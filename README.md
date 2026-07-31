@@ -33,19 +33,15 @@ Azure App Service containers. No auth — fully public by design.
 ## Quick start
 
 ```bash
-# 1. Local SQL Server (host port 14330)
-docker compose -f docker-compose.local-db.yml up -d
-
-# 2. Backend (port 8100) — creates schema + seeds the car catalog
-cd src && uv sync
-uv run python -m scripts.db_bootstrap
-uv run uvicorn app.main:app --reload --port 8100
-
-# 3. Frontend (port 3100)
-cd frontend && npm install
-cp .env.local.example .env.local
-npm run dev -- --port 3100
+./scripts/dev.sh
 ```
+
+That frees the dev ports, starts SQL Server (waiting until it actually accepts
+connections), creates + migrates the database, seeds the car catalog, and runs
+the API on **:8100** and the site on **:3100**. Ctrl-C stops everything.
+In VS Code it's the default build task — **⇧⌘B → "Run app"**.
+
+Prerequisites: Docker (or OrbStack), [uv](https://docs.astral.sh/uv/), Node 20.
 
 The simulator, tests, and vehicle catalog work with **no external keys**. Live
 route planning needs two free keys in `.env`:
@@ -66,6 +62,7 @@ cd src && uv run pytest
 ## Docs
 
 - `CLAUDE.md` / `AGENTS.md` — architecture map + working norms (agent-oriented)
-- `docs/DEPLOYMENT.md` — Azure deployment walkthrough (Bicep is manual;
-  pushes to `develop`/`main` build, test, and roll containers)
+- `docs/DEPLOYMENT.md` — Azure deployment walkthrough. One environment, one
+  workflow: pushes to `main` test + build, and deploy once the Azure secrets
+  are set (until then the deploy steps skip and CI stays green)
 - `docs/ARCHITECTURE.md` — template heritage notes

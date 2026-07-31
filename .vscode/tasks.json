@@ -2,80 +2,74 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Free dev ports",
-      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100 (other projects included). Leaves Docker/OrbStack alone.",
+      "label": "Run app",
+      "detail": "Free ports → SQL Server → migrate + seed → API :8100 + web :3100. Ctrl-C stops everything.",
       "type": "shell",
-      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-server\"){print $2}' | sort -u | xargs kill 2>/dev/null; echo 'Ports freed.'",
-      "problemMatcher": [],
-      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
-    },
-    {
-      "label": "DB: local SQL Server",
-      "detail": "Start the MSSQL 2022 container (host port 14330).",
-      "type": "shell",
-      "command": "docker compose -f docker-compose.local-db.yml up -d",
-      "problemMatcher": [],
-      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
-    },
-    {
-      "label": "API (uvicorn :8100)",
-      "detail": "FastAPI backend with reload. Runs db_bootstrap first (schema + vehicle seed).",
-      "type": "shell",
-      "command": "uv run python -m scripts.db_bootstrap && uv run uvicorn app.main:app --reload --port 8100",
-      "options": { "cwd": "${workspaceFolder}/src" },
-      "isBackground": true,
-      "dependsOn": ["Free dev ports", "DB: local SQL Server"],
-      "problemMatcher": {
-        "pattern": { "regexp": "^(ERROR|CRITICAL):(.*)$", "severity": 1, "message": 2 },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".*Started server process.*",
-          "endsPattern": ".*Application startup complete.*"
-        }
-      },
-      "presentation": { "reveal": "always", "panel": "dedicated", "group": "dev" }
-    },
-    {
-      "label": "Web (next dev :3100)",
-      "detail": "Next.js frontend.",
-      "type": "shell",
-      "command": "npm run dev -- --port 3100",
-      "options": { "cwd": "${workspaceFolder}/frontend" },
-      "isBackground": true,
-      "dependsOn": ["Free dev ports"],
-      "problemMatcher": {
-        "pattern": { "regexp": "^(Error):(.*)$", "severity": 1, "message": 2 },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".*Starting\\.\\.\\..*",
-          "endsPattern": ".*(Ready in|✓ Ready).*"
-        }
-      },
-      "presentation": { "reveal": "always", "panel": "dedicated", "group": "dev" }
-    },
-    {
-      "label": "Run app (free ports + DB + API + Web)",
-      "detail": "The one task to run: frees ports, starts SQL Server, backend on 8100, frontend on 3100.",
-      "dependsOn": ["API (uvicorn :8100)", "Web (next dev :3100)"],
-      "dependsOrder": "parallel",
+      "command": "./scripts/dev.sh",
+      "options": { "cwd": "${workspaceFolder}" },
       "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "focus": true
+      }
     },
     {
-      "label": "Tests: backend (pytest)",
+      "label": "Run API only",
+      "detail": "Backend + database, no frontend.",
+      "type": "shell",
+      "command": "./scripts/dev.sh --no-web",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Free dev ports",
+      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100 (leaves Docker alone).",
+      "type": "shell",
+      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-ser\") {print $2}' | sort -u | xargs -r kill 2>/dev/null; echo 'Ports freed.'",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Stop database",
+      "detail": "Stop the local SQL Server container (data is kept in its volume).",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.local-db.yml down",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Test: backend",
+      "detail": "pytest — simulator + API tests (no network, no SQL Server needed).",
       "type": "shell",
       "command": "uv run pytest -q",
       "options": { "cwd": "${workspaceFolder}/src" },
       "group": { "kind": "test", "isDefault": true },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
-      "label": "Check: frontend (tsc + build)",
+      "label": "Test: frontend typecheck + build",
       "type": "shell",
       "command": "npx tsc --noEmit && npx next build",
       "options": { "cwd": "${workspaceFolder}/frontend" },
       "group": "test",
-      "problemMatcher": ["$tsc"]
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Demo: print the Born answer table",
+      "detail": "Runs the simulator on the fixture route and prints time-vs-speed.",
+      "type": "shell",
+      "command": "uv run python -m scripts.demo_sim",
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     }
   ]
 }

@@ -1,29 +1,34 @@
 # Deployment
 
-Two branches → two Azure environments:
+**One environment.** This is a PoC: `main` is the only shipping branch and `dev`
+is the only Azure environment.
 
-| Branch    | Env    | Workflow                          |
-|-----------|--------|-----------------------------------|
-| `develop` | `dev`  | `.github/workflows/deploy-dev.yml`|
-| `main`    | `prod` | `.github/workflows/deploy.yml`    |
+| Branch | Env   | Workflow                       |
+|--------|-------|--------------------------------|
+| `main` | `dev` | `.github/workflows/deploy.yml` |
 
-Each pipeline: **paths-filter** (`src/**` vs `frontend/**`) → **test** (backend
-smoke-import; frontend `tsc` + `next build`) → **build & push** container images
-to GHCR → **`az webapp config container set`** + **`az webapp restart`**.
+The pipeline: **paths-filter** (`src/**` vs `frontend/**`) → **test** (backend
+smoke-import + `pytest`; frontend `tsc` + `next build`) → **build** container
+images → **push to GHCR** → **`az webapp config container set`** +
+**`az webapp restart`**.
+
+Everything from "push to GHCR" onward is **skipped while the `AZURE_*` secrets
+are unset**, so the pipeline is green (tests + builds still run and still gate
+merges) until you actually provision Azure. Add the secrets and the same
+pipeline starts deploying — no workflow edit needed.
 
 ## Azure resources (Bicep — `infra/main.bicep`)
 
-Provisioned per environment (`{env}` = `dev` | `prod`), named
-`evtrip-{kind}-{env}`:
+Provisioned as `evtrip-{kind}-dev`:
 
 | Resource            | Name                              |
 |---------------------|-----------------------------------|
-| Log Analytics       | `evtrip-logs-{env}`     |
-| App Service Plan    | `evtrip-plan-{env}`     |
-| API App Service     | `evtrip-api-{env}`      |
-| Web App Service     | `evtrip-web-{env}`      |
-| SQL Server          | `evtrip-sql-{env}`      |
-| SQL Database        | `evtripdb-{env}`        |
+| Log Analytics       | `evtrip-logs-dev`     |
+| App Service Plan    | `evtrip-plan-dev`     |
+| API App Service     | `evtrip-api-dev`      |
+| Web App Service     | `evtrip-web-dev`      |
+| SQL Server          | `evtrip-sql-dev`      |
+| SQL Database        | `evtripdb-dev`        |
 
 Container images: `ghcr.io/gardan4/evtrip-api` and
 `-web`. There is **no worker tier** (the skeleton ships no background loops) —
@@ -38,8 +43,9 @@ add one to the Bicep + CI if you introduce `PROCESS_ROLE=worker` work.
    docs.
 3. **Repo secrets** (Settings → Secrets and variables → Actions):
    `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
-   `RESOURCE_GROUP`, `GHCR_TOKEN` (a PAT with `write:packages`), and
-   `CLERK_PUBLISHABLE_KEY`.
+   `RESOURCE_GROUP`, `GHCR_TOKEN` (a PAT with `write:packages`).
+   Until `AZURE_CLIENT_ID` exists the pipeline runs tests/builds and skips the
+   deploy steps.
 4. **Provision infra** (manual — the workflows deploy app *images*, not infra):
 
    ```bash
@@ -47,16 +53,14 @@ add one to the Bicep + CI if you introduce `PROCESS_ROLE=worker` work.
      -g <rg> -f infra/main.bicep -p infra/main.parameters.json \
      -p environmentName=dev sqlAdminPassword=<pw> \
         secretKey=<32-byte> encryptionKey=<fernet> \
-        clerkJwtKey='<pem>' clerkIssuer='https://clerk.evtrip.app' \
-        clerkAuthorizedParties='https://evtrip.app' \
-        clerkSecretKey=<sk> clerkPublishableKey=<pk> \
+        orsApiKey=<openrouteservice-key> ocmApiKey=<openchargemap-key> \
         githubOwner=gardan4 ghcrToken=<pat>
    ```
 
    Secrets are passed as `@secure()` params and land in App Service settings
    (encrypted at rest) — there is no Key Vault in the default template.
 
-5. **Push** to `develop` (or `main`) → CI builds, pushes, and deploys.
+5. **Push** to `main` → CI tests, builds, pushes, and deploys.
 
 ## Local build sanity
 

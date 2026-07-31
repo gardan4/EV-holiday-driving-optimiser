@@ -76,9 +76,11 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
 
 Bicep provisions an App Service Plan, api + web App Services (GHCR containers),
 Azure SQL, and Log Analytics; `orsApiKey`/`ocmApiKey` land as api app settings.
-Two workflows: `deploy-dev.yml` (push to `develop`) and `deploy.yml` (push to
-`main`); both run `uv run pytest` before building images. Infra deploy is
-manual (`az deployment group create`) — see `docs/DEPLOYMENT.md`.
+**One environment (`dev`), one workflow** (`deploy.yml`, push to `main`) — this
+is a PoC. It runs `uv run pytest` + `tsc`/`next build`, then builds images; the
+GHCR push and Azure deploy steps are gated on `AZURE_CLIENT_ID` being set, so
+the pipeline is green before infra exists. Infra deploy is manual
+(`az deployment group create`) — see `docs/DEPLOYMENT.md`.
 
 ## Key design decisions (do not re-litigate casually)
 
@@ -98,7 +100,11 @@ manual (`az deployment group create`) — see `docs/DEPLOYMENT.md`.
 ## Common commands
 
 ```bash
-# Backend
+# Everything (ports, DB, migrate, seed, API + web) — VS Code: ⇧⌘B "Run app"
+./scripts/dev.sh
+./scripts/dev.sh --no-web      # backend + DB only
+
+# Backend on its own
 cd src && uv sync
 uv run uvicorn app.main:app --reload --port 8100
 uv run pytest                      # simulator + API tests (no network, no MSSQL)
@@ -126,13 +132,17 @@ docker compose -f docker-compose.local-db.yml up -d
 - **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless
-  the DB name contains `-dev`.
+  the DB name contains `-dev` (see `scripts/dev_seed_trip.py`).
+- **`./scripts/dev.sh` is the supported way to run locally** (VS Code: ⇧⌘B).
+  It frees ports, waits for SQL Server, and CREATEs the database — the compose
+  file only starts the server, so a fresh volume has no `evtripdb-dev`.
 - **`npx tsc` only works from `frontend/`.** `npm run dev` is long-running — use
   `npx next build` for a one-shot compile check.
 - **Before `git add`-ing a file, `git diff` it** — stage only what you touched.
 - **Commits**: lowercase `<type>(<scope>): <imperative summary>` — `feat`, `fix`,
   `chore`, `docs`, `style`, `test`. Bodies explain the *why*.
-- `develop` is the integration branch; merging to `main` ships to prod.
+- `main` is the only branch; pushing to it runs CI and (once Azure secrets
+  exist) deploys the single `dev` environment.
 
 ## Environment
 

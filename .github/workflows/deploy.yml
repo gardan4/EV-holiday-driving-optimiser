@@ -1,25 +1,27 @@
-name: Deploy EV Trip Optimizer (prod)
+name: CI + Deploy
 
-# Prod deploy: every push to `main`. Builds the changed tier(s), pushes to GHCR,
-# and points the prod App Services at the new image.
+# Single environment (dev) — this is a PoC, so `main` is the only branch that
+# ships and `evtrip-*-dev` are the only App Services.
+#
+# Tests and container builds always run. The Azure deploy only runs once the
+# AZURE_* secrets exist, so the pipeline stays green before infra is set up
+# (rather than red-failing at `azure/login` on every push).
 on:
   workflow_dispatch:
   push:
     branches: [main]
 
-# Serialize prod deploys per ref; queue rather than cancel so a mid-flight
-# deploy finishes cleanly.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
-  ENVIRONMENT: prod
+  ENVIRONMENT: dev
   REGISTRY: ghcr.io
   API_IMAGE: ${{ github.repository_owner }}/evtrip-api
   WEB_IMAGE: ${{ github.repository_owner }}/evtrip-web
-  API_APP_NAME: evtrip-api-prod
-  WEB_APP_NAME: evtrip-web-prod
+  API_APP_NAME: evtrip-api-dev
+  WEB_APP_NAME: evtrip-web-dev
 
 jobs:
   # --- Decide what changed ---------------------------------------------------
@@ -41,7 +43,7 @@ jobs:
             frontend:
               - 'frontend/**'
 
-  # --- Backend: test + build + deploy ---------------------------------------
+  # --- Backend: test + build (+ deploy when Azure is configured) -------------
   backend:
     needs: [changes]
     if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
@@ -75,26 +77,44 @@ jobs:
           ENCRYPTION_KEY: ci-smoke-test-encryption-key
         run: uv run pytest -q
 
+      # `secrets` isn't available in job/step `if:` conditions, so turn its
+      # presence into a step output the later steps can gate on.
+      - name: Is Azure configured?
+        id: az
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy skipped::Tests passed. Set AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID / RESOURCE_GROUP / GHCR_TOKEN to enable deploys."
+          fi
+
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
+        if: steps.az.outputs.configured == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push API image
+      # Always builds (validates the Dockerfile + uv.lock); only pushes when
+      # there is somewhere to deploy it to.
+      - name: Build API image
         uses: docker/build-push-action@v5
         with:
           context: ./src
-          push: true
+          push: ${{ steps.az.outputs.configured == 'true' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.API_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.API_IMAGE }}:${{ env.ENVIRONMENT }}-latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=dev-api
+          cache-to: type=gha,mode=max,scope=dev-api
 
       - name: Log in to Azure (OIDC)
+        if: steps.az.outputs.configured == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -102,6 +122,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy API container
+        if: steps.az.outputs.configured == 'true'
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.API_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}"
           az webapp config container set \
@@ -115,7 +136,7 @@ jobs:
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --name ${{ env.API_APP_NAME }}
 
-  # --- Frontend: test + build + deploy --------------------------------------
+  # --- Frontend: test + build (+ deploy when Azure is configured) ------------
   frontend:
     needs: [changes]
     if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
@@ -143,29 +164,43 @@ jobs:
           npx tsc --noEmit
           npx next build
 
+      - name: Is Azure configured?
+        id: az
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          if [ -n "$AZURE_CLIENT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy skipped::Type-check + build passed. Add the AZURE_* secrets to enable deploys."
+          fi
+
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
+        if: steps.az.outputs.configured == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push Web image
+      - name: Build Web image
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          push: true
+          push: ${{ steps.az.outputs.configured == 'true' }}
           build-args: |
             NEXT_PUBLIC_API_URL=https://${{ env.API_APP_NAME }}.azurewebsites.net
             NEXT_PUBLIC_SITE_URL=https://${{ env.WEB_APP_NAME }}.azurewebsites.net
           tags: |
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=dev-web
+          cache-to: type=gha,mode=max,scope=dev-web
 
       - name: Log in to Azure (OIDC)
+        if: steps.az.outputs.configured == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -173,6 +208,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy Web container
+        if: steps.az.outputs.configured == 'true'
         run: |
           IMAGE="${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}"
           az webapp config container set \
