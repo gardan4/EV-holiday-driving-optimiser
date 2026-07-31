@@ -32,3 +32,6 @@ dev = [
     # FastAPI's get_db dependency. Not used in prod.
     "aiosqlite>=0.20",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
