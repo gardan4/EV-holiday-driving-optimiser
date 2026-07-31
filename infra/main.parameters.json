@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "dev"
+    },
+    "githubOwner": {
+      "value": "gardan4"
+    },
+    "apiImageTag": {
+      "value": "latest"
+    },
+    "webImageTag": {
+      "value": "latest"
+    },
+    "ghcrToken": {
+      "value": ""
+    },
+    "sqlAdminLogin": {
+      "value": "evtripadmin"
+    },
+    "sqlAdminPassword": {
+      "value": ""
+    },
+    "sqlSkuName": {
+      "value": "S0"
+    },
+    "sqlTier": {
+      "value": "Standard"
+    },
+    "secretKey": {
+      "value": ""
+    },
+    "encryptionKey": {
+      "value": ""
+    },
+    "clerkPublishableKey": {
+      "value": ""
+    },
+    "clerkJwtKey": {
+      "value": ""
+    },
+    "clerkIssuer": {
+      "value": ""
+    },
+    "clerkAuthorizedParties": {
+      "value": ""
+    },
+    "clerkSecretKey": {
+      "value": ""
+    },
+    "clerkWebhookSecret": {
+      "value": ""
+    },
+    "frontendUrl": {
+      "value": ""
+    },
+    "apiUrl": {
+      "value": ""
+    },
+    "siteUrl": {
+      "value": ""
+    },
+    "corsOrigins": {
+      "value": ""
+    }
+  }
+}

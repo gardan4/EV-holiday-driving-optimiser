@@ -1,0 +1,37 @@
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tests
+tests/
+pytest.ini
+.pytest_cache/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Local dev files
+.env
+.env.local
+*.log
+
+# Migrations (if not needed in prod)
+# migrations/

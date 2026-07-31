@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #f8fafc;
+  --color-foreground: #0f172a;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Brand palette — swap these hexes to rebrand the whole app. Based on #0C6291. */
+  --color-brand-50: #f0f7ff;
+  --color-brand-100: #dfeeff;
+  --color-brand-200: #b8ddff;
+  --color-brand-300: #79c2ff;
+  --color-brand-400: #32a3ff;
+  --color-brand-500: #0C6291;
+  --color-brand-600: #0a5279;
+  --color-brand-700: #084263;
+  --color-brand-800: #063550;
+  --color-brand-900: #042940;
+  --color-brand-950: #021b2b;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(12, 98, 145, 0.25); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(12, 98, 145, 0.4); }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .animate-float { animation: float 8s ease-in-out infinite; }
+  .animate-fade-in-up { animation: fade-in-up 0.6s ease-out both; }
+}

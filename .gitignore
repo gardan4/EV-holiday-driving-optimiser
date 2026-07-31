@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+!frontend/lib/
+!tests/lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables
+.env
+.env.local
+
+# Secrets (entire folder + specific patterns)
+secrets/
+
+# Google Cloud credentials
+theta-ocean-269919-9dbd7260ee6c.json
+service-account-*.json
+
+# Database
+*.db
+*.sqlite3
+
+# Data directories
+data/
+chroma/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# LangSmith
+.langsmith/
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Per-run evaluator dumps (history.jsonl IS committed; runs/ is not)
+tests/eval/runs/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.zip
+server.err
+
+# Build artifacts
+.specstory/
+
+.claude/
+claude-code-main
+# Template bootstrap marker (written by init.sh)
+.template-initialized

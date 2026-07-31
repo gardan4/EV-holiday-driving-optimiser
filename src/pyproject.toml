@@ -1,0 +1,36 @@
+[project]
+name = "evtrip-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "httpx",
+    # Database (Azure SQL / MSSQL)
+    "sqlalchemy[asyncio]",
+    "aioodbc",
+    "pyodbc",
+    "alembic",
+    # Authentication — Clerk session-token verification (RS256, networkless)
+    "python-jose[cryptography]",
+    # Fernet encryption for any at-rest secrets. Hold the major (currently 46.x):
+    # cryptography is Fernet- + python-jose-critical; a multi-major jump needs a
+    # deliberate, tested bump, not a routine lock-upgrade.
+    "cryptography>=46,<47",
+    # Structured JSON logging
+    "python-json-logger>=3.2.1",
+    # Rate limiting
+    "slowapi>=0.1.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+    # aiosqlite lets component route tests spin up an async SQLite engine behind
+    # FastAPI's get_db dependency. Not used in prod.
+    "aiosqlite>=0.20",
+]

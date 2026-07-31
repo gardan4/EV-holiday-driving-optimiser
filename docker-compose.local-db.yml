@@ -1,0 +1,27 @@
+# Local SQL Server for offline development — stands in for the Azure
+# evtripdb-dev database so you never have to whitelist your IP.
+#
+#   Start:  docker compose -f docker-compose.local-db.yml up -d
+#   Stop:   docker compose -f docker-compose.local-db.yml down
+#   Wipe:   docker compose -f docker-compose.local-db.yml down -v   (deletes all data)
+#   Logs:   docker compose -f docker-compose.local-db.yml logs -f
+#
+# Apple Silicon note: the mssql/server image is x86-only and runs under
+# OrbStack's emulation (works, slightly slower startup). The SA password is
+# local-only and non-secret (the container is bound to localhost).
+services:
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: evtrip-db-local
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "LocalDev_Passw0rd!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - evtrip-db-data:/var/opt/mssql
+
+volumes:
+  evtrip-db-data:
