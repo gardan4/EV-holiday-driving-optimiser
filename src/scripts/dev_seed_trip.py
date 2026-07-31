@@ -57,6 +57,12 @@ CHARGER_SPECS = [  # (offset_km, power_kw, name, operator)
 
 
 async def main() -> None:
+    from app.core.config import settings
+
+    # Dev-data guard: never write demo trips into a non-dev database.
+    if "-dev" not in settings.DATABASE_URL:
+        raise SystemExit("Refusing to seed: DATABASE_URL does not look like a -dev database.")
+
     geometry = RouteGeometry(WAYPOINTS)
 
     # Build segments per leg, matching the geometry's real leg lengths.

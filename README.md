@@ -1,79 +1,71 @@
 # EV Trip Optimizer
 
-A production-shaped full-stack starter:
+**Should you really drive 100?** Enter your route and your EV, and find the
+cruise speed that actually gets you to your holiday destination first —
+charging stops, taper curves and all. Then race the result against your
+friend's plan.
 
-- **Backend** — FastAPI (Python 3.12, `uv`), async SQLAlchemy on **Azure SQL /
-  MSSQL**, Alembic migrations, `pydantic-settings`, rate limiting, structured
-  JSON logging.
-- **Frontend** — Next.js 16 (App Router, React 19), **Clerk** authentication,
-  Tailwind CSS 4.
-- **Infra** — Azure Bicep (App Service Plan, api + web App Services, Azure SQL,
-  Log Analytics), GitHub Actions CI/CD to GHCR + Azure App Service.
-- **Local dev** — Docker Compose (backend container + local SQL Server 2022).
+## What it does
 
-It ships one working vertical slice — `User → Business (tenant) → Item` with
-owner/member roles and audit logging — so a new project boots, authenticates,
-and serves a real multi-tenant resource on day one. Build your product by copying
-that slice (see [docs/ADDING_A_RESOURCE.md](docs/ADDING_A_RESOURCE.md)).
+- Fetches the real driving route (OpenRouteService) and the fast chargers along
+  it (OpenChargeMap, CCS ≥ 100 kW).
+- Simulates the whole trip at every cruise speed from 90–160 km/h with an exact
+  optimizer over charging stops: quadratic consumption per car, measured DC
+  charge curves, per-country speed caps (incl. derestricted German autobahn),
+  arrival-charge targets, and winter conditions.
+- Shows the total-time-vs-speed curve with the optimum highlighted, a
+  stop-by-stop itinerary (arrive 23:41 at 12%, charge 18 min to 60%…) with
+  Google Maps links, and a **low-poly 3D journey diorama** — play the overnight
+  drive, watch the battery drain, and put a second car at your friend's speed
+  on the road with a live gap timer.
+- Every plan gets a shareable permalink — send it to your co-driver.
 
-> **This is a template.** If you just cloned it, run **`./init.sh`** first — it
-> rebrands the placeholders (`EV Trip Optimizer`, `evtrip`, …), generates
-> fresh secrets, resets git history, and deletes itself.
+Curated car catalog (Cupra Born 58/77 first, plus ID.3/ID.4, Model 3 RWD/LR,
+Enyaq, Ioniq 5, Mégane) with charging curves hand-curated from public
+fast-charge tests.
+
+## Stack
+
+FastAPI (Python 3.12, uv) + async SQLAlchemy on Azure SQL · Next.js 16
+(React 19, Tailwind 4, React Three Fiber) · Bicep + GitHub Actions → GHCR →
+Azure App Service containers. No auth — fully public by design.
 
 ## Quick start
 
 ```bash
-# 0. (once) rebrand + generate secrets + reset git
-./init.sh
-
-# 1. Create a Clerk application (https://clerk.com) and fill the CLERK_* vars in
-#    .env, plus NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in frontend/.env.local.
-#    In Clerk → Sessions → Customize session token, add the email/name claims
-#    (see .env.example). The app will not render without Clerk keys.
-
-# 2. Start a local SQL Server
+# 1. Local SQL Server (host port 14330)
 docker compose -f docker-compose.local-db.yml up -d
 
-# 3. Backend
-cd src
-uv sync
-uv run python -m scripts.db_bootstrap     # create schema on the fresh DB
-uv run uvicorn app.main:app --reload      # http://localhost:8000  (GET /health)
+# 2. Backend (port 8100) — creates schema + seeds the car catalog
+cd src && uv sync
+uv run python -m scripts.db_bootstrap
+uv run uvicorn app.main:app --reload --port 8100
 
-# 4. Frontend
-cd ../frontend
-npm install
-npm run dev                                # http://localhost:3000
+# 3. Frontend (port 3100)
+cd frontend && npm install
+cp .env.local.example .env.local
+npm run dev -- --port 3100
 ```
 
-Toolchain versions are pinned in `mise.toml` (Python 3.12, Node 20) — run
-`mise install` if you use [mise](https://mise.jdx.dev).
+The simulator, tests, and vehicle catalog work with **no external keys**. Live
+route planning needs two free keys in `.env`:
 
-## Layout
+- `ORS_API_KEY` — <https://openrouteservice.org/dev/>
+- `OCM_API_KEY` — <https://openchargemap.org/site/develop/api>
 
-```
-src/          FastAPI backend (app/, alembic/, scripts/, Dockerfile, pyproject.toml)
-frontend/     Next.js frontend (app/, lib/, proxy.ts, Dockerfile, package.json)
-infra/        Azure Bicep + deploy scripts
-.github/      CI/CD workflows (deploy-dev.yml → develop, deploy.yml → main)
-docs/         ARCHITECTURE, DEPLOYMENT, ADDING_A_RESOURCE
-CLAUDE.md     Working map of the codebase for AI agents (twin: AGENTS.md)
-```
-
-## Tests
+No keys yet? Seed a demo trip instead: `uv run python -m scripts.dev_seed_trip`.
 
 ```bash
-cd src && uv run pytest        # add tests under src/tests or a tests/ dir
-cd frontend && npx tsc --noEmit && npx next build
+# The physics, in your terminal
+cd src && uv run python -m scripts.demo_sim
+
+# Tests (pure Python + in-memory SQLite — no network, no MSSQL)
+cd src && uv run pytest
 ```
 
-## Deployment
+## Docs
 
-Two branches → two Azure environments: push `develop` → **dev**, `main` → **prod**.
-Each pipeline: paths-filter → test → build container → push to GHCR →
-`az webapp config container set` → restart. See
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
-
-## License
-
-Apache-2.0 — see [LICENSE](LICENSE).
+- `CLAUDE.md` / `AGENTS.md` — architecture map + working norms (agent-oriented)
+- `docs/DEPLOYMENT.md` — Azure deployment walkthrough (Bicep is manual;
+  pushes to `develop`/`main` build, test, and roll containers)
+- `docs/ARCHITECTURE.md` — template heritage notes

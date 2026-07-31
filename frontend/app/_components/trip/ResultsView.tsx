@@ -213,6 +213,34 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           />
         </aside>
       </div>
+
+      <details className="mt-6 rounded-2xl border border-ink-100 bg-white px-5 py-4 text-sm text-ink-500 open:pb-5">
+        <summary className="cursor-pointer select-none font-semibold text-ink-700">
+          What this simulation assumes
+        </summary>
+        <ul className="mt-3 list-disc space-y-1.5 pl-5 leading-relaxed">
+          <li>
+            Your cruise speed applies on motorway stretches up to each country&apos;s legal cap
+            (130 in AT/NL, derestricted German autobahn where the map data suggests it); everywhere
+            else the road&apos;s normal driving speed governs. No live traffic — planned for quiet
+            roads and overnight departures.
+          </li>
+          <li>
+            Consumption is a per-car fit from public range tests (with your conditions multiplier);
+            charging follows the car&apos;s measured fast-charge curve, capped by each site&apos;s
+            power. Real cars vary a few percent either way.
+          </li>
+          <li>
+            Every stop includes 5 minutes of plug-in overhead plus an estimated detour off the
+            route, so arrival times at chargers are ±5 minutes.
+          </li>
+          <li>
+            Chargers come from OpenChargeMap (community data) filtered to operational CCS sites of
+            100 kW and up — glance at the operator and Maps link before counting on a specific one.
+          </li>
+          <li>Departure time shifts the clock, not the plan — there is no traffic model yet.</li>
+        </ul>
+      </details>
     </div>
   )
 }

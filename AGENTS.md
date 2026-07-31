@@ -1,115 +1,143 @@
-# AGENTS.md
+# CLAUDE.md
 
-Guidance for Codex (and any AI agent) working in this repository.
+Guidance for Claude Code (and any AI agent) working in this repository.
 
-> **Keep this file and `CLAUDE.md` in sync** — they are twins (one for Claude, one
+> **Keep this file and `AGENTS.md` in sync** — they are twins (one for Claude, one
 > for Codex). When you change one, mirror the change in the other.
-
-<!-- FILL IN: Product Overview -->
-<!-- What is this product? Who uses it, and what does it do? Replace this block
-     once you've built something on top of the skeleton. -->
 
 ## What this is
 
-A full-stack starter: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) +
-**Next.js 16** (App Router, React 19) with **Clerk** authentication, deployed as
-containers to **Azure App Service** via **Bicep** + GitHub Actions. It ships one
-working vertical slice you extend:
+**EV Trip Optimizer** — a public web app that answers: *"what cruise speed gets
+you to your holiday destination earliest in an EV, charging stops included?"*
+The user enters origin/destination, picks a car, sets departure and desired
+arrival charge; the backend fetches the real route, simulates every cruise speed
+(90–160 km/h) against the car's consumption + DC charge curves, and returns a
+total-time-vs-speed sweep, a stop-by-stop itinerary, and a low-poly 3D "journey
+scene" with animated playback and a race mode. Trips persist under unguessable
+UUIDs (the share link). **There is no auth** — fully public by design.
 
-```
-User ──owns──▶ Business  (strict tenant boundary)
-                   └──has──▶ Item   (example child resource)
-```
+Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
+(App Router, React 19, Tailwind 4, React Three Fiber), deployed as containers to
+**Azure App Service** via **Bicep** + GitHub Actions.
 
 ## Architecture
 
 ### Backend (`src/`) — FastAPI + Python 3.12 (uv)
 
-- **Entry point** `src/app/main.py` — process-role-aware lifespan (`PROCESS_ROLE`:
-  `web`/`all` mount the API, `worker`/`all` run background loops). The skeleton
-  ships **no** loops; `_start_background_loops()` is an empty, documented seam.
-- **Config** `src/app/core/config.py` — `pydantic-settings`; refuses to boot with
-  missing/placeholder `SECRET_KEY`/`ENCRYPTION_KEY`. In production it also refuses
-  to start without `CLERK_ISSUER` + `CLERK_AUTHORIZED_PARTIES`.
-- **Database** `src/app/core/database.py` — async (`aioodbc`) + sync (`pyodbc`)
-  engines, auto-detects the ODBC driver, `GUID` type for MSSQL UUIDs. Do not edit
-  the pool logic casually — the NullPool-on-macOS note there is load-bearing.
-- **Auth** `src/app/core/clerk_auth.py` + `src/app/api/auth.py` — verifies the
-  Clerk session JWT (RS256, networkless) and JIT-provisions a local `User` keyed
-  by `clerk_user_id`. `GET /api/auth/me`, `POST /api/auth/onboarded`,
-  `DELETE /api/auth/me` (GDPR erasure).
-- **Tenancy + permissions** `src/app/api/deps.py` — `require_business_member`,
-  `require_business_owner`, `require_item`, and `audit()`. Copy `require_item` for
-  new nested resources.
-- **Routers** `src/app/api/` — `businesses.py` (CRUD + members),
-  `items.py` (the reference nested CRUD), `webhooks.py` (Clerk `user.deleted`).
-- **Models** `src/app/models/__init__.py` — `User`, `Business`,
-  `BusinessMembership`, `Item`, `UserAuditLog`, and the `GUID` type.
-- **Migrations** `src/alembic/` — one baseline `0001_initial`. `db_bootstrap.py`
+- **The engine** `src/app/services/simulator.py` — pure-Python, zero-I/O trip
+  simulator: quadratic consumption (`Wh/km = a + b·v²`), piecewise-linear charge
+  curves, per-country speed caps (DE-derestriction heuristic: free-flow ≥ 118),
+  and an exact forward DP over (charger node, 2.5% SoC bucket) that discovers
+  the optimal stop plan per speed. The DP plans on the grid; the chosen plan is
+  re-simulated continuously for exact itinerary numbers + playback timeline.
+  **Change it only with `uv run pytest tests/test_simulator.py` green.**
+- **External data** `src/app/services/routing.py` (ORS geocode + directions,
+  cache-first: `route_cache` keyed by geohash6 O/D, 7d TTL) and
+  `src/app/services/chargers.py` (OpenChargeMap corridor search via geohash-4
+  tiles, 14d TTL, projection onto the polyline). Free-tier quotas are protected
+  by these caches — never call ORS/OCM per-speed or per-request.
+- **Geo helpers** `src/app/services/geo.py` — haversine, geohash, polyline5
+  codec, point→route projection, coarse EU country boxes.
+- **Routers** `src/app/api/` — `vehicles.py`, `geocode.py`, `trips.py`
+  (`POST /api/trips` = plan + persist permalink; sweep runs via
+  `asyncio.to_thread`). Schemas in `api/schemas.py` mirror `frontend/lib/client.ts`.
+- **Models** `src/app/models/__init__.py` — `Vehicle` (curated catalog with
+  consumption/charge-curve JSON), `Charger`/`OcmTile`/`RouteCache` (caches),
+  `Trip` (request+result JSON, id = share token), and the `GUID` type.
+- **Seed data** `src/scripts/seed_vehicles.py` — 9 curated EVs (Born 58/77
+  first); idempotent upsert-by-slug, auto-run by `db_bootstrap` when empty.
+  Curves are hand-curated from public fast-charge tests — cite sources in
+  `source_note` when adding cars.
+- **Config** `src/app/core/config.py` — `pydantic-settings`; needs
+  `SECRET_KEY`/`ENCRYPTION_KEY` (generated by init) and `ORS_API_KEY`/
+  `OCM_API_KEY` for live routing (simulator + tests run without them).
+- **Migrations** `src/alembic/` — baseline `0001_initial`. `db_bootstrap.py`
   runs `create_all` + stamp on a fresh DB, else `alembic upgrade head`.
 
-### Frontend (`frontend/`) — Next.js 16, React 19, Tailwind 4
+### Frontend (`frontend/`) — Next.js 16, React 19, Tailwind 4, R3F
 
-- `app/` — `page.tsx` (public landing), `login/` + `register/` (Clerk),
-  `dashboard/` (businesses list), `businesses/[id]/` (Items + Members tabs).
-- `proxy.ts` — Clerk middleware + CSP + security headers (single source of truth).
-- `lib/api.ts` — auth token plumbing; `lib/client.ts` — typed API client.
-- `app/_components/ui/` — Button, Card, Input, Badge primitives.
+- `app/page.tsx` — landing + `TripForm` (geocode autocomplete, vehicle cards,
+  SoC sliders) → `POST /api/trips` → redirect to `/trip/[id]`.
+- `app/trip/[id]/` — server-rendered results + per-trip OG image.
+  `ResultsView` owns `selectedSpeed`; chart, itinerary, and 3D scene follow.
+- `app/_components/trip/scene/JourneyScene.tsx` — the 3D diorama (all
+  procedural geometry, no assets, strict-CSP safe). `geometry.ts` maps the real
+  polyline to an arc-length-true scene curve — stop positions and playback are
+  distance-truthful.
+- `lib/playback.ts` — `PlaybackClock` mutates a shared ref per rAF (cars read
+  it in `useFrame`); React UI subscribes at ~5 Hz. Race mode = second timeline.
+- `proxy.ts` — middleware: CSP (fully self-hosted; no external origins) +
+  security headers + www redirect + noindex for `/trip/*`.
+- `lib/client.ts` — typed API client; keep in sync with `api/schemas.py`.
+- Design system: EV-mint brand ramp + navy ink in `app/globals.css`,
+  Bricolage Grotesque display font, chart palette validated for CVD.
 
 ### Infra (`infra/`) + CI (`.github/workflows/`)
 
 Bicep provisions an App Service Plan, api + web App Services (GHCR containers),
-Azure SQL, and Log Analytics. Two workflows: `deploy-dev.yml` (push to `develop`)
-and `deploy.yml` (push to `main`). See `docs/DEPLOYMENT.md`.
+Azure SQL, and Log Analytics; `orsApiKey`/`ocmApiKey` land as api app settings.
+Two workflows: `deploy-dev.yml` (push to `develop`) and `deploy.yml` (push to
+`main`); both run `uv run pytest` before building images. Infra deploy is
+manual (`az deployment group create`) — see `docs/DEPLOYMENT.md`.
 
-<!-- FILL IN: Domain Model -->
-<!-- Describe your real entities and their relationships as you add them. -->
+## Key design decisions (do not re-litigate casually)
 
-<!-- FILL IN: Key design decisions -->
-<!-- Record the non-obvious choices future-you (and agents) should not re-litigate. -->
+- **No auth, no user table.** Share links are unguessable UUIDs; `/trip/*` is
+  noindexed. Adding accounts later is additive, not a refactor.
+- **No in-app map.** The 3D journey scene is the visualization; per-stop
+  Google Maps deep links cover navigation. Keeps CSP self-hosted.
+- **DP over greedy** for stop planning — it must *discover* "arrive low,
+  charge to ~60-80%", not hardcode it (tests assert this emerges).
+- **ORS free-flow under-caps fast roads**, so motorway-like segments
+  (free-flow ≥ 105) use country legal caps instead; disclosed in the UI's
+  assumptions accordion. The naive clamp survives behind
+  `SimParams.freeflow_cap_only` for comparison.
+- **Local ports 8100/3100** (8000/3000 collide with other local projects);
+  local MSSQL on host port 14330.
 
 ## Common commands
 
 ```bash
 # Backend
 cd src && uv sync
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload --port 8100
+uv run pytest                      # simulator + API tests (no network, no MSSQL)
+uv run python -m scripts.demo_sim  # Born NL→AT answer table in the terminal
+uv run python -m scripts.dev_seed_trip  # keyless demo trip for frontend dev
 
 # Migrations
 cd src && uv run alembic upgrade head
 cd src && uv run alembic revision --autogenerate -m "describe change"
 
 # Frontend
-cd frontend && npm install && npm run dev
+cd frontend && npm install && npm run dev -- --port 3100
 cd frontend && npx tsc --noEmit && npx next build   # one-shot compile check
 
-# Local SQL Server (for local dev)
+# Local SQL Server (host port 14330)
 docker compose -f docker-compose.local-db.yml up -d
 ```
-
-## Adding a resource
-
-Copy the `Item` slice: model in `models/__init__.py` → `api/<resource>.py` router
-(mounted under `/api/businesses/{business_id}/...`) → a migration → `lib/client.ts`
-block → a UI tab. Full walkthrough: `docs/ADDING_A_RESOURCE.md`.
 
 ## Working norms (load-bearing)
 
 - **MSSQL boolean filters**: `.is_(True)` / `.is_(False)` compile to `IS 1` / `IS 0`
-  — a T-SQL **syntax error**. Use `Column == True` / `== False  # noqa: E712`, or a
-  string status column (as `Item.status` does).
-- **Scripts that mutate the DB must guard against prod**: refuse to run unless the
-  DB name contains `-dev`. (Pattern to add when you write seed/cleanup scripts.)
+  — a T-SQL **syntax error**. Use `Column == True  # noqa: E712`.
+- **Keep new columns MSSQL+SQLite portable** (tests run on aiosqlite): plain
+  `JSON`, `GUID`, no filtered indexes.
+- **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
+  differs between Node and browsers and breaks hydration.
+- **Scripts that mutate the DB must guard against prod**: refuse to run unless
+  the DB name contains `-dev`.
 - **`npx tsc` only works from `frontend/`.** `npm run dev` is long-running — use
   `npx next build` for a one-shot compile check.
-- **Before `git add`-ing a file, `git diff` it** — stage only what you touched;
-  never `git add -A` blindly.
+- **Before `git add`-ing a file, `git diff` it** — stage only what you touched.
 - **Commits**: lowercase `<type>(<scope>): <imperative summary>` — `feat`, `fix`,
   `chore`, `docs`, `style`, `test`. Bodies explain the *why*.
 - `develop` is the integration branch; merging to `main` ships to prod.
 
 ## Environment
 
-Copy `.env.example` → `.env` (init.sh does this + generates the secrets). The app
-will not render without Clerk keys — create a Clerk application first and fill the
-`CLERK_*` vars + the frontend `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
+Copy `.env.example` → `.env` (init generated the secrets already). Vehicles,
+simulator, and all tests work with **no external keys**. Live route planning
+needs free keys: `ORS_API_KEY` (openrouteservice.org) and `OCM_API_KEY`
+(openchargemap.org). Frontend env lives in `frontend/.env.local`
+(see `frontend/.env.local.example`).
