@@ -49,7 +49,7 @@ chroma/
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
 *.swp
 *.swo
 *~
@@ -92,3 +92,6 @@ server.err
 claude-code-main
 # Template bootstrap marker (written by init.sh)
 .template-initialized
+
+# Shared editor tasks (rest of .vscode stays ignored)
+!.vscode/tasks.json
