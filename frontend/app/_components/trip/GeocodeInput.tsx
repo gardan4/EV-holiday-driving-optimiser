@@ -18,6 +18,7 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -43,10 +44,15 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
       try {
         const results = await geocode(next.trim())
         setHits(results)
+        setError(results.length === 0 ? "No places found — try a city name." : null)
         setOpen(true)
         setActive(-1)
-      } catch {
+      } catch (err) {
+        // Surface the backend's message (e.g. "Routing is not configured") —
+        // a silently empty dropdown reads as a broken input.
         setHits([])
+        setError(err instanceof Error ? err.message : "Search failed — try again.")
+        setOpen(true)
       } finally {
         setLoading(false)
       }
@@ -100,6 +106,11 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
           } ${loading ? "animate-pulse-soft" : ""}`}
         />
       </div>
+      {open && hits.length === 0 && error && (
+        <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900 shadow-lg shadow-ink-900/5">
+          {error}
+        </div>
+      )}
       {open && hits.length > 0 && (
         <ul
           role="listbox"
