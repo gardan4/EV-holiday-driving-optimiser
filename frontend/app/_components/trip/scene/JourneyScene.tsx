@@ -13,7 +13,8 @@ import * as THREE from "three"
 import { Canvas, useFrame } from "@react-three/fiber"
 import { Html, OrbitControls, Stars } from "@react-three/drei"
 import { Moon, Sun } from "lucide-react"
-import { Stop } from "@/lib/client"
+import { Stop, TimelinePoint } from "@/lib/client"
+import { sampleTimeline, SimRef } from "@/lib/playback"
 import { decodePolyline } from "@/lib/polyline"
 import {
   buildRoadGeometry,
@@ -25,6 +26,13 @@ import {
 
 const BRAND = "#17a56b"
 
+interface CarRun {
+  timeline: TimelinePoint[]
+  color: string
+  /** Lateral lane offset in scene units (race mode puts cars side by side). */
+  lane: number
+}
+
 interface JourneySceneProps {
   polyline: string
   totalDistM: number
@@ -33,8 +41,9 @@ interface JourneySceneProps {
   destLabel: string
   highlightStop?: string | null
   onHoverStop?: (chargerId: string | null) => void
-  /** 0..1 fraction of route driven (M7 playback); car sits at origin when 0. */
-  carProgress?: number
+  /** Shared playback clock (mutated outside React); cars read it per frame. */
+  simRef: SimRef
+  cars: CarRun[]
 }
 
 export default function JourneyScene(props: JourneySceneProps) {
@@ -76,7 +85,7 @@ export default function JourneyScene(props: JourneySceneProps) {
       >
         {night ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </button>
-      <div className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-black/25 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-white/80 backdrop-blur-sm">
+      <div className="pointer-events-none absolute left-3 top-3 rounded-lg bg-black/25 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-white/80 backdrop-blur-sm">
         drag to orbit · scroll to zoom
       </div>
     </div>
@@ -93,7 +102,8 @@ function SceneContent({
   destLabel,
   highlightStop,
   onHoverStop,
-  carProgress = 0,
+  simRef,
+  cars,
   night,
 }: JourneySceneProps & { night: boolean }) {
   const route = useMemo(() => buildSceneRoute(decodePolyline(polyline)), [polyline])
@@ -120,7 +130,18 @@ function SceneContent({
           onHover={onHoverStop}
         />
       ))}
-      <Car route={route} u={carProgress} night={night} />
+      {cars.map((car, i) => (
+        <Car
+          key={i}
+          route={route}
+          timeline={car.timeline}
+          simRef={simRef}
+          totalDistM={totalDistM}
+          color={car.color}
+          lane={car.lane}
+          night={night}
+        />
+      ))}
       <OrbitControls
         target={[0, 0, 0]}
         minDistance={25}
@@ -491,18 +512,37 @@ function EndpointMarker({
   )
 }
 
-function Car({ route, u, night }: { route: SceneRoute; u: number; night: boolean }) {
+function Car({
+  route,
+  timeline,
+  simRef,
+  totalDistM,
+  color,
+  lane,
+  night,
+}: {
+  route: SceneRoute
+  timeline: TimelinePoint[]
+  simRef: SimRef
+  totalDistM: number
+  color: string
+  lane: number
+  night: boolean
+}) {
   const group = useRef<THREE.Group>(null)
 
-  // Position + orient along the road (springless direct placement; playback
-  // in M7 updates `u` per frame via props/state).
+  // Reads the shared clock every frame — no React re-render per tick.
   useFrame(() => {
     const g = group.current
     if (!g) return
-    const clamped = THREE.MathUtils.clamp(u, 0, 1)
-    const p = route.curve.getPointAt(clamped)
-    const t = route.curve.getTangentAt(clamped)
-    g.position.set(p.x, p.y + 0.12, p.z)
+    const { dist } = sampleTimeline(timeline, simRef.min)
+    const u = THREE.MathUtils.clamp(dist / totalDistM, 0, 0.9995)
+    const p = route.curve.getPointAt(u)
+    const t = route.curve.getTangentAt(u)
+    const nx = -t.z
+    const nz = t.x
+    const n = Math.hypot(nx, nz) || 1
+    g.position.set(p.x + (nx / n) * lane, p.y + 0.12, p.z + (nz / n) * lane)
     g.rotation.y = Math.atan2(-t.z, t.x) + Math.PI / 2
   })
 
@@ -511,7 +551,7 @@ function Car({ route, u, night }: { route: SceneRoute; u: number; night: boolean
       {/* Body */}
       <mesh position={[0, 0.32, 0]}>
         <boxGeometry args={[0.95, 0.34, 1.9]} />
-        <meshStandardMaterial color={BRAND} flatShading roughness={0.5} />
+        <meshStandardMaterial color={color} flatShading roughness={0.5} />
       </mesh>
       {/* Cabin */}
       <mesh position={[0, 0.6, -0.05]}>

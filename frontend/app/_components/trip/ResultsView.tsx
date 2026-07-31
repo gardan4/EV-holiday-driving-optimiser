@@ -1,14 +1,18 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import Link from "next/link"
 import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { SpeedResult, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
+import { PlaybackClock } from "@/lib/playback"
 import Itinerary from "./Itinerary"
+import PlaybackHUD from "./PlaybackHUD"
 import SpeedChart from "./SpeedChart"
+
+const RACE_COLOR = "#e8a33d"
 
 // three.js stays out of the initial bundle; the scene is client-only.
 const JourneyScene = dynamic(() => import("./scene/JourneyScene"), {
@@ -28,6 +32,10 @@ export default function ResultsView({ trip }: { trip: Trip }) {
   )
   const [hoverStop, setHoverStop] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [raceSpeed, setRaceSpeed] = useState<number | null>(null)
+
+  const clock = useMemo(() => new PlaybackClock(), [])
+  useEffect(() => () => clock.dispose(), [clock])
 
   const selected = useMemo(
     () => result.speeds.find((s) => s.speed_kph === selectedSpeed) ?? null,
@@ -43,6 +51,25 @@ export default function ResultsView({ trip }: { trip: Trip }) {
     const feasible = result.speeds.filter((s) => s.feasible)
     return feasible.find((s) => s.speed_kph === 100) ?? feasible[0] ?? null
   }, [result.speeds])
+
+  const raceRun = useMemo(
+    () =>
+      raceSpeed == null
+        ? null
+        : (result.speeds.find((s) => s.feasible && s.speed_kph === raceSpeed) ?? null),
+    [result.speeds, raceSpeed]
+  )
+  const feasibleSpeeds = useMemo(
+    () => result.speeds.filter((s) => s.feasible).map((s) => s.speed_kph),
+    [result.speeds]
+  )
+
+  // Playback horizon covers both racers; changing plans keeps the clock sane.
+  useEffect(() => {
+    if (!selected?.feasible) return
+    clock.maxMin = Math.max(selected.total_min ?? 0, raceRun?.total_min ?? 0)
+    if (clock.simRef.min > clock.maxMin) clock.seek(clock.maxMin)
+  }, [clock, selected, raceRun])
 
   async function copyLink() {
     try {
@@ -122,8 +149,8 @@ export default function ResultsView({ trip }: { trip: Trip }) {
         />
       </div>
 
-      {/* 3D journey scene */}
-      <div className="mt-4">
+      {/* 3D journey scene + playback overlay */}
+      <div className="relative mt-4">
         <JourneyScene
           polyline={result.polyline}
           totalDistM={result.total_dist_m}
@@ -132,6 +159,20 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           destLabel={trip.request.dest.label}
           highlightStop={hoverStop}
           onHoverStop={setHoverStop}
+          simRef={clock.simRef}
+          cars={[
+            { timeline: selected.timeline, color: "#17a56b", lane: raceRun ? -0.55 : 0 },
+            ...(raceRun ? [{ timeline: raceRun.timeline, color: RACE_COLOR, lane: 0.55 }] : []),
+          ]}
+        />
+        <PlaybackHUD
+          clock={clock}
+          departureIso={trip.request.departure_iso}
+          main={selected}
+          race={raceRun}
+          raceSpeed={raceSpeed}
+          feasibleSpeeds={feasibleSpeeds}
+          onRaceSpeedChange={setRaceSpeed}
         />
       </div>
 
