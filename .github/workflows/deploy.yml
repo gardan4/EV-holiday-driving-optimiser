@@ -66,6 +66,9 @@ jobs:
         env:
           SECRET_KEY: ci-smoke-test-secret
           ENCRYPTION_KEY: ci-smoke-test-encryption-key
+          # Never connected to — the engine is lazy; tests use in-memory SQLite
+          # via a dependency override. It only has to exist and parse.
+          DATABASE_URL: mssql+aioodbc://sa:ci@localhost:1433/ci?driver=ODBC+Driver+18+for+SQL+Server
         run: |
           uv sync
           uv run python -c "import app.main; print('app imports OK')"
@@ -75,6 +78,9 @@ jobs:
         env:
           SECRET_KEY: ci-smoke-test-secret
           ENCRYPTION_KEY: ci-smoke-test-encryption-key
+          # Never connected to — the engine is lazy; tests use in-memory SQLite
+          # via a dependency override. It only has to exist and parse.
+          DATABASE_URL: mssql+aioodbc://sa:ci@localhost:1433/ci?driver=ODBC+Driver+18+for+SQL+Server
         run: uv run pytest -q
 
       # `secrets` isn't available in job/step `if:` conditions, so turn its

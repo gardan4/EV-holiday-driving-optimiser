@@ -8,15 +8,14 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Validate DATABASE_URL is configured
+# Validate DATABASE_URL is configured. The engine is created lazily below, so a
+# syntactically valid URL is enough to import this module (that's what CI does).
 if not settings.DATABASE_URL:
     raise RuntimeError(
         "DATABASE_URL is not configured!\n"
-        "For local development, get the dev database URL from Azure Key Vault:\n"
-        "  az keyvault secret show --vault-name <vault> --name DATABASE-URL-DEV --query value -o tsv\n"
-        "Then add to your .env file:\n"
-        "  DATABASE_URL=mssql+aioodbc://...\n"
-        "See QUICKSTART.md for setup instructions."
+        "Local development: run ./scripts/dev.sh — it starts SQL Server and\n"
+        "creates .env from .env.example (which already points at it).\n"
+        "In Azure the value is injected as an App Service setting by Bicep."
     )
 
 
