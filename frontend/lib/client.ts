@@ -1,106 +1,124 @@
 /**
- * Typed API client for the EV Trip Optimizer backend.
- *
- * Thin wrappers over `fetchWithAuth` that parse JSON and surface a readable
- * error. Extend this as you add resources — copy the `items` block for your own
- * nested resource. See docs/ADDING_A_RESOURCE.md.
+ * Typed API client — thin wrappers over apiFetch mirroring the FastAPI
+ * schemas in src/app/api/schemas.py.
  */
-import { fetchWithAuth, getErrorMessage } from "./api"
 
-export type UserProfile = {
+import { apiFetch, getErrorMessage } from "./api"
+
+// ---------------------------------------------------------------------------
+// Types (mirror src/app/api/schemas.py)
+// ---------------------------------------------------------------------------
+
+export interface Vehicle {
   id: string
-  email: string
+  slug: string
+  make: string
+  model: string
+  variant: string | null
+  usable_kwh: number
+  consumption: { model: string; a_wh_km: number; b_wh_km_per_kph2: number }
+  charge_curve: [number, number][]
+  max_dc_kw: number
+  source_note: string | null
+}
+
+export interface GeocodeHit {
+  label: string
+  lat: number
+  lon: number
+  country: string | null
+}
+
+export interface PlacePoint {
+  label: string
+  lat: number
+  lon: number
+}
+
+export interface PlanRequest {
+  origin: PlacePoint
+  dest: PlacePoint
+  vehicle_id: string
+  departure_iso: string
+  depart_soc: number
+  target_soc: number
+  speed_min?: number
+  speed_max?: number
+  speed_step?: number
+  conditions_factor?: number
+}
+
+export interface Stop {
+  charger_id: string
   name: string
-  email_verified: boolean
-  onboarded: boolean
+  operator: string | null
+  lat: number
+  lon: number
+  power_kw: number
+  offset_m: number
+  arrive_min: number
+  arrive_soc: number
+  depart_soc: number
+  charge_min: number
+}
+
+export interface TimelinePoint {
+  t_min: number
+  dist_m: number
+  soc: number
+}
+
+export interface SpeedResult {
+  speed_kph: number
+  feasible: boolean
+  total_min: number | null
+  drive_min: number | null
+  charge_min: number | null
+  n_stops: number | null
+  stops: Stop[]
+  timeline: TimelinePoint[]
+}
+
+export interface PlanResult {
+  polyline: string
+  total_dist_m: number
+  speeds: SpeedResult[]
+  optimum_speed: number | null
+  vehicle: Vehicle
+}
+
+export interface Trip {
+  id: string
+  request: PlanRequest
+  result: PlanResult
   created_at: string
-  owned_business_count: number
 }
 
-export type Business = {
-  id: string
-  name: string
-  created_at: string | null
-  archived_at: string | null
-}
+// ---------------------------------------------------------------------------
+// Calls
+// ---------------------------------------------------------------------------
 
-export type Member = {
-  user_id: string
-  email: string
-  name: string
-  role: "owner" | "member"
-  is_founder: boolean
-}
-
-export type Item = {
-  id: string
-  business_id: string
-  name: string
-  description: string | null
-  status: string
-  data: Record<string, unknown> | null
-  created_at: string | null
-  updated_at: string | null
-  archived_at: string | null
-}
-
-async function json<T>(res: Response): Promise<T> {
-  const body = await res.json().catch(() => null)
+async function unwrap<T>(res: Response): Promise<T> {
+  const data = await res.json().catch(() => null)
   if (!res.ok) {
-    throw new Error(getErrorMessage(body?.detail, `Request failed (${res.status})`))
+    const detail = (data as { detail?: unknown } | null)?.detail
+    throw new Error(getErrorMessage(detail, `Request failed (${res.status})`))
   }
-  return body as T
+  return data as T
 }
 
-// ── Auth / profile ──────────────────────────────────────────────────────────
-export const me = () => fetchWithAuth("/api/auth/me").then((r) => json<UserProfile>(r))
-export const markOnboarded = () =>
-  fetchWithAuth("/api/auth/onboarded", { method: "POST" }).then((r) => json<{ onboarded: boolean }>(r))
+export async function getVehicles(): Promise<Vehicle[]> {
+  return unwrap<Vehicle[]>(await apiFetch("/api/vehicles"))
+}
 
-// ── Businesses (the tenant) ───────────────────────────────────────────────────
-export const listBusinesses = () =>
-  fetchWithAuth("/api/businesses").then((r) => json<Business[]>(r))
-export const createBusiness = (name: string) =>
-  fetchWithAuth("/api/businesses", { method: "POST", body: JSON.stringify({ name }) }).then((r) =>
-    json<Business>(r)
-  )
-export const getBusiness = (id: string) =>
-  fetchWithAuth(`/api/businesses/${id}`).then((r) => json<Business>(r))
-export const renameBusiness = (id: string, name: string) =>
-  fetchWithAuth(`/api/businesses/${id}`, { method: "PATCH", body: JSON.stringify({ name }) }).then(
-    (r) => json<Business>(r)
-  )
-export const archiveBusiness = (id: string) =>
-  fetchWithAuth(`/api/businesses/${id}`, { method: "DELETE" }).then((r) => json<{ archived: boolean }>(r))
-export const listMembers = (businessId: string) =>
-  fetchWithAuth(`/api/businesses/${businessId}/members`).then((r) => json<Member[]>(r))
-export const setMemberRole = (businessId: string, userId: string, role: "owner" | "member") =>
-  fetchWithAuth(`/api/businesses/${businessId}/members/${userId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ role }),
-  }).then((r) => json<{ user_id: string; role: string }>(r))
+export async function geocode(q: string): Promise<GeocodeHit[]> {
+  return unwrap<GeocodeHit[]>(await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}`))
+}
 
-// ── Items (the example nested resource — copy this block) ──────────────────────
-export const listItems = (businessId: string) =>
-  fetchWithAuth(`/api/businesses/${businessId}/items`).then((r) => json<Item[]>(r))
-export const createItem = (
-  businessId: string,
-  payload: { name: string; description?: string; status?: string }
-) =>
-  fetchWithAuth(`/api/businesses/${businessId}/items`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  }).then((r) => json<Item>(r))
-export const updateItem = (
-  businessId: string,
-  itemId: string,
-  payload: Partial<Pick<Item, "name" | "description" | "status">>
-) =>
-  fetchWithAuth(`/api/businesses/${businessId}/items/${itemId}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  }).then((r) => json<Item>(r))
-export const archiveItem = (businessId: string, itemId: string) =>
-  fetchWithAuth(`/api/businesses/${businessId}/items/${itemId}`, { method: "DELETE" }).then((r) =>
-    json<{ archived: boolean }>(r)
-  )
+export async function planTrip(req: PlanRequest): Promise<Trip> {
+  return unwrap<Trip>(await apiFetch("/api/trips", { method: "POST", body: JSON.stringify(req) }))
+}
+
+export async function getTrip(id: string): Promise<Trip> {
+  return unwrap<Trip>(await apiFetch(`/api/trips/${id}`))
+}

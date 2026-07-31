@@ -1,8 +1,6 @@
-import Link from "next/link"
-
 /**
- * Public landing page. Replace this with your real marketing page — it's the one
- * route the middleware leaves fully public and indexable.
+ * Public landing page — the planner form lands here (M5). Placeholder copy for
+ * now so the auth-free app boots cleanly with the real product story.
  */
 export default function Home() {
   return (
@@ -14,30 +12,19 @@ export default function Home() {
 
       <section className="relative z-10 mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 text-center">
         <p className="font-mono text-xs uppercase tracking-[0.22em] text-brand-500">
-          Full-stack starter
+          EV road-trip speed optimizer
         </p>
         <h1 className="mt-4 text-5xl font-bold tracking-tight text-slate-900 sm:text-6xl">
-          EV Trip Optimizer
+          Should you really drive 100?
         </h1>
         <p className="mt-5 max-w-xl text-lg leading-relaxed text-slate-500">
-          A production-shaped skeleton: FastAPI + async SQLAlchemy on Azure SQL,
-          Next.js 16 with Clerk auth, Docker, Bicep, and CI. Sign in to see the
-          multi-tenant dashboard, then build your product on top.
+          Enter your route and your EV, and find the cruise speed that actually
+          gets you there first — charging stops, taper curves and all. Then race
+          the result against your friend&apos;s plan.
         </p>
-        <div className="mt-9 flex items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="rounded-xl bg-brand-500 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600"
-          >
-            Open the app
-          </Link>
-          <Link
-            href="/register"
-            className="rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
-          >
-            Create an account
-          </Link>
-        </div>
+        <p className="mt-9 rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-semibold text-slate-400">
+          Trip planner coming up — under construction
+        </p>
       </section>
     </main>
   )

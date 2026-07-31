@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # Local dev points at the docker-compose SQL Server (see docker-compose.local-db.yml).
     DATABASE_URL: str = ""
 
-    # JWT / token settings (kept for any local-token needs; auth is Clerk-based).
+    # Token/signing settings (no auth in this app; kept for signed local tokens if ever needed).
     SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
@@ -35,23 +35,14 @@ class Settings(BaseSettings):
     # provider tokens if you add integrations). Generated per-clone by init.sh.
     ENCRYPTION_KEY: str = ""
 
-    # Clerk (authentication provider). The backend verifies Clerk session tokens
-    # and JIT-provisions a local User keyed by clerk_user_id (see
-    # app/core/clerk_auth.py + app/api/auth.py). Unset → token verification fails
-    # closed (→ 401) rather than blocking boot.
-    CLERK_PUBLISHABLE_KEY: str = ""   # pk_… (frontend; safe to expose)
-    CLERK_SECRET_KEY: str = ""        # sk_… (Backend API: delete user, invitations)
-    # PEM public key from Clerk Dashboard → API Keys → "Show JWT public key".
-    # Verifies session tokens networklessly (RS256) — no JWKS round-trip per request.
-    CLERK_JWT_KEY: str = ""
-    # Expected `iss` claim = your Clerk Frontend API URL
-    # (e.g. https://clerk.evtrip.app or https://xxx.clerk.accounts.dev).
-    CLERK_ISSUER: str = ""
-    # Comma-separated allowed `azp` (authorized-party) origins = your frontend
-    # URLs. Empty disables the azp check (acceptable in local dev only).
-    CLERK_AUTHORIZED_PARTIES: str = ""
-    # Svix signing secret for the Clerk webhook endpoint (user.deleted sync).
-    CLERK_WEBHOOK_SECRET: str = ""
+    # External data providers (server-side only; the frontend never sees these).
+    # Free keys: https://openrouteservice.org/dev/ and https://openchargemap.org/site/develop/api
+    ORS_API_KEY: str = ""             # OpenRouteService — geocoding + directions
+    OCM_API_KEY: str = ""             # OpenChargeMap — charger POIs
+    # Cache TTLs. Routes barely change; chargers change rarely. Aggressive caching
+    # keeps us far under the ORS free-tier daily quota.
+    ROUTE_CACHE_TTL_HOURS: int = 24 * 7
+    CHARGER_CACHE_TTL_HOURS: int = 24 * 14
 
     # Azure AI Foundry (OPTIONAL, inert in the skeleton). Nothing here calls it —
     # the config is kept so wiring an LLM feature in later is drop-in. Fill these
@@ -90,20 +81,6 @@ class Settings(BaseSettings):
             return "all"
         return role
 
-    @field_validator("CLERK_JWT_KEY")
-    @classmethod
-    def _normalize_clerk_pem(cls, v: str) -> str:
-        # The PEM is multi-line, but a .env / Azure App Setting can only hold a
-        # single line — so it's supplied with literal "\n" escapes. Convert them
-        # back to real newlines so jose can parse the key.
-        if v and "\\n" in v:
-            v = v.replace("\\n", "\n")
-        return v
-
-    def clerk_authorized_parties(self) -> list[str]:
-        """Parsed CLERK_AUTHORIZED_PARTIES (allowed `azp` origins)."""
-        return [p.strip() for p in self.CLERK_AUTHORIZED_PARTIES.split(",") if p.strip()]
-
     # ----- Database connection pool (ASYNC engine — the web/API tier) -----
     # Per web instance the async ceiling = DB_POOL_SIZE + DB_MAX_OVERFLOW. Size so
     # an autoscaled web tier stays under the SQL connection budget.
@@ -129,8 +106,8 @@ class Settings(BaseSettings):
     THREAD_POOL_MAX_WORKERS: int = 40
 
     # ----- Rate limiting -----
-    RATE_LIMIT_AUTH: str = "5/minute"           # auth-adjacent endpoints per IP
-    RATE_LIMIT_WRITE: str = "30/minute"         # create/update endpoints per IP
+    RATE_LIMIT_PLAN: str = "10/minute"          # trip planning (may trigger ORS/OCM calls) per IP
+    RATE_LIMIT_GEOCODE: str = "30/minute"       # geocode autocomplete proxy per IP
     RATE_LIMIT_DEFAULT: str = "60/minute"       # general API per IP
     # Shared rate-limit backend. Empty = in-process memory (per-instance, resets
     # on restart). Set to a redis://… URI in production so the limit is global

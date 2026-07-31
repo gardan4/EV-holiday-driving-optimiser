@@ -35,22 +35,10 @@
     "encryptionKey": {
       "value": ""
     },
-    "clerkPublishableKey": {
+    "orsApiKey": {
       "value": ""
     },
-    "clerkJwtKey": {
-      "value": ""
-    },
-    "clerkIssuer": {
-      "value": ""
-    },
-    "clerkAuthorizedParties": {
-      "value": ""
-    },
-    "clerkSecretKey": {
-      "value": ""
-    },
-    "clerkWebhookSecret": {
+    "ocmApiKey": {
       "value": ""
     },
     "frontendUrl": {

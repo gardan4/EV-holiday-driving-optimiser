@@ -33,10 +33,10 @@ export default function OpengraphImage() {
           EV Trip Optimizer
         </div>
         <div style={{ fontSize: 64, fontWeight: 700, lineHeight: 1.05, letterSpacing: "-0.02em", maxWidth: 900 }}>
-          A full-stack starter.
+          Should you really drive 100?
         </div>
         <div style={{ fontSize: 28, lineHeight: 1.35, color: "rgba(255,255,255,0.82)", maxWidth: 880 }}>
-          FastAPI · Next.js · Clerk · Azure SQL — wired and ready.
+          Find the cruise speed that gets your EV there first — charging stops included.
         </div>
       </div>
     ),

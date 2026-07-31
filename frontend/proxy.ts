@@ -1,36 +1,15 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 
-// Public routes: the landing page and the auth screens (Clerk renders sign-in/up
-// + its recovery flows under /login and /register), plus the SEO plumbing.
-// The SEO files must be listed: .txt/.xml/extension-less routes are NOT in the
-// config matcher's static-asset skip list, so without an entry here Clerk
-// auth-gates them and crawlers get a sign-in redirect instead of robots.txt.
-const isPublicRoute = createRouteMatcher([
-  "/",
-  "/login(.*)",
-  "/register(.*)",
-  "/robots.txt",
-  "/sitemap.xml",
-  "/opengraph-image(.*)",
-])
-
-// Indexable routes: the public marketing surface plus SEO plumbing. Everything
-// else — the authenticated product AND the auth screens — gets an
-// X-Robots-Tag: noindex header. robots.txt alone doesn't stop Google indexing a
-// bare URL it can't crawl; the header does, and for /login and /register
-// (crawlable, since they're linked from the landing CTA) it's the only signal.
-const isIndexableRoute = createRouteMatcher([
-  "/",
-  "/sitemap.xml",
-  "/robots.txt",
-  "/opengraph-image(.*)",
-])
+// Indexable routes: the public planner surface plus SEO plumbing. Trip
+// permalinks (/trip/*) carry unguessable ids — they are shareable but
+// deliberately noindexed so shared links never end up in search results.
+const INDEXABLE = [/^\/$/, /^\/robots\.txt$/, /^\/sitemap\.xml$/, /^\/opengraph-image/]
 
 const isDev = process.env.NODE_ENV === "development"
 
-// Single source of truth for the CSP. The locked connect-src is the real defense
-// for the auth token; Clerk's widget needs its FAPI + Cloudflare Turnstile + img.clerk.com.
+// Single source of truth for the CSP. Fully self-hosted: the 3D scene is
+// procedural (no tile servers, no CDNs) and all API traffic goes to our own
+// backend, so connect-src stays locked to our origins.
 const connectExtra = isDev
   ? "http://localhost:* ws://localhost:*"
   : "https://*.azurewebsites.net https://*.evtrip.app https://api.evtrip.app"
@@ -39,17 +18,13 @@ const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  // clerk.evtrip.app = the PRODUCTION Clerk Frontend API (serves clerk-js
-  // + ui bundles). Without it the prod CSP blocks Clerk's script → <SignIn> never
-  // renders and login hangs. *.clerk.accounts.dev covers the dev instance; both
-  // are listed so one CSP works in every environment.
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://clerk.evtrip.app https://challenges.cloudflare.com",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https://img.clerk.com https://*.clerk.accounts.dev https://clerk.evtrip.app",
+  "img-src 'self' data: blob:",
   "font-src 'self' data: https://fonts.gstatic.com",
-  `connect-src 'self' ${connectExtra} https://*.clerk.accounts.dev https://clerk-telemetry.com`,
+  `connect-src 'self' ${connectExtra}`,
+  // three.js / R3F may spin up blob workers (e.g. for texture decoding).
   "worker-src 'self' blob:",
-  "frame-src 'self' https://challenges.cloudflare.com",
   "frame-ancestors 'none'",
   "form-action 'self'",
 ].join("; ")
@@ -63,7 +38,7 @@ function withSecurityHeaders(res: NextResponse): NextResponse {
   return res
 }
 
-export default clerkMiddleware(async (auth, req) => {
+export default function proxy(req: NextRequest) {
   const host = req.headers.get("host") || ""
 
   // Redirect www → non-www (prod canonicalization).
@@ -75,17 +50,13 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(url, 301)
   }
 
-  // Gate everything that isn't explicitly public.
-  if (!isPublicRoute(req)) {
-    await auth.protect()
-  }
-
   const res = withSecurityHeaders(NextResponse.next())
-  if (!isIndexableRoute(req)) {
+  const path = req.nextUrl.pathname
+  if (!INDEXABLE.some((re) => re.test(path))) {
     res.headers.set("X-Robots-Tag", "noindex, nofollow")
   }
   return res
-})
+}
 
 export const config = {
   matcher: [

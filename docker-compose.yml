@@ -34,13 +34,6 @@ services:
       # values, so these are non-empty throwaways. Never use them anywhere real.
       - SECRET_KEY=local-dev-secret-key-change-me
       - ENCRYPTION_KEY=local-dev-encryption-key-change-me
-      # Clerk — paste your dev instance's keys to exercise auth locally.
-      - CLERK_PUBLISHABLE_KEY=
-      - CLERK_SECRET_KEY=
-      - CLERK_JWT_KEY=
-      - CLERK_ISSUER=
-      - CLERK_AUTHORIZED_PARTIES=http://localhost:3000
-      - CLERK_WEBHOOK_SECRET=
       # App config.
       - ENV=development
       - CORS_ORIGINS=*
@@ -74,7 +67,6 @@ services:
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - NEXT_PUBLIC_SITE_URL=http://localhost:3000
-      - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
     volumes:

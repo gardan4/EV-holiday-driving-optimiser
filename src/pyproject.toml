@@ -13,11 +13,9 @@ dependencies = [
     "aioodbc",
     "pyodbc",
     "alembic",
-    # Authentication — Clerk session-token verification (RS256, networkless)
-    "python-jose[cryptography]",
     # Fernet encryption for any at-rest secrets. Hold the major (currently 46.x):
-    # cryptography is Fernet- + python-jose-critical; a multi-major jump needs a
-    # deliberate, tested bump, not a routine lock-upgrade.
+    # a multi-major jump needs a deliberate, tested bump, not a routine
+    # lock-upgrade.
     "cryptography>=46,<47",
     # Structured JSON logging
     "python-json-logger>=3.2.1",

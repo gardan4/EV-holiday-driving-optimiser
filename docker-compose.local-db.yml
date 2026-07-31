@@ -19,7 +19,8 @@ services:
       MSSQL_SA_PASSWORD: "LocalDev_Passw0rd!"
       MSSQL_PID: "Developer"
     ports:
-      - "1433:1433"
+      # Host port 14330: 1433 is commonly taken by another local MSSQL container.
+      - "14330:1433"
     volumes:
       - evtrip-db-data:/var/opt/mssql
 

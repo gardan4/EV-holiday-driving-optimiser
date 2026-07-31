@@ -131,7 +131,6 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: https://${{ env.API_APP_NAME }}.azurewebsites.net
           NEXT_PUBLIC_SITE_URL: https://${{ env.WEB_APP_NAME }}.azurewebsites.net
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
         run: |
           npm ci
           npx tsc --noEmit
@@ -153,7 +152,6 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=https://${{ env.API_APP_NAME }}.azurewebsites.net
             NEXT_PUBLIC_SITE_URL=https://${{ env.WEB_APP_NAME }}.azurewebsites.net
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.CLERK_PUBLISHABLE_KEY }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-latest

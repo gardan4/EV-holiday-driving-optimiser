@@ -1,33 +1,36 @@
 """Database models for EV Trip Optimizer.
 
-Tenancy spine: User → Business (strict tenant boundary) → Item (example child
-resource). `Item` is the canonical "copy me" resource — duplicate it (model +
-`api/items.py` router + a migration + a frontend tab) to add your own
-tenant-scoped entity. See docs/ADDING_A_RESOURCE.md.
+Domain: curated `Vehicle` catalog (consumption + DC charge curves), cached
+external data (`Charger` from OpenChargeMap, `RouteCache` from OpenRouteService,
+`OcmTile` cache bookkeeping), and `Trip` — a persisted plan result whose UUID id
+doubles as the unguessable share token. There is no auth and no user table.
 
 MSSQL note: UUID primary keys use the `GUID` TypeDecorator (CHAR(36)); a plain
 `uuid` column type has no portable MSSQL mapping. Keep it for every id/FK.
+Boolean filters must be written `== True  # noqa: E712` — `.is_(True)` compiles
+to `IS 1`, a T-SQL syntax error. JSON columns use SQLAlchemy `JSON`
+(NVARCHAR(MAX) on MSSQL, JSON-as-TEXT on the SQLite test engine).
 """
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
     CHAR,
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     TypeDecorator,
     Unicode,
     UnicodeText,
-    UniqueConstraint,
-    text,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
@@ -55,189 +58,109 @@ class GUID(TypeDecorator):
 
 
 # ---------------------------------------------------------------------------
-# Identity & tenancy
+# Vehicle catalog (curated seed data — see scripts/seed_vehicles.py)
 # ---------------------------------------------------------------------------
 
 
-class User(Base):
-    """Global user identity. Authentication is owned by Clerk; this is the local
-    mirror, JIT-provisioned on first sign-in (see app/api/auth.py)."""
+class Vehicle(Base):
+    """A curated EV with the physics the simulator needs.
 
-    __tablename__ = "users"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    name: Mapped[str] = mapped_column(Unicode(255), nullable=False)
-
-    # External identity-provider key (Clerk owns authentication). Nullable so an
-    # erased/tombstoned row can hold NULL. Uniqueness is enforced by a FILTERED
-    # index in __table_args__ — a plain UNIQUE on a nullable column only permits
-    # one NULL row on SQL Server, so the filter scopes uniqueness to non-NULL.
-    clerk_user_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-
-    # Mirror of Clerk's email-verified state (kept locally for /me + gating).
-    email_verified: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="0", nullable=False
-    )
-
-    __table_args__ = (
-        Index(
-            "uq_users_clerk_user_id",
-            "clerk_user_id",
-            unique=True,
-            mssql_where=text("clerk_user_id IS NOT NULL"),
-        ),
-    )
-
-    # Onboarding gate (example lifecycle flag). Flip via POST /api/auth/onboarded.
-    onboarded: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
-
-    # Legal consent — stamped at first provisioning (configure legal links in Clerk).
-    tos_accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    # Local ban switch (deactivate without touching Clerk). Also set by erasure.
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    owned_businesses: Mapped[List["Business"]] = relationship(
-        "Business",
-        back_populates="owner",
-        foreign_keys="Business.owner_user_id",
-        cascade="all, delete-orphan",
-    )
-    business_memberships: Mapped[List["BusinessMembership"]] = relationship(
-        "BusinessMembership", back_populates="user", cascade="all, delete-orphan"
-    )
-
-
-class Business(Base):
-    """A business / organization. Strict tenant boundary — zero cross-business
-    sharing. A user can own many businesses."""
-
-    __tablename__ = "businesses"
-
-    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    owner_user_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("users.id"), nullable=False, index=True
-    )
-    name: Mapped[str] = mapped_column(Unicode(200), nullable=False)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    # Soft-delete: archived businesses are hidden everywhere (deps.py 404s them).
-    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
-
-    owner: Mapped["User"] = relationship(
-        "User", back_populates="owned_businesses", foreign_keys=[owner_user_id]
-    )
-    memberships: Mapped[List["BusinessMembership"]] = relationship(
-        "BusinessMembership", back_populates="business", cascade="all, delete-orphan"
-    )
-    items: Mapped[List["Item"]] = relationship(
-        "Item", back_populates="business", cascade="all, delete-orphan"
-    )
-
-    def to_dict(self) -> dict:
-        return {
-            "id": str(self.id),
-            "name": self.name,
-            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
-            "archived_at": self.archived_at.isoformat() + "Z" if self.archived_at else None,
-        }
-
-
-class BusinessMembership(Base):
-    """A user's membership in a business with a role.
-
-    `owner` is derived from Business.owner_user_id and always has full access;
-    additional members can be promoted to `owner` for the same rights. `member`
-    is the default for invited users.
+    `consumption` JSON: {"model": "quadratic", "a_wh_km": 55.0,
+    "b_wh_km_per_kph2": 0.0105} → Wh/km(v) = a + b·v².
+    `charge_curve` JSON: [[soc_pct, kw], ...] piecewise-linear DC charge power
+    (cable-side, as measured by public fast-charge tests) sorted by soc_pct.
     """
 
-    __tablename__ = "business_memberships"
-    __table_args__ = (UniqueConstraint("business_id", "user_id", name="uq_business_membership"),)
+    __tablename__ = "vehicles"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    business_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("businesses.id"), nullable=False, index=True
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="member")
+    slug: Mapped[str] = mapped_column(String(60), unique=True, index=True, nullable=False)
+    make: Mapped[str] = mapped_column(Unicode(80), nullable=False)
+    model: Mapped[str] = mapped_column(Unicode(80), nullable=False)
+    variant: Mapped[Optional[str]] = mapped_column(Unicode(80), nullable=True)
+
+    usable_kwh: Mapped[float] = mapped_column(Float, nullable=False)
+    consumption: Mapped[dict] = mapped_column(JSON, nullable=False)
+    charge_curve: Mapped[list] = mapped_column(JSON, nullable=False)
+    max_dc_kw: Mapped[float] = mapped_column(Float, nullable=False)
+    # Reserved for energy-cost display; charge *time* comes straight from the
+    # cable-side curve and must not be scaled by this (no double counting).
+    charge_efficiency: Mapped[float] = mapped_column(Float, nullable=False, default=0.92)
+
+    source_note: Mapped[Optional[str]] = mapped_column(UnicodeText, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    business: Mapped["Business"] = relationship("Business", back_populates="memberships")
-    user: Mapped["User"] = relationship("User", back_populates="business_memberships")
-
 
 # ---------------------------------------------------------------------------
-# Example tenant-scoped resource — copy this to build your own
+# External-data caches (OpenChargeMap / OpenRouteService)
 # ---------------------------------------------------------------------------
 
 
-class Item(Base):
-    """Example child resource, scoped to a Business (the tenant).
+class Charger(Base):
+    """OpenChargeMap POI cache, upserted by `ocm_id` per corridor tile fetch."""
 
-    This is the reference CRUD entity the skeleton ships. To add your own
-    resource, copy this model, add an `api/<resource>.py` router mounted the
-    same way `items` is, generate a migration, and add a frontend tab.
-    """
-
-    __tablename__ = "items"
-    __table_args__ = (Index("ix_items_business", "business_id", "archived_at"),)
+    __tablename__ = "chargers"
+    __table_args__ = (Index("ix_chargers_lat_lon", "lat", "lon"),)
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    business_id: Mapped[uuid.UUID] = mapped_column(
-        GUID(), ForeignKey("businesses.id"), nullable=False, index=True
-    )
-
+    ocm_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(Unicode(200), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(UnicodeText, nullable=True)
-    # Free-form status label ("active" | "archived" | your own vocab). A string,
-    # not a bool — MSSQL `IS 1` boolean filters are a T-SQL syntax error.
-    status: Mapped[str] = mapped_column(String(40), nullable=False, default="active")
-    data: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-
-    business: Mapped["Business"] = relationship("Business", back_populates="items")
-
-    def to_dict(self) -> dict:
-        return {
-            "id": str(self.id),
-            "business_id": str(self.business_id),
-            "name": self.name,
-            "description": self.description,
-            "status": self.status,
-            "data": self.data,
-            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() + "Z" if self.updated_at else None,
-            "archived_at": self.archived_at.isoformat() + "Z" if self.archived_at else None,
-        }
+    operator: Mapped[Optional[str]] = mapped_column(Unicode(200), nullable=True)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lon: Mapped[float] = mapped_column(Float, nullable=False)
+    max_power_kw: Mapped[float] = mapped_column(Float, nullable=False)
+    n_points: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    country: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    is_operational: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Trimmed OCM POI payload kept for debugging / future fields.
+    raw: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-# ---------------------------------------------------------------------------
-# Audit
-# ---------------------------------------------------------------------------
+class OcmTile(Base):
+    """Bookkeeping: which geohash-4 corridor tiles (~39×20 km) have been fetched
+    from OCM and when. Fresh tiles are served entirely from the chargers table."""
+
+    __tablename__ = "ocm_tiles"
+
+    tile_key: Mapped[str] = mapped_column(String(12), primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class UserAuditLog(Base):
-    """Audit log of user-initiated writes. Written via api/deps.audit()."""
+class RouteCache(Base):
+    """ORS directions cache. Key = sha256 over geohash6-snapped origin/dest
+    (~±600 m), so autocomplete-picked places hit reliably."""
 
-    __tablename__ = "user_audit_logs"
-    __table_args__ = (
-        Index("ix_user_audit_business_time", "business_id", "created_at"),
-        Index("ix_user_audit_user_time", "user_id", "created_at"),
-    )
+    __tablename__ = "route_cache"
 
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
-    business_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("businesses.id"), nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(GUID(), ForeignKey("users.id"), nullable=False)
-    action: Mapped[str] = mapped_column(String(80), nullable=False)
-    target_type: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
-    target_id: Mapped[Optional[uuid.UUID]] = mapped_column(GUID(), nullable=True)
-    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    cache_key: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    # Condensed route: polyline coords, per-segment {dist_m, dur_s}, totals.
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Trips — persisted plan results; the UUID id is the share token
+# ---------------------------------------------------------------------------
+
+
+class Trip(Base):
+    """A computed trip plan. Created on every successful plan request; the
+    unguessable UUID4 id is the permalink token (no auth, no ownership)."""
+
+    __tablename__ = "trips"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    vehicle_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("vehicles.id"), nullable=False, index=True
+    )
+    # The validated PlanRequest as submitted (origin/dest, departure, SoC params,
+    # speed range, conditions factor) — enough to re-run the plan.
+    request: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # PlanResult: encoded polyline, per-speed results incl. stops + timeline,
+    # optimum speed. Schema versioned so old permalinks stay renderable.
+    result: Mapped[dict] = mapped_column(JSON, nullable=False)
+    result_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

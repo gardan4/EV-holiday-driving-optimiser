@@ -67,26 +67,14 @@ param secretKey string
 @secure()
 param encryptionKey string
 
-// ── Clerk (auth) ────────────────────────────────────────────────────────────
-@description('Clerk publishable key (pk_…) — public, also baked into the web build.')
-param clerkPublishableKey string = ''
-
-@description('Clerk JWT verification PEM public key (single line, \\n-escaped).')
-param clerkJwtKey string = ''
-
-@description('Clerk issuer / Frontend API URL (e.g. https://clerk.evtrip.app).')
-param clerkIssuer string = ''
-
-@description('Clerk authorized parties — comma-separated frontend origin(s).')
-param clerkAuthorizedParties string = ''
-
-@description('Clerk secret key (sk_…) — backend + Next.js middleware.')
+// ── External data providers (API tier only) ─────────────────────────────────
+@description('OpenRouteService API key (routing + geocoding).')
 @secure()
-param clerkSecretKey string = ''
+param orsApiKey string = ''
 
-@description('Clerk webhook signing secret (svix).')
+@description('OpenChargeMap API key (charger POIs).')
 @secure()
-param clerkWebhookSecret string = ''
+param ocmApiKey string = ''
 
 // ── Public URLs / CORS ──────────────────────────────────────────────────────
 @description('Public frontend URL (used for CORS + email links). Empty ⇒ derive the *.azurewebsites.net host.')
@@ -121,7 +109,6 @@ var apiPublicUrl = empty(apiUrl) ? 'https://${apiAppName}.azurewebsites.net' : a
 var webPublicUrl = empty(frontendUrl) ? 'https://${webAppName}.azurewebsites.net' : frontendUrl
 var sitePublicUrl = empty(siteUrl) ? webPublicUrl : siteUrl
 var effectiveCors = empty(corsOrigins) ? webPublicUrl : corsOrigins
-var effectiveClerkParties = empty(clerkAuthorizedParties) ? webPublicUrl : clerkAuthorizedParties
 
 // mssql+aioodbc DSN the FastAPI app expects (matches src/ settings + Dockerfile ODBC 18).
 var databaseUrl = 'mssql+aioodbc://${sqlAdminLogin}:${sqlAdminPassword}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
@@ -247,24 +234,12 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           value: encryptionKey
         }
         {
-          name: 'CLERK_JWT_KEY'
-          value: clerkJwtKey
+          name: 'ORS_API_KEY'
+          value: orsApiKey
         }
         {
-          name: 'CLERK_ISSUER'
-          value: clerkIssuer
-        }
-        {
-          name: 'CLERK_AUTHORIZED_PARTIES'
-          value: effectiveClerkParties
-        }
-        {
-          name: 'CLERK_SECRET_KEY'
-          value: clerkSecretKey
-        }
-        {
-          name: 'CLERK_WEBHOOK_SECRET'
-          value: clerkWebhookSecret
+          name: 'OCM_API_KEY'
+          value: ocmApiKey
         }
         // Non-secret config.
         {
@@ -319,16 +294,6 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'NEXT_PUBLIC_SITE_URL'
           value: sitePublicUrl
-        }
-        {
-          name: 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'
-          value: clerkPublishableKey
-        }
-        // Clerk middleware runs server-side on every request and needs the
-        // secret key at runtime (build-time inlining only covers public keys).
-        {
-          name: 'CLERK_SECRET_KEY'
-          value: clerkSecretKey
         }
         {
           name: 'WEBSITES_PORT'

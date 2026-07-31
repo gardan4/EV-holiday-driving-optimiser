@@ -1,5 +1,6 @@
 /**
- * API configuration + authenticated fetch for the frontend.
+ * API configuration + fetch helper for the frontend. The app is fully public —
+ * there is no auth and no tokens.
  *
  * Base URL priority:
  * 1. NEXT_PUBLIC_API_URL environment variable (set at build time)
@@ -31,7 +32,8 @@ function getApiUrl(): string {
     }
   }
 
-  return "http://localhost:8000"
+  // Local backend runs on 8100 (8000 commonly taken by other local projects).
+  return "http://localhost:8100"
 }
 
 export const API_URL = getApiUrl()
@@ -60,65 +62,13 @@ export function getErrorMessage(detail: unknown, fallback = "Something went wron
   return fallback
 }
 
-// Authentication is owned by Clerk. ClerkProvider exposes `window.Clerk` once
-// loaded; we read the session token from it for our (cross-origin) FastAPI API.
-type ClerkGlobal = {
-  session?: { getToken: () => Promise<string | null> }
-  user?: unknown
-  signOut?: (opts?: { redirectUrl?: string }) => Promise<void>
-}
-function clerk(): ClerkGlobal | undefined {
-  if (typeof window === "undefined") return undefined
-  return (window as unknown as { Clerk?: ClerkGlobal }).Clerk
-}
-
-/**
- * Resolve the bearer token for an API call: the live (short-lived,
- * auto-refreshed) Clerk session JWT — minted with the email/name/email_verified
- * claims the backend reads. Central choke point for fetchWithAuth + lib/client.
- */
-export async function getAuthToken(): Promise<string | null> {
-  if (typeof window === "undefined") return null
-  try {
-    return (await clerk()?.session?.getToken()) ?? null
-  } catch {
-    return null
-  }
-}
-
-/** Make an authenticated API request against the FastAPI backend. */
-export async function fetchWithAuth(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<Response> {
-  const token = await getAuthToken()
-
+/** Make an API request against the FastAPI backend. */
+export async function apiFetch(endpoint: string, options: RequestInit = {}): Promise<Response> {
   // FormData bodies must NOT get a JSON Content-Type — the browser sets the
   // multipart boundary itself.
   const headers: HeadersInit = {
     ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
     ...options.headers,
   }
-  if (token) {
-    (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`
-  }
-
   return fetch(`${API_URL}${endpoint}`, { ...options, headers })
-}
-
-/**
- * Best-effort "is there a session?" check. Route protection is enforced
- * server-side by clerkMiddleware; this is only a client-side UI hint. Components
- * that need reactive state should use Clerk's `useAuth()` instead.
- */
-export function isAuthenticated(): boolean {
-  if (typeof window === "undefined") return false
-  return !!clerk()?.user
-}
-
-/** Log out — clears the Clerk session (and cookie) and lands on /login. */
-export function logout(): void {
-  clerk()
-    ?.signOut?.({ redirectUrl: "/login" })
-    .catch(() => {})
 }

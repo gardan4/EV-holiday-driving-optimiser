@@ -27,8 +27,6 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Clerk publishable key — Next.js inlines NEXT_PUBLIC_* at build time, so it
 # must be present here (not just as a runtime App Service setting).
-ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 
 # Build the application
 RUN npm run build

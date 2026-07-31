@@ -42,6 +42,22 @@ def _make_alembic_config() -> Config:
     return cfg
 
 
+def _seed_vehicles_if_empty(engine) -> None:
+    """Populate the curated vehicle catalog on first boot (no-op otherwise)."""
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    from app.models import Vehicle
+    from scripts.seed_vehicles import seed
+
+    with Session(engine) as session:
+        count = session.execute(select(func.count()).select_from(Vehicle)).scalar_one()
+        if count:
+            return
+        created, updated = seed(session)
+        logger.info("Vehicle catalog empty → seeded %d vehicles", created + updated)
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="db_bootstrap: %(message)s")
     if not settings.DATABASE_URL:
@@ -61,6 +77,7 @@ def main() -> int:
             cfg = _make_alembic_config()
             command.upgrade(cfg, "head")
             logger.info("alembic upgrade head complete")
+            _seed_vehicles_if_empty(engine)
             return 0
 
         logger.info(
@@ -72,6 +89,7 @@ def main() -> int:
         cfg = _make_alembic_config()
         command.stamp(cfg, TARGET_HEAD_REVISION)
         logger.info("Fresh DB bootstrapped at revision %s", TARGET_HEAD_REVISION)
+        _seed_vehicles_if_empty(engine)
         return 0
 
     except Exception as exc:

@@ -1,9 +1,8 @@
 """Encryption utilities.
 
-Authentication moved to Clerk — password hashing and our own JWT mint/verify
-were removed in the Clerk cutover. What remains is Fernet encryption for the
-user's BYO Google Cloud API key. (The Microsoft-OAuth state token does its own
-HS256 signing in app/services/email_microsoft.py.)
+Fernet encryption for any at-rest secrets. Nothing uses it in the app today;
+kept because ENCRYPTION_KEY is already provisioned and future integrations
+(stored provider tokens etc.) can use it drop-in.
 """
 
 import base64

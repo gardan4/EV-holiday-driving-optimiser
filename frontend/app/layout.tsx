@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -9,8 +8,9 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://evtrip.app";
 
-const TITLE = "EV Trip Optimizer";
-const DESCRIPTION = "EV Trip Optimizer — a full-stack starter (FastAPI + Next.js + Clerk on Azure).";
+const TITLE = "EV Trip Optimizer — find your fastest cruise speed";
+const DESCRIPTION =
+  "Should you really drive 100? Enter your route and EV, and find the cruise speed that gets you there first — charging stops included.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -38,24 +38,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <ClerkProvider
-      // Custom in-app auth pages. These MUST be declared explicitly: without
-      // them Clerk falls back to the instance default sign-in URL, which on a
-      // *production* instance is the hosted Account Portal — so <SignIn> mounted
-      // at /login never renders and the page hangs. (Dev/test instances render
-      // inline regardless, which is why dev can work while prod hangs.)
-      signInUrl="/login"
-      signUpUrl="/register"
-      signInFallbackRedirectUrl="/dashboard"
-      signUpFallbackRedirectUrl="/dashboard"
-      afterSignOutUrl="/login"
-      appearance={{ variables: { colorPrimary: "#0C6291", borderRadius: "0.75rem" } }}
-    >
-      <html lang="en">
-        <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-          <Providers>{children}</Providers>
-        </body>
-      </html>
-    </ClerkProvider>
+    <html lang="en">
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
   );
 }

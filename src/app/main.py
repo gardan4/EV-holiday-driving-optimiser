@@ -25,11 +25,8 @@ from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 
-from app.api import auth, businesses, items, webhooks
-from app.api.auth import require_auth
 from app.core.database import AsyncSessionLocal, init_db
 from app.core.rate_limit import limiter
-from app.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -108,24 +105,6 @@ async def lifespan(app: FastAPI):
     setup_logging(log_level=settings.LOG_LEVEL, json_logs=settings.LOG_JSON)
     logger.info("Starting instance", extra={"instance_id": INSTANCE_ID, "role": settings.PROCESS_ROLE})
 
-    # Auth hardening: in production the Clerk issuer + azp checks must be on —
-    # with them unset, token verification degrades to signature-only, accepting
-    # tokens minted for other apps on the same Clerk instance.
-    if settings.ENV == "production" and settings.CLERK_JWT_KEY:
-        missing = [
-            name
-            for name, value in (
-                ("CLERK_ISSUER", settings.CLERK_ISSUER),
-                ("CLERK_AUTHORIZED_PARTIES", settings.CLERK_AUTHORIZED_PARTIES),
-            )
-            if not value.strip()
-        ]
-        if missing:
-            raise RuntimeError(
-                f"Refusing to start in production without {', '.join(missing)} — "
-                "Clerk token verification would accept tokens from other apps."
-            )
-
     await _run_common_startup()
 
     background_tasks: list[asyncio.Task] = []
@@ -190,16 +169,9 @@ app.add_middleware(
 # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only / and
 # /health below, so health probes pass without exposing the API surface.
 if _serves_api():
-    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-    app.include_router(businesses.router, prefix="/api/businesses", tags=["businesses"])
-    # Item is the reference nested resource, scoped under a business.
-    app.include_router(
-        items.router,
-        prefix="/api/businesses/{business_id}/items",
-        tags=["items"],
-    )
-    # Mounts at /api/webhooks/clerk (Svix-signed; user.deleted → local erasure).
-    app.include_router(webhooks.router, prefix="/api")
+    from app.api import vehicles
+
+    app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
 
 
 @app.get("/")
@@ -213,8 +185,8 @@ async def health_check():
 
 
 @app.get("/health/detailed")
-async def detailed_health_check(_user: User = Depends(require_auth)):
-    """Detailed health check that verifies dependencies. Requires auth."""
+async def detailed_health_check():
+    """Detailed health check that verifies dependencies (DB reachability)."""
     health: dict = {"status": "healthy", "checks": {}}
     try:
         async with AsyncSessionLocal() as session:
