@@ -1,0 +1,15 @@
+{
+  // Run tasks in a LOGIN shell. Without this, a VS Code started from the Dock
+  // gives tasks the bare launchd PATH (/usr/bin:/bin:/usr/sbin:/sbin), so
+  // homebrew (uv, docker) and mise (node, npm) are all missing and every task
+  // dies with "command not found". scripts/dev.sh repairs PATH itself, but the
+  // plain tasks (pytest, tsc) need this.
+  "terminal.integrated.automationProfile.osx": {
+    "path": "/bin/zsh",
+    "args": ["-l"]
+  },
+  "terminal.integrated.automationProfile.linux": {
+    "path": "/bin/bash",
+    "args": ["-l"]
+  }
+}

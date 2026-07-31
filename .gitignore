@@ -95,3 +95,4 @@ claude-code-main
 
 # Shared editor tasks (rest of .vscode stays ignored)
 !.vscode/tasks.json
+!.vscode/settings.json

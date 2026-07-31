@@ -17,6 +17,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# ── PATH bootstrap ───────────────────────────────────────────────────────────
+# A VS Code launched from the Dock hands its tasks the bare launchd PATH
+# (/usr/bin:/bin:/usr/sbin:/sbin) — no homebrew, no mise — so `docker`, `uv`
+# and `npm` all vanish. Put the usual tool locations back so this script works
+# the same from a task, a login shell, or a bare `sh -c`.
+for _dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/.local/share/mise/shims"; do
+  case ":$PATH:" in
+    *":$_dir:"*) ;;
+    *) [[ -d "$_dir" ]] && PATH="$_dir:$PATH" ;;
+  esac
+done
+export PATH
+unset _dir
+
+# mise won't resolve tools from an untrusted config — node/npm just silently
+# disappear. Trusting our own repo's mise.toml is safe and idempotent.
+if command -v mise >/dev/null 2>&1 && [[ -f mise.toml ]]; then
+  mise trust >/dev/null 2>&1 || true
+fi
+
 API_PORT=8100
 WEB_PORT=3100
 DB_CONTAINER=evtrip-db-local
