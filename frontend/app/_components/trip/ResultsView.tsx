@@ -1,0 +1,230 @@
+"use client"
+
+import { useMemo, useState } from "react"
+import Link from "next/link"
+import { Check, Link2, RotateCcw } from "lucide-react"
+import { toast } from "sonner"
+import { SpeedResult, Trip } from "@/lib/client"
+import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
+import Itinerary from "./Itinerary"
+import SpeedChart from "./SpeedChart"
+
+/** Results hub: owns `selectedSpeed`; chart + stats + itinerary stay in sync. */
+export default function ResultsView({ trip }: { trip: Trip }) {
+  const { result } = trip
+  const [selectedSpeed, setSelectedSpeed] = useState<number>(
+    result.optimum_speed ?? result.speeds.find((s) => s.feasible)?.speed_kph ?? 0
+  )
+  const [hoverStop, setHoverStop] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const selected = useMemo(
+    () => result.speeds.find((s) => s.speed_kph === selectedSpeed) ?? null,
+    [result.speeds, selectedSpeed]
+  )
+  const best = useMemo(
+    () => result.speeds.find((s) => s.speed_kph === result.optimum_speed) ?? null,
+    [result.speeds, result.optimum_speed]
+  )
+  const slowBaseline = useMemo(() => {
+    // The friend's plan: the slowest feasible simulated speed ≤ 100, else the
+    // slowest overall — the comparison the app exists to settle.
+    const feasible = result.speeds.filter((s) => s.feasible)
+    return feasible.find((s) => s.speed_kph === 100) ?? feasible[0] ?? null
+  }, [result.speeds])
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setCopied(true)
+      toast.success("Trip link copied — send it to your co-driver")
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error("Could not copy the link")
+    }
+  }
+
+  if (!selected || !selected.feasible) {
+    return <p className="text-ink-500">No feasible plan at this speed.</p>
+  }
+
+  const vsBaseline =
+    slowBaseline && slowBaseline.total_min != null && selected.total_min != null
+      ? slowBaseline.total_min - selected.total_min
+      : null
+
+  return (
+    <div className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 py-5">
+        <div className="min-w-0">
+          <h1 className="truncate font-display text-xl font-bold text-ink-900 sm:text-2xl">
+            {short(trip.request.origin.label)} → {short(trip.request.dest.label)}
+          </h1>
+          <p className="mt-0.5 text-sm text-ink-500">
+            {fmtKm(result.total_dist_m)} · {result.vehicle.make} {result.vehicle.model}{" "}
+            {result.vehicle.variant} · leaves {clockAt(trip.request.departure_iso, 0)}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={copyLink}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+          >
+            {copied ? <Check className="h-4 w-4 text-brand-600" /> : <Link2 className="h-4 w-4" />}
+            Share
+          </button>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300"
+          >
+            <RotateCcw className="h-4 w-4" />
+            New trip
+          </Link>
+        </div>
+      </div>
+
+      {/* Hero stats for the SELECTED speed */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat
+          label="cruise at"
+          value={`${selected.speed_kph}`}
+          unit="km/h"
+          accent={selected.speed_kph === result.optimum_speed}
+          sub={selected.speed_kph === result.optimum_speed ? "the fastest plan" : "your pick"}
+        />
+        <Stat
+          label="arrive at"
+          value={clockAt(trip.request.departure_iso, selected.total_min ?? 0)}
+          sub={`door to door ${fmtHm(selected.total_min ?? 0)}`}
+        />
+        <Stat
+          label="charging"
+          value={fmtDuration(selected.charge_min ?? 0)}
+          sub={`${selected.n_stops} stop${selected.n_stops === 1 ? "" : "s"}`}
+        />
+        <Stat
+          label={vsBaseline != null && slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
+          value={vsBaseline != null ? `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}` : "—"}
+          accent={vsBaseline != null && vsBaseline > 0}
+          sub={vsBaseline != null && vsBaseline > 0 ? "earlier at the chalet" : "slower overall"}
+        />
+      </div>
+
+      {/* Chart + itinerary */}
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div className="space-y-4">
+          <SpeedChart
+            speeds={result.speeds}
+            optimumSpeed={result.optimum_speed}
+            selectedSpeed={selectedSpeed}
+            onSelect={setSelectedSpeed}
+          />
+          <SpeedPills
+            speeds={result.speeds}
+            optimumSpeed={result.optimum_speed}
+            selectedSpeed={selectedSpeed}
+            onSelect={setSelectedSpeed}
+          />
+          {best && selected.speed_kph !== best.speed_kph && (
+            <button
+              onClick={() => setSelectedSpeed(best.speed_kph)}
+              className="w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-800 transition-colors hover:bg-brand-100"
+            >
+              Jump to the fastest plan — {best.speed_kph} km/h, arrives{" "}
+              {clockAt(trip.request.departure_iso, best.total_min ?? 0)}
+            </button>
+          )}
+        </div>
+        <aside aria-label="Itinerary">
+          <h2 className="mb-2 px-1 font-display text-base font-semibold text-ink-900">
+            Itinerary at {selected.speed_kph} km/h
+          </h2>
+          <Itinerary
+            trip={trip}
+            result={selected}
+            highlightStop={hoverStop}
+            onHoverStop={setHoverStop}
+          />
+        </aside>
+      </div>
+    </div>
+  )
+}
+
+function short(label: string): string {
+  return label.split(",")[0]
+}
+
+function SpeedPills({
+  speeds,
+  optimumSpeed,
+  selectedSpeed,
+  onSelect,
+}: {
+  speeds: SpeedResult[]
+  optimumSpeed: number | null
+  selectedSpeed: number
+  onSelect: (speed: number) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cruise speed">
+      {speeds.map((s) => {
+        const isSelected = s.speed_kph === selectedSpeed
+        const isBest = s.speed_kph === optimumSpeed
+        return (
+          <button
+            key={s.speed_kph}
+            role="radio"
+            aria-checked={isSelected}
+            disabled={!s.feasible}
+            onClick={() => onSelect(s.speed_kph)}
+            title={!s.feasible ? "Not feasible — charger gaps too large at this speed" : undefined}
+            className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
+              isSelected
+                ? "border-ink-900 bg-ink-900 text-white"
+                : isBest
+                  ? "border-brand-400 bg-brand-50 text-brand-800 hover:bg-brand-100"
+                  : s.feasible
+                    ? "border-ink-200 bg-white text-ink-700 hover:border-ink-300"
+                    : "cursor-not-allowed border-ink-100 bg-ink-100/50 text-ink-300 line-through"
+            }`}
+          >
+            {s.speed_kph}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function Stat({
+  label,
+  value,
+  unit,
+  sub,
+  accent,
+}: {
+  label: string
+  value: string
+  unit?: string
+  sub?: string
+  accent?: boolean
+}) {
+  return (
+    <div
+      className={`rounded-2xl border p-4 ${
+        accent ? "border-brand-200 bg-brand-50" : "border-ink-100 bg-white"
+      }`}
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">{label}</div>
+      <div className="mt-1 font-display text-2xl font-bold text-ink-900">
+        {value}
+        {unit && <span className="ml-1 text-sm font-semibold text-ink-500">{unit}</span>}
+      </div>
+      {sub && (
+        <div className={`mt-0.5 text-xs ${accent ? "text-brand-700" : "text-ink-500"}`}>{sub}</div>
+      )}
+    </div>
+  )
+}

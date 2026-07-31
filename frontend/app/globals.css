@@ -1,23 +1,38 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-background: #f8fafc;
-  --color-foreground: #0f172a;
+  /* Snow-white alpine surface, deep navy ink — the Cula-style diorama palette. */
+  --color-background: #f4f7f6;
+  --color-foreground: #0e1a2b;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-display);
 
-  /* Brand palette — swap these hexes to rebrand the whole app. Based on #0C6291. */
-  --color-brand-50: #f0f7ff;
-  --color-brand-100: #dfeeff;
-  --color-brand-200: #b8ddff;
-  --color-brand-300: #79c2ff;
-  --color-brand-400: #32a3ff;
-  --color-brand-500: #0C6291;
-  --color-brand-600: #0a5279;
-  --color-brand-700: #084263;
-  --color-brand-800: #063550;
-  --color-brand-900: #042940;
-  --color-brand-950: #021b2b;
+  /* Brand palette — EV mint. Swap these hexes to rebrand the whole app. */
+  --color-brand-50: #effaf4;
+  --color-brand-100: #d9f4e6;
+  --color-brand-200: #b3e8ce;
+  --color-brand-300: #7ed9ae;
+  --color-brand-400: #43c389;
+  --color-brand-500: #17a56b;
+  --color-brand-600: #108a58;
+  --color-brand-700: #0d6f48;
+  --color-brand-800: #0b593b;
+  --color-brand-900: #094830;
+  --color-brand-950: #04291b;
+
+  /* Ink scale (navy-tinted slate) */
+  --color-ink-900: #0e1a2b;
+  --color-ink-700: #2b3b52;
+  --color-ink-500: #55677f;
+  --color-ink-400: #7d8ca0;
+  --color-ink-300: #aab6c5;
+  --color-ink-200: #d4dce4;
+  --color-ink-100: #e8edf1;
+
+  /* Chart series — validated (dataviz six checks, light surface #f7f9f8). */
+  --color-chart-drive: #3f6dbf;
+  --color-chart-charge: #d98e1f;
 }
 
 body {
@@ -29,8 +44,8 @@ body {
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(12, 98, 145, 0.25); border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(12, 98, 145, 0.4); }
+::-webkit-scrollbar-thumb { background: rgba(23, 165, 107, 0.3); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(23, 165, 107, 0.5); }
 
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
@@ -42,7 +57,14 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 @layer utilities {
   .animate-float { animation: float 8s ease-in-out infinite; }
   .animate-fade-in-up { animation: fade-in-up 0.6s ease-out both; }
+  .animate-pulse-soft { animation: pulse-soft 1.6s ease-in-out infinite; }
+  .font-display { font-family: var(--font-display), var(--font-sans), sans-serif; }
 }
