@@ -45,6 +45,19 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} ${display.variable} antialiased`}>
+        {process.env.NODE_ENV === "development" && (
+          // Dev-only: headless/embedded preview panes report visibilityState
+          // "hidden", which parks requestAnimationFrame and freezes the 3D
+          // scene. Shim RAF with a timer so the render loop still runs there.
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `if (document.visibilityState === "hidden") {
+  window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16);
+  window.cancelAnimationFrame = (id) => clearTimeout(id);
+}`,
+            }}
+          />
+        )}
         <Providers>{children}</Providers>
       </body>
     </html>

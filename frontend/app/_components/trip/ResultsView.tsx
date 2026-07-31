@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
@@ -8,6 +9,16 @@ import { SpeedResult, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import Itinerary from "./Itinerary"
 import SpeedChart from "./SpeedChart"
+
+// three.js stays out of the initial bundle; the scene is client-only.
+const JourneyScene = dynamic(() => import("./scene/JourneyScene"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[430px] items-center justify-center rounded-2xl border border-ink-100 bg-white text-sm text-ink-400 sm:h-[480px]">
+      <span className="animate-pulse-soft">Building your journey…</span>
+    </div>
+  ),
+})
 
 /** Results hub: owns `selectedSpeed`; chart + stats + itinerary stay in sync. */
 export default function ResultsView({ trip }: { trip: Trip }) {
@@ -108,6 +119,19 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           value={vsBaseline != null ? `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}` : "—"}
           accent={vsBaseline != null && vsBaseline > 0}
           sub={vsBaseline != null && vsBaseline > 0 ? "earlier at the chalet" : "slower overall"}
+        />
+      </div>
+
+      {/* 3D journey scene */}
+      <div className="mt-4">
+        <JourneyScene
+          polyline={result.polyline}
+          totalDistM={result.total_dist_m}
+          stops={selected.stops}
+          originLabel={trip.request.origin.label}
+          destLabel={trip.request.dest.label}
+          highlightStop={hoverStop}
+          onHoverStop={setHoverStop}
         />
       </div>
 
