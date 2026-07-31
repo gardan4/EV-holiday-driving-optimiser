@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { SpeedResult, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import { PlaybackClock } from "@/lib/playback"
+import BatteryChart from "./BatteryChart"
 import Itinerary from "./Itinerary"
 import PlaybackHUD from "./PlaybackHUD"
 import SpeedChart from "./SpeedChart"
@@ -190,6 +191,12 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             optimumSpeed={result.optimum_speed}
             selectedSpeed={selectedSpeed}
             onSelect={setSelectedSpeed}
+          />
+          <BatteryChart
+            result={selected}
+            departureIso={trip.request.departure_iso}
+            targetSoc={trip.request.target_soc}
+            clock={clock}
           />
           {best && selected.speed_kph !== best.speed_kph && (
             <button
