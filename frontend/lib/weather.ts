@@ -20,3 +20,12 @@ export function chargePowerFactorForTemp(tempC: number): number {
   if (tempC >= -10) return 0.8 - -tempC * (0.25 / 10)
   return 0.45
 }
+
+/** Puts the multipliers into words, including the "no penalty" case. */
+export function describeTemp(tempC: number): string {
+  const extra = Math.round((consumptionFactorForTemp(tempC) - 1) * 100)
+  const charge = Math.round(chargePowerFactorForTemp(tempC) * 100)
+  if (extra === 0 && charge === 100) return "no weather penalty — full range and full charging speed"
+  if (extra === 0) return `normal consumption · charging at ${charge}% of full speed`
+  return `${extra}% more energy · charging at ${charge}% of full speed`
+}

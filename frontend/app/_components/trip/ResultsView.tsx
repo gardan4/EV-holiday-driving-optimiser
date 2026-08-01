@@ -8,6 +8,7 @@ import { SpeedResult, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
+import Assumptions from "./Assumptions"
 import BatteryChart from "./BatteryChart"
 import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
@@ -284,6 +285,8 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             <li>Departure time shifts the clock, not the plan — there is no traffic model yet.</li>
           </ul>
         </details>
+        <Assumptions trip={trip} />
+
       </div>
     </div>
   )
