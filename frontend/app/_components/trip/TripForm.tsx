@@ -6,23 +6,18 @@ import { ArrowRight, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { getVehicles, planTrip, PlacePoint, Vehicle } from "@/lib/client"
 import { defaultDepartureIso } from "@/lib/format"
+import { chargePowerFactorForTemp, consumptionFactorForTemp } from "@/lib/weather"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
 
-// Cold hits twice: the car uses more, AND the pack accepts charge more slowly.
-// The second effect is the bigger one on a long winter trip.
-const CONDITIONS = [
-  { label: "Mild", factor: 1.0, charge: 1.0, hint: "≥ 10 °C" },
-  { label: "Cold", factor: 1.15, charge: 0.8, hint: "around 0 °C — slower charging too" },
-  { label: "Freezing", factor: 1.3, charge: 0.55, hint: "below 0 °C — much slower charging" },
-]
-
-// How hard you push where the road allows it.
-const STYLES = [
-  { label: "Legal", cap: 0, flow: 1.0, hint: "sit on the limit" },
-  { label: "Brisk", cap: 10, flow: 1.08, hint: "a little over, everywhere" },
-  { label: "Assertive", cap: 20, flow: 1.15, hint: "press on wherever you can" },
-]
+/**
+ * An ordinary road's flow speed lifts more gently than a motorway's legal cap
+ * when you push: +20 km/h on the autobahn is not +20 through a village. Mirrors
+ * the old Legal/Brisk/Assertive presets (0 -> 1.00, 10 -> 1.08, 20 -> 1.15).
+ */
+function freeflowFactorFor(overCapKph: number): number {
+  return Math.min(1.15, 1 + overCapKph * 0.0075)
+}
 
 /** The planner form. On submit: POST /api/trips → navigate to the permalink. */
 export default function TripForm() {
@@ -34,12 +29,13 @@ export default function TripForm() {
   const [departure, setDeparture] = useState(defaultDepartureIso())
   const [departSoc, setDepartSoc] = useState(100)
   const [targetSoc, setTargetSoc] = useState(10)
-  const [conditions, setConditions] = useState(CONDITIONS[0])
-  const [style, setStyle] = useState(STYLES[0])
+  const [tempC, setTempC] = useState(12)
+  const [overCap, setOverCap] = useState(0)
   const [autobahnShare, setAutobahnShare] = useState(30)
-  const [stopOverhead, setStopOverhead] = useState(5)
+  const [stopOverhead, setStopOverhead] = useState(8)
   const [queue, setQueue] = useState(0)
-  const [restBreaks, setRestBreaks] = useState(false)
+  const [restEveryH, setRestEveryH] = useState(0)
+  const [restMin, setRestMin] = useState(20)
   const [price, setPrice] = useState(0.59)
   const [submitting, setSubmitting] = useState(false)
 
@@ -66,15 +62,14 @@ export default function TripForm() {
         departure_iso: departure,
         depart_soc: departSoc,
         target_soc: targetSoc,
-        conditions_factor: conditions.factor,
-        charge_power_factor: conditions.charge,
+        temperature_c: tempC,
         autobahn_open_share: autobahnShare / 100,
-        over_cap_kph: style.cap,
-        over_freeflow_factor: style.flow,
+        over_cap_kph: overCap,
+        over_freeflow_factor: freeflowFactorFor(overCap),
         stop_overhead_min: stopOverhead,
         queue_min: queue,
-        rest_interval_min: restBreaks ? 180 : 0,
-        rest_min: restBreaks ? 20 : 0,
+        rest_interval_min: restEveryH > 0 ? restEveryH * 60 : 0,
+        rest_min: restEveryH > 0 ? restMin : 0,
         price_per_kwh: price,
       })
       router.push(`/trip/${trip.id}`)
@@ -114,35 +109,18 @@ export default function TripForm() {
             className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
           />
         </div>
-        <div>
-          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
-            Conditions
-            <InfoTip>
-              Cold hits twice: the car uses more energy <em>and</em> the battery accepts charge
-              more slowly. The second effect is the bigger one on a long winter drive — it can
-              move the best cruise speed down by 30&nbsp;km/h.
-            </InfoTip>
-          </span>
-          <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Conditions">
-            {CONDITIONS.map((c) => (
-              <button
-                key={c.label}
-                type="button"
-                role="radio"
-                aria-checked={conditions.label === c.label}
-                onClick={() => setConditions(c)}
-                title={c.hint}
-                className={`rounded-xl border px-2 py-2.5 text-sm font-medium transition-colors ${
-                  conditions.label === c.label
-                    ? "border-brand-400 bg-brand-50 text-ink-900 ring-2 ring-brand-200"
-                    : "border-ink-200 bg-white text-ink-500 hover:border-ink-300"
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <NumberField
+          id="temp"
+          label="Temperature"
+          unit="°C"
+          value={tempC}
+          min={-30}
+          max={45}
+          step={1}
+          onChange={setTempC}
+          explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one — it can move the best cruise speed down by 30 km/h."
+          readout={describeTemp(tempC)}
+        />
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -205,85 +183,82 @@ export default function TripForm() {
             />
           </div>
 
-          <Choice
-            label="Driving style"
-            explain="How far above the posted limit you actually sit — on the autobahn and on ordinary roads alike. Pushing harder saves driving time but burns more energy, so it can buy you an extra charging stop."
-            options={STYLES.map((x) => ({ label: x.label, hint: x.hint }))}
-            selected={style.label}
-            onSelect={(l) => setStyle(STYLES.find((x) => x.label === l)!)}
+          <NumberField
+            id="over-cap"
+            label="Over the limit"
+            unit="km/h"
+            value={overCap}
+            min={0}
+            max={30}
+            step={1}
+            onChange={setOverCap}
+            explain="How far above the posted limit you actually sit. Saves driving time but burns more energy, so past a point it simply buys you another charging stop. Ordinary roads lift more gently than the autobahn does."
+            readout={
+              overCap === 0
+                ? "sitting on the limit"
+                : `+${overCap} on limited roads, about +${Math.round((freeflowFactorFor(overCap) - 1) * 100)}% elsewhere`
+            }
           />
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Choice
+            <NumberField
+              id="stop-overhead"
               label="Time per stop"
-              explain="Everything around the charging itself: leaving the motorway, parking, plugging in, paying, getting back on. Higher values punish plans with many short stops."
-              options={[
-                { label: "5 min", hint: "plug and go — optimistic" },
-                { label: "8 min", hint: "typical for a motorway services" },
-                { label: "12 min", hint: "realistic with a detour and payment faff" },
-              ]}
-              selected={`${stopOverhead} min`}
-              onSelect={(l) => setStopOverhead(parseInt(l))}
+              unit="min"
+              value={stopOverhead}
+              min={0}
+              max={30}
+              onChange={setStopOverhead}
+              explain="Everything around the charging itself: leaving the motorway, parking, plugging in, paying, getting back on. Count about 5 minutes if you plug and go, 12 if there's a detour and payment faff. Higher values punish plans with many short stops."
             />
-            <Choice
+            <NumberField
+              id="queue"
               label="Queue for a charger"
-              explain="Waiting for a free stall. The more stops a plan makes, the more times you risk it — which is the honest cost of driving fast."
-              options={[
-                { label: "0 min", hint: "middle of the night, nobody about" },
-                { label: "5 min", hint: "a normal evening" },
-                { label: "10 min", hint: "holiday getaway weekend" },
-              ]}
-              selected={`${queue} min`}
-              onSelect={(l) => setQueue(parseInt(l))}
+              unit="min"
+              value={queue}
+              min={0}
+              max={30}
+              onChange={setQueue}
+              explain="Waiting for a free stall. Nil in the middle of the night; 10 or more on a holiday getaway weekend. The more stops a plan makes, the more times you risk it — which is the honest cost of driving fast."
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 px-3 py-2.5">
-              <input
-                type="checkbox"
-                checked={restBreaks}
-                onChange={(e) => setRestBreaks(e.target.checked)}
-                className="mt-0.5 accent-brand-500"
-              />
-              <span className="text-xs leading-relaxed text-ink-600">
-                <span className="inline-flex items-center gap-1.5 font-semibold text-ink-900">
-                  Rest breaks
-                  <InfoTip>
-                    20 minutes off every 3 hours of driving. Time already spent standing at a
-                    charger counts towards it, so a fast plan with many stops usually gets its
-                    breaks for free — a slow plan with few stops has to add them.
-                  </InfoTip>
-                </span>
-                <br />
-                20 min every 3 h of driving
-              </span>
-            </label>
-            <div>
-              <label
-                htmlFor="price"
-                className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500"
-              >
-                <span className="flex items-center gap-1.5">
-                  Charging price (€/kWh)
-                  <InfoTip>
-                    What you pay at a public fast charger — about €0.59 on most European
-                    networks without a subscription. Priced at the plug, so it includes
-                    charging losses.
-                  </InfoTip>
-                </span>
-              </label>
-              <input
-                id="price"
-                type="number"
+            <div className="grid grid-cols-2 gap-3">
+              <NumberField
+                id="rest-every"
+                label="Break every"
+                unit="h"
+                value={restEveryH}
                 min={0}
-                max={3}
-                step={0.01}
-                value={price}
-                onChange={(e) => setPrice(Number(e.target.value))}
-                className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+                max={8}
+                onChange={setRestEveryH}
+                explain="How long you'll drive before stopping to rest. Time already spent standing at a charger counts towards it, so a fast plan with many stops usually gets its breaks for free — a slow plan has to add them. Set 0 if you'd rather not model breaks."
+                readout={restEveryH === 0 ? "no breaks modelled" : undefined}
+              />
+              <NumberField
+                id="rest-min"
+                label="Break length"
+                unit="min"
+                value={restMin}
+                min={0}
+                max={120}
+                step={5}
+                onChange={setRestMin}
+                explain="How long each of those breaks lasts."
               />
             </div>
+            <NumberField
+              id="price"
+              label="Charging price"
+              unit="€/kWh"
+              value={price}
+              min={0}
+              max={3}
+              step={0.01}
+              onChange={setPrice}
+              explain="What you pay at a public fast charger — about €0.59 on most European networks without a subscription. Priced at the plug, so it already includes charging losses."
+            />
           </div>
         </div>
       </details>
@@ -378,58 +353,78 @@ function InfoTip({ children }: { children: React.ReactNode }) {
 }
 
 /** Small segmented control used by the fine-tuning panel. */
-function Choice({
-  label,
-  explain,
-  options,
-  selected,
-  onSelect,
-}: {
+
+
+interface NumberFieldProps {
+  id: string
   label: string
-  /** One line saying what the setting actually does. Always visible — a
-   * tooltip is invisible on touch and easy to miss. */
+  unit: string
+  value: number
+  min: number
+  max: number
+  step?: number
+  onChange: (v: number) => void
   explain?: string
-  options: { label: string; hint?: string }[]
-  selected: string
-  onSelect: (label: string) => void
-}) {
+  /** Optional line showing what the entered number actually does. */
+  readout?: string
+}
+
+/**
+ * A plain number with its unit. Preferred over preset chips wherever the reader
+ * plausibly knows the real figure — "12 °C" or "10 min" says what it means,
+ * where "Cold" or "typical" hides a multiplier they can't see or argue with.
+ */
+function NumberField({
+  id,
+  label,
+  unit,
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  explain,
+  readout,
+}: NumberFieldProps) {
   return (
     <div>
-      <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
+      <label
+        htmlFor={id}
+        className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500"
+      >
         {label}
-        {explain && (
-          <InfoTip>
-            {explain}
-            <span className="mt-1.5 block space-y-0.5">
-              {options.map((o) => (
-                <span key={o.label} className="block">
-                  <span className="font-semibold text-ink-900">{o.label}</span>
-                  {o.hint ? ` — ${o.hint}` : ""}
-                </span>
-              ))}
-            </span>
-          </InfoTip>
-        )}
-      </span>
-      <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={label}>
-        {options.map((o) => (
-          <button
-            key={o.label}
-            type="button"
-            role="radio"
-            aria-checked={selected === o.label}
-            onClick={() => onSelect(o.label)}
-            title={o.hint}
-            className={`rounded-xl border px-2 py-2 text-xs font-medium transition-colors ${
-              selected === o.label
-                ? "border-brand-400 bg-brand-50 text-ink-900 ring-2 ring-brand-200"
-                : "border-ink-200 bg-white text-ink-500 hover:border-ink-300"
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
+        {explain && <InfoTip>{explain}</InfoTip>}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => {
+            const n = Number(e.target.value)
+            if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
+          }}
+          className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-3 pr-12 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+        />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-ink-400">
+          {unit}
+        </span>
       </div>
+      {readout && <p className="mt-1 text-xs leading-relaxed text-ink-500">{readout}</p>}
     </div>
   )
+}
+
+
+/** Puts the temperature multipliers into words, including "no penalty". */
+function describeTemp(tempC: number): string {
+  const extra = Math.round((consumptionFactorForTemp(tempC) - 1) * 100)
+  const charge = Math.round(chargePowerFactorForTemp(tempC) * 100)
+  if (extra === 0 && charge === 100) return "no weather penalty — full range and full charging speed"
+  if (extra === 0) return `normal consumption · charging at ${charge}% of full speed`
+  return `${extra}% more energy · charging at ${charge}% of full speed`
 }

@@ -48,6 +48,8 @@ export interface PlanRequest {
   speed_max?: number
   speed_step?: number
   /** Consumption multiplier: 1.0 mild / 1.15 cold / 1.3 freezing. */
+  /** Ambient temperature; when set the server derives the two factors below. */
+  temperature_c?: number
   conditions_factor?: number
   /** Cold packs charge slower too: 1.0 / 0.8 / 0.55. */
   charge_power_factor?: number

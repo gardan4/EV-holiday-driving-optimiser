@@ -237,3 +237,38 @@ class TestCost:
         slow = simulate(segs, chargers, BORN_58, 100.0, p)
         fast = simulate(segs, chargers, BORN_58, 160.0, p)
         assert fast.cost_eur > slow.cost_eur
+
+
+# --- Temperature -> factors -------------------------------------------------
+
+
+def test_temperature_reproduces_the_presets_it_replaced() -> None:
+    """The old Mild/Cold/Freezing chips are still the anchors of the curve."""
+    from app.services.simulator import (
+        charge_power_factor_for_temp,
+        consumption_factor_for_temp,
+    )
+
+    assert consumption_factor_for_temp(15.0) == pytest.approx(1.0)
+    assert consumption_factor_for_temp(0.0) == pytest.approx(1.15, abs=0.01)
+    assert consumption_factor_for_temp(-10.0) == pytest.approx(1.30, abs=0.01)
+
+    assert charge_power_factor_for_temp(20.0) == pytest.approx(1.0)
+    assert charge_power_factor_for_temp(0.0) == pytest.approx(0.80, abs=0.01)
+    assert charge_power_factor_for_temp(-10.0) == pytest.approx(0.55, abs=0.01)
+
+
+def test_temperature_factors_are_monotonic_and_bounded() -> None:
+    from app.services.simulator import (
+        charge_power_factor_for_temp,
+        consumption_factor_for_temp,
+    )
+
+    temps = [t / 2 for t in range(-60, 90)]
+    charge = [charge_power_factor_for_temp(t) for t in temps]
+    assert charge == sorted(charge), "colder must never charge faster"
+    assert all(0.4 <= c <= 1.0 for c in charge)
+
+    cold = [consumption_factor_for_temp(t) for t in temps if t <= 10]
+    assert cold == sorted(cold, reverse=True), "colder must never use less energy"
+    assert all(1.0 <= consumption_factor_for_temp(t) <= 1.6 for t in temps)

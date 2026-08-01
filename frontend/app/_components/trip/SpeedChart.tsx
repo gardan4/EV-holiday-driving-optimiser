@@ -62,6 +62,11 @@ export default function SpeedChart({
     [speeds]
   )
 
+  // Every hook must run before any early return — React matches hooks by call
+  // order, so a conditional one breaks the component in ways that only surface
+  // in a production build.
+  const plotWidth = useChartWidth(wrapRef)
+
   const feasible = speeds.filter((s) => s.feasible)
   if (feasible.length === 0) return null
   const anyRest = feasible.some((s) => (s.rest_min ?? 0) > 0)
@@ -72,7 +77,6 @@ export default function SpeedChart({
   // A "€108" label needs ~30px; on a phone each bar only gets ~21px, so every
   // label after the first few collides into an unreadable smear. Thin them to
   // whatever actually fits and always keep the ones carrying the argument.
-  const plotWidth = useChartWidth(wrapRef)
   const slotPx = plotWidth > 0 ? plotWidth / Math.max(1, data.length) : 999
   const labelStride = Math.max(1, Math.ceil(30 / slotPx))
 

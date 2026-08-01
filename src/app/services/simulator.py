@@ -657,3 +657,40 @@ def optimum(results: list[SpeedResult]) -> SpeedResult | None:
     if not feasible:
         return None
     return min(feasible, key=lambda r: r.total_min)
+
+
+# --- Weather ---------------------------------------------------------------
+# Cold hits an EV twice, and the second effect is the one people forget: the
+# pack also ACCEPTS charge more slowly, which on a long winter trip costs far
+# more time than the extra kWh does. Both curves are anchored to the presets
+# this replaced (mild 1.00/1.00, ~0 °C 1.15/0.80, ~-10 °C 1.30/0.55) and
+# interpolated between, so a real temperature can be entered instead.
+
+def consumption_factor_for_temp(temp_c: float) -> float:
+    """Multiplier on Wh/km for ambient temperature.
+
+    Flat in the mild band; rises ~1.5%/°C once it drops below 10 °C (cabin
+    heating plus a stiffer drivetrain), and creeps up again in real heat as
+    air-conditioning starts to draw.
+    """
+    if temp_c < 10.0:
+        return min(1.55, 1.0 + (10.0 - temp_c) * 0.015)
+    if temp_c > 28.0:
+        return min(1.15, 1.0 + (temp_c - 28.0) * 0.005)
+    return 1.0
+
+
+def charge_power_factor_for_temp(temp_c: float) -> float:
+    """Multiplier on DC charging power for ambient temperature.
+
+    A cold pack limits how much current it will accept. Falls away below
+    15 °C and steepens below freezing, with a floor rather than zero — cars
+    warm the pack as they drive, and many precondition before a stop.
+    """
+    if temp_c >= 15.0:
+        return 1.0
+    if temp_c >= 0.0:
+        return 1.0 - (15.0 - temp_c) * (0.20 / 15.0)
+    if temp_c >= -10.0:
+        return 0.80 - (-temp_c) * (0.25 / 10.0)
+    return 0.45

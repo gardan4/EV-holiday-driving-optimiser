@@ -63,6 +63,9 @@ class PlanRequest(BaseModel):
     speed_max: float = Field(default=170.0, ge=60.0, le=220.0)
     speed_step: float = Field(default=5.0, ge=1.0, le=20.0)
     # Consumption multiplier for conditions: 1.0 mild / 1.15 cold / 1.3 freezing.
+    # Ambient temperature is what people actually know; when given it derives
+    # both factors below, so callers don't have to invent multipliers.
+    temperature_c: Optional[float] = Field(default=None, ge=-30.0, le=45.0)
     conditions_factor: float = Field(default=1.0, ge=0.8, le=1.6)
     # Cold packs also CHARGE slower — the dominant winter effect, and separate
     # from consumption. 1.0 mild / 0.8 cold / 0.55 freezing.

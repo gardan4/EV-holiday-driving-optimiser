@@ -31,6 +31,8 @@ from app.services import chargers as chargers_svc
 from app.services import routing
 from app.services.geo import polyline_encode
 from app.services.simulator import (
+    charge_power_factor_for_temp,
+    consumption_factor_for_temp,
     SimParams,
     SpeedResult,
     VehicleParams,
@@ -133,8 +135,16 @@ async def plan_trip(
     params = SimParams(
         depart_soc=plan.depart_soc,
         target_soc=plan.target_soc,
-        consumption_factor=plan.conditions_factor,
-        charge_power_factor=plan.charge_power_factor,
+        consumption_factor=(
+            consumption_factor_for_temp(plan.temperature_c)
+            if plan.temperature_c is not None
+            else plan.conditions_factor
+        ),
+        charge_power_factor=(
+            charge_power_factor_for_temp(plan.temperature_c)
+            if plan.temperature_c is not None
+            else plan.charge_power_factor
+        ),
         autobahn_open_share=plan.autobahn_open_share,
         over_cap_kph=plan.over_cap_kph,
         over_freeflow_factor=plan.over_freeflow_factor,
