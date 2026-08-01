@@ -6,6 +6,7 @@ import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { SpeedResult, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
+import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import BatteryChart from "./BatteryChart"
 import CostChart from "./CostChart"
@@ -31,6 +32,12 @@ export default function ResultsView({ trip }: { trip: Trip }) {
     [result.speeds, selectedSpeed]
   )
   const band = useMemo(() => nearOptimalBand(result.speeds), [result.speeds])
+
+  // Picking a different speed can change the itinerary from 4 stops to 9,
+  // which changes the page height by ~440px. If the reader is scrolled down,
+  // the browser clamps their scroll position and the page appears to jump.
+  // Keep whatever they clicked visually still instead.
+  const { anchorRef, select } = useAnchoredSelection(setSelectedSpeed)
 
   const best = useMemo(
     () => result.speeds.find((s) => s.speed_kph === result.optimum_speed) ?? null,
@@ -189,25 +196,28 @@ export default function ResultsView({ trip }: { trip: Trip }) {
         )}
 
         {/* Charts + itinerary */}
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]">
+        <div
+          ref={anchorRef as React.RefObject<HTMLDivElement>}
+          className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]"
+        >
           <div className="space-y-4">
             <SpeedChart
               speeds={result.speeds}
               optimumSpeed={result.optimum_speed}
               selectedSpeed={selectedSpeed}
-              onSelect={setSelectedSpeed}
+              onSelect={select}
             />
             <SpeedPills
               speeds={result.speeds}
               optimumSpeed={result.optimum_speed}
               selectedSpeed={selectedSpeed}
-              onSelect={setSelectedSpeed}
+              onSelect={select}
             />
             <CostChart
               speeds={result.speeds}
               optimumSpeed={result.optimum_speed}
               selectedSpeed={selectedSpeed}
-              onSelect={setSelectedSpeed}
+              onSelect={select}
             />
             <BatteryChart
               result={selected}

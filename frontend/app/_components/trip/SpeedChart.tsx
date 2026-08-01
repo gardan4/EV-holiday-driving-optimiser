@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -46,6 +46,7 @@ export default function SpeedChart({
   selectedSpeed,
   onSelect,
 }: SpeedChartProps) {
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const data = useMemo(
     () =>
       speeds.map((s) => ({
@@ -67,6 +68,13 @@ export default function SpeedChart({
   const anyCost = feasible.some((s) => s.cost_eur > 0)
   const maxTotal = Math.max(...feasible.map((s) => s.total_min ?? 0))
   const band = nearOptimalBand(speeds)
+
+  // A "€108" label needs ~30px; on a phone each bar only gets ~21px, so every
+  // label after the first few collides into an unreadable smear. Thin them to
+  // whatever actually fits and always keep the ones carrying the argument.
+  const plotWidth = useChartWidth(wrapRef)
+  const slotPx = plotWidth > 0 ? plotWidth / Math.max(1, data.length) : 999
+  const labelStride = Math.max(1, Math.ceil(30 / slotPx))
 
   return (
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
@@ -96,6 +104,7 @@ export default function SpeedChart({
       </div>
 
       <div
+        ref={wrapRef}
         className="h-72 sm:h-80"
         role="img"
         aria-label="Stacked bar chart of driving and charging time by cruise speed, with charging cost labelled above each bar"
@@ -215,6 +224,8 @@ export default function SpeedChart({
                     data={data}
                     optimumSpeed={optimumSpeed}
                     selectedSpeed={selectedSpeed}
+                    stride={labelStride}
+                    compact={slotPx < 34}
                   />
                 )}
               />
@@ -239,20 +250,34 @@ interface CostLabelProps {
   data: { speed: number; cost: number; feasible: boolean }[]
   optimumSpeed: number | null
   selectedSpeed: number
+  stride: number
+  compact: boolean
 }
 
 /** Cost above the bar, with the fastest plan called out by name. */
-function CostLabel({ x, y, width, index, data, optimumSpeed, selectedSpeed }: CostLabelProps) {
+function CostLabel({
+  x,
+  y,
+  width,
+  index,
+  data,
+  optimumSpeed,
+  selectedSpeed,
+  stride,
+  compact,
+}: CostLabelProps) {
   if (index == null) return null
   const d = data[index]
   if (!d || !d.feasible || d.cost <= 0) return null
-  const cx = Number(x) + Number(width) / 2
   const isBest = d.speed === optimumSpeed
   const isSel = d.speed === selectedSpeed
+  // Keep the two bars the reader is reasoning about, then thin the rest.
+  if (!isBest && !isSel && index % stride !== 0) return null
+  const cx = Number(x) + Number(width) / 2
   const top = Number(y)
   return (
     <g>
-      {isBest && (
+      {isBest && !compact && (
         <text
           x={cx}
           y={top - 18}
@@ -303,4 +328,18 @@ function Key({ color, label }: { color: string; label?: string }) {
       {label}
     </span>
   )
+}
+
+/** Tracks the rendered chart width so label density can respond to it. */
+function useChartWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [width, setWidth] = useState(0)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    ro.observe(el)
+    setWidth(el.getBoundingClientRect().width)
+    return () => ro.disconnect()
+  }, [ref])
+  return width
 }
