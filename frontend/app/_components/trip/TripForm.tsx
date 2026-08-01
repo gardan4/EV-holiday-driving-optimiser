@@ -33,6 +33,7 @@ export default function TripForm() {
   const [overCap, setOverCap] = useState(0)
   const [autobahnShare, setAutobahnShare] = useState(30)
   const [stopOverhead, setStopOverhead] = useState(8)
+  const [sitePower, setSitePower] = useState(100)
   const [queue, setQueue] = useState(0)
   const [restEveryH, setRestEveryH] = useState(0)
   const [restMin, setRestMin] = useState(20)
@@ -67,6 +68,7 @@ export default function TripForm() {
         over_cap_kph: overCap,
         over_freeflow_factor: freeflowFactorFor(overCap),
         stop_overhead_min: stopOverhead,
+        site_power_factor: sitePower / 100,
         queue_min: queue,
         rest_interval_min: restEveryH > 0 ? restEveryH * 60 : 0,
         rest_min: restEveryH > 0 ? restMin : 0,
@@ -210,6 +212,22 @@ export default function TripForm() {
               max={30}
               onChange={setStopOverhead}
               explain="Everything around the charging itself: leaving the motorway, parking, plugging in, paying, getting back on. Count about 5 minutes if you plug and go, 12 if there's a detour and payment faff. Higher values punish plans with many short stops."
+            />
+            <NumberField
+              id="site-power"
+              label="Charger power you get"
+              unit="%"
+              value={sitePower}
+              min={30}
+              max={100}
+              step={5}
+              onChange={setSitePower}
+              explain="A charger's rating is the headline figure, not what reaches your car. A 350 kW cabinet shared with the car beside you, or a busy Supercharger splitting a stall pair, delivers roughly half. This is throughput while you're plugged in — the queue field below covers waiting for a plug."
+              readout={
+                sitePower >= 100
+                  ? "every charger delivers its full rating"
+                  : `a 350 kW site behaves like ${Math.round(350 * (sitePower / 100))} kW`
+              }
             />
             <NumberField
               id="queue"
@@ -395,7 +413,10 @@ function NumberField({
         {label}
         {explain && <InfoTip>{explain}</InfoTip>}
       </label>
-      <div className="relative">
+      {/* The unit sits beside the input, not over it: absolutely positioning it
+          put it on top of the native spinner arrows, which clipped "min" and
+          wrapped "€/kWh" out of the box. */}
+      <div className="flex items-center rounded-xl border border-ink-200 bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200">
         <input
           id={id}
           type="number"
@@ -408,9 +429,9 @@ function NumberField({
             const n = Number(e.target.value)
             if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
           }}
-          className="w-full rounded-xl border border-ink-200 bg-white py-2.5 pl-3 pr-12 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+          className="min-w-0 flex-1 rounded-xl bg-transparent py-2.5 pl-3 pr-1 text-sm text-ink-900 outline-none"
         />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 font-mono text-xs text-ink-400">
+        <span className="shrink-0 whitespace-nowrap pl-1 pr-3 font-mono text-xs text-ink-400">
           {unit}
         </span>
       </div>

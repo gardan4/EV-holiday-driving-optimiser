@@ -77,6 +77,9 @@ class PlanRequest(BaseModel):
     over_cap_kph: float = Field(default=0.0, ge=0.0, le=30.0)
     over_freeflow_factor: float = Field(default=1.0, ge=1.0, le=1.3)
     # Minutes queuing per stop, and the plug-in overhead.
+    # Fraction of a charger's rated power you actually receive (shared cabinet,
+    # busy site). Separate from queue_min, which is time before you plug in.
+    site_power_factor: float = Field(default=1.0, ge=0.3, le=1.0)
     queue_min: float = Field(default=0.0, ge=0.0, le=30.0)
     stop_overhead_min: float = Field(default=5.0, ge=0.0, le=30.0)
     # Rest rule: a break of `rest_min` after every `rest_interval_min` driving.

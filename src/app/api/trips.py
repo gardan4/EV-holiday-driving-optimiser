@@ -148,6 +148,7 @@ async def plan_trip(
         autobahn_open_share=plan.autobahn_open_share,
         over_cap_kph=plan.over_cap_kph,
         over_freeflow_factor=plan.over_freeflow_factor,
+        site_power_factor=plan.site_power_factor,
         queue_min=plan.queue_min,
         stop_overhead_min=plan.stop_overhead_min,
         rest_interval_min=plan.rest_interval_min,

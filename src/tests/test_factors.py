@@ -272,3 +272,23 @@ def test_temperature_factors_are_monotonic_and_bounded() -> None:
     cold = [consumption_factor_for_temp(t) for t in temps if t <= 10]
     assert cold == sorted(cold, reverse=True), "colder must never use less energy"
     assert all(1.0 <= consumption_factor_for_temp(t) <= 1.6 for t in temps)
+
+
+def test_site_power_factor_slows_charging_and_calms_the_optimum() -> None:
+    """A shared 350 kW cabinet is not a 350 kW cabinet."""
+    from app.services.simulator import optimum, sweep
+
+    segs = flat_motorway(900, freeflow=125, country="DE")
+    chargers = chargers_every(900, 60.0, power_kw=150.0)
+    speeds = [float(v) for v in range(90, 181, 5)]
+
+    full = optimum(sweep(segs, chargers, BORN_58, speeds, SimParams()))
+    shared = optimum(sweep(segs, chargers, BORN_58, speeds, SimParams(site_power_factor=0.5)))
+
+    assert shared.charge_min > full.charge_min, "half the power must take longer"
+    assert shared.total_min > full.total_min
+    # Slower charging makes speed more expensive, so the best cruise can only
+    # come down (or hold), never rise.
+    assert shared.speed_kph <= full.speed_kph
+    # The reported per-stop power reflects what was assumed, not the rating.
+    assert all(s.power_kw == pytest.approx(0.5 * 150.0) for s in shared.stops)

@@ -57,6 +57,8 @@ export interface PlanRequest {
   autobahn_open_share?: number
   over_cap_kph?: number
   over_freeflow_factor?: number
+  /** Fraction of a charger's rated power you actually get (0.3–1). */
+  site_power_factor?: number
   queue_min?: number
   stop_overhead_min?: number
   rest_interval_min?: number

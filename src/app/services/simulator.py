@@ -135,6 +135,11 @@ class SimParams:
     # Cold packs charge far slower than the datasheet curve. This scales the
     # whole curve; it is the single biggest lever on the winter answer.
     charge_power_factor: float = 1.0
+    # What fraction of a charger's RATED power you actually receive. A 350 kW
+    # cabinet shared with the car next to you delivers nowhere near 350, and a
+    # busy Supercharger splits a stall pair. Distinct from queue_min: this is
+    # degraded throughput while plugged in, not time spent waiting for a plug.
+    site_power_factor: float = 1.0
     # Minutes queuing for a free stall, added per stop. More stops = more
     # exposure, which is the honest cost of the many-short-stops strategy.
     queue_min: float = 0.0
@@ -413,7 +418,9 @@ def simulate(
     for i, c in enumerate(nodes, start=1):
         f = _site_f_cache.get(c.power_kw)
         if f is None:
-            f = _site_cumulative_minutes(veh, c.power_kw, p.charge_power_factor)
+            f = _site_cumulative_minutes(
+                veh, c.power_kw * p.site_power_factor, p.charge_power_factor
+            )
             _site_f_cache[c.power_kw] = f
         site_f[i] = f
 
@@ -550,7 +557,10 @@ def _exact_forward_pass(
                 + p.stop_overhead_min
                 + p.queue_min
                 + charge_minutes(
-                    veh, probe_soc, t_bucket * SOC_BUCKET, node.power_kw,
+                    veh,
+                    probe_soc,
+                    t_bucket * SOC_BUCKET,
+                    node.power_kw * p.site_power_factor,
                     p.charge_power_factor,
                 )
             )
@@ -570,7 +580,9 @@ def _exact_forward_pass(
         arrive_soc = soc
         arrive_clock = clock
         target = t_bucket * SOC_BUCKET
-        c_min = charge_minutes(veh, soc, target, node.power_kw, p.charge_power_factor)
+        c_min = charge_minutes(
+            veh, soc, target, node.power_kw * p.site_power_factor, p.charge_power_factor
+        )
         pause = (
             node.detour_min + p.stop_overhead_min + p.queue_min + c_min + extra_rest_each
         )
@@ -584,7 +596,9 @@ def _exact_forward_pass(
                 operator=node.operator,
                 lat=node.lat,
                 lon=node.lon,
-                power_kw=node.power_kw,
+                # The power this plan actually assumed, so the reported kW and
+                # the charge time next to it always explain each other.
+                power_kw=node.power_kw * p.site_power_factor,
                 offset_m=node.offset_m,
                 arrive_min=arrive_clock,
                 arrive_soc=arrive_soc,
