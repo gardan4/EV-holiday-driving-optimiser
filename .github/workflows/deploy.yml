@@ -138,9 +138,14 @@ jobs:
             --container-registry-url https://${{ env.REGISTRY }} \
             --container-registry-user ${{ github.repository_owner }} \
             --container-registry-password ${{ secrets.GHCR_TOKEN }}
+          # `container set` above already rolls the container, so this restart is
+          # belt-and-braces. ARM has been observed returning a spurious
+          # ResourceNotFound here for a resource the same credential can read and
+          # update moments earlier, so a failure must not fail the deploy.
           az webapp restart \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --name ${{ env.API_APP_NAME }}
+            --name ${{ env.API_APP_NAME }} \
+            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container." 
 
   # --- Frontend: test + build (+ deploy when Azure is configured) ------------
   frontend:
@@ -224,6 +229,11 @@ jobs:
             --container-registry-url https://${{ env.REGISTRY }} \
             --container-registry-user ${{ github.repository_owner }} \
             --container-registry-password ${{ secrets.GHCR_TOKEN }}
+          # `container set` above already rolls the container, so this restart is
+          # belt-and-braces. ARM has been observed returning a spurious
+          # ResourceNotFound here for a resource the same credential can read and
+          # update moments earlier, so a failure must not fail the deploy.
           az webapp restart \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
-            --name ${{ env.WEB_APP_NAME }}
+            --name ${{ env.WEB_APP_NAME }} \
+            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container." 
