@@ -5,6 +5,7 @@ import Link from "next/link"
 import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { SpeedResult, Trip } from "@/lib/client"
+import { nearOptimalBand } from "@/lib/verdict"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import BatteryChart from "./BatteryChart"
 import CostChart from "./CostChart"
@@ -29,6 +30,8 @@ export default function ResultsView({ trip }: { trip: Trip }) {
     () => result.speeds.find((s) => s.speed_kph === selectedSpeed) ?? null,
     [result.speeds, selectedSpeed]
   )
+  const band = useMemo(() => nearOptimalBand(result.speeds), [result.speeds])
+
   const best = useMemo(
     () => result.speeds.find((s) => s.speed_kph === result.optimum_speed) ?? null,
     [result.speeds, result.optimum_speed]
@@ -149,6 +152,30 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             sub={vsBaseline != null && vsBaseline > 0 ? "earlier at the chalet" : "slower overall"}
           />
         </div>
+
+        {band && !band.sharp && (
+          <p className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm leading-relaxed text-ink-800">
+            <span className="font-semibold">
+              Anything from {band.lo} to {band.hi} km/h arrives within{" "}
+              {band.toleranceMin} minutes of the best.
+            </span>{" "}
+            The curve is flat across that range, so hold whatever is comfortable —
+            sitting at {band.lo} instead of {band.best} costs you{" "}
+            {band.loCostMin <= 0 ? "nothing" : `${band.loCostMin} min`}
+            {band.loSavesEur > 0.5 && (
+              <> and saves €{band.loSavesEur.toFixed(0)} in charging</>
+            )}
+            .
+          </p>
+        )}
+
+        {band?.sharp && (
+          <p className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm leading-relaxed text-ink-800">
+            <span className="font-semibold">Speed genuinely matters here.</span> No
+            other cruise speed comes within {band.toleranceMin} minutes of{" "}
+            {band.best} km/h.
+          </p>
+        )}
 
         {result.optimum_at_top_speed && (
           <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">

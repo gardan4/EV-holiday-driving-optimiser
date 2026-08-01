@@ -8,12 +8,14 @@ import {
   Cell,
   LabelList,
   ResponsiveContainer,
+  ReferenceArea,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
 import { fmtDuration, fmtHm } from "@/lib/format"
+import { nearOptimalBand } from "@/lib/verdict"
 
 const DRIVE = "#3f6dbf" // --color-chart-drive (validated)
 const CHARGE = "#d98e1f" // --color-chart-charge
@@ -64,6 +66,7 @@ export default function SpeedChart({
   const anyRest = feasible.some((s) => (s.rest_min ?? 0) > 0)
   const anyCost = feasible.some((s) => s.cost_eur > 0)
   const maxTotal = Math.max(...feasible.map((s) => s.total_min ?? 0))
+  const band = nearOptimalBand(speeds)
 
   return (
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
@@ -79,6 +82,12 @@ export default function SpeedChart({
         <Key color={CHARGE} label="charging" />
         {anyRest && <Key color={REST} label="breaks" />}
         <Key color={DRIVE} label="driving" />
+        {band && !band.sharp && (
+          <span className="inline-flex items-center gap-1.5 text-ink-400">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm bg-brand-100 ring-1 ring-brand-300" />
+            all within {band.toleranceMin} min of the best
+          </span>
+        )}
         {anyCost && (
           <span className="text-ink-400">
             € above each bar = what that plan costs to charge
@@ -106,6 +115,20 @@ export default function SpeedChart({
             style={{ cursor: "pointer" }}
           >
             <CartesianGrid stroke={GRID} vertical={false} />
+            {/* The plateau: every speed in here ties within a few minutes, which
+                matters more than the single winning bar. */}
+            {band && !band.sharp && (
+              <ReferenceArea
+                x1={band.lo}
+                x2={band.hi}
+                fill={OPTIMUM}
+                fillOpacity={0.07}
+                stroke={OPTIMUM}
+                strokeOpacity={0.25}
+                strokeDasharray="4 4"
+                ifOverflow="extendDomain"
+              />
+            )}
             <XAxis
               dataKey="speed"
               tick={{ fill: INK, fontSize: 12 }}
