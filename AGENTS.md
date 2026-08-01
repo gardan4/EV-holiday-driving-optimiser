@@ -138,6 +138,10 @@ docker compose -f docker-compose.local-db.yml up -d
   file only starts the server, so a fresh volume has no `evtripdb-dev`.
 - **`npx tsc` only works from `frontend/`.** `npm run dev` is long-running — use
   `npx next build` for a one-shot compile check.
+- **Never `source .env`** — `DATABASE_URL` contains an unquoted `&`, so the
+  shell aborts parsing at that line and every variable after it is silently
+  empty. This deployed empty ORS/OCM keys to Azure once. Read values with
+  `grep -E '^KEY=' .env | cut -d= -f2-` instead.
 - **Before `git add`-ing a file, `git diff` it** — stage only what you touched.
 - **Commits**: lowercase `<type>(<scope>): <imperative summary>` — `feat`, `fix`,
   `chore`, `docs`, `style`, `test`. Bodies explain the *why*.
