@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useReducer } from "react"
+import { useMemo } from "react"
 import {
   Area,
   AreaChart,
@@ -13,7 +13,6 @@ import {
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
 import { clockAt, fmtKm } from "@/lib/format"
-import { PlaybackClock } from "@/lib/playback"
 
 const MINT = "#17a56b"
 const AMBER = "#d98e1f"
@@ -24,25 +23,18 @@ interface BatteryChartProps {
   result: SpeedResult
   departureIso: string
   targetSoc: number
-  clock: PlaybackClock
 }
 
 /**
  * Estimated battery % across the trip for the selected speed — the sawtooth
  * of driving drain and charging spikes. A cursor follows 3D playback.
  */
-export default function BatteryChart({ result, departureIso, targetSoc, clock }: BatteryChartProps) {
-  // Follow the playback clock at its ~5 Hz notify rate.
-  const [, force] = useReducer((n: number) => n + 1, 0)
-  useEffect(() => clock.subscribe(force), [clock])
-
+export default function BatteryChart({ result, departureIso, targetSoc }: BatteryChartProps) {
   const data = useMemo(
     () => result.timeline.map((p) => ({ t: p.t_min, soc: p.soc, dist: p.dist_m })),
     [result.timeline]
   )
   const totalMin = result.total_min ?? 0
-  const cursor = clock.simRef.min
-  const showCursor = cursor > 0 && cursor <= totalMin
 
   if (data.length === 0) return null
 
@@ -117,8 +109,6 @@ export default function BatteryChart({ result, departureIso, targetSoc, clock }:
                 fontWeight: 700,
               }}
             />
-            {/* Playback cursor (follows the 3D scene) */}
-            {showCursor && <ReferenceLine x={cursor} stroke={INK} strokeWidth={1.5} />}
             <Area
               type="linear"
               dataKey="soc"

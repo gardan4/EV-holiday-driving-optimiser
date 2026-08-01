@@ -1,86 +1,11 @@
-/** Playback clock + timeline interpolation for the 3D journey animation.
+/** Timeline interpolation for the journey animation.
  *
- * The clock mutates a shared `simRef` every animation frame WITHOUT React
- * re-renders — the 3D cars read it inside useFrame. React UI (HUD, itinerary
- * highlight) subscribes and is notified at ~5 Hz. Time advance uses measured
- * wall-clock dt, so playback speed is correct at any frame rate.
+ * Playback itself lives in JourneyHero: the hero's horizontal scroll position
+ * IS the playback head, so there is no separate clock to keep in sync. These
+ * helpers turn a sim-minute into position/charge state.
  */
 
 import { TimelinePoint } from "./client"
-
-export interface SimRef {
-  min: number
-}
-
-type Listener = () => void
-
-export class PlaybackClock {
-  readonly simRef: SimRef = { min: 0 }
-  playing = false
-  factor = 300 // sim-time multiplier (300× → 1 real second = 5 sim minutes)
-  maxMin = 0
-
-  private listeners = new Set<Listener>()
-  private raf: number | null = null
-  private lastTs: number | null = null
-  private lastNotify = 0
-
-  subscribe = (cb: Listener): (() => void) => {
-    this.listeners.add(cb)
-    return () => this.listeners.delete(cb)
-  }
-
-  private notify() {
-    this.listeners.forEach((cb) => cb())
-  }
-
-  private tick = (ts: number) => {
-    if (this.lastTs != null && this.playing) {
-      const dtRealMin = (ts - this.lastTs) / 1000 / 60
-      this.simRef.min = Math.min(this.simRef.min + dtRealMin * this.factor, this.maxMin)
-      if (this.simRef.min >= this.maxMin) this.playing = false
-    }
-    this.lastTs = ts
-    if (ts - this.lastNotify > 200) {
-      this.lastNotify = ts
-      this.notify()
-    }
-    if (this.playing) this.raf = requestAnimationFrame(this.tick)
-    else {
-      this.raf = null
-      this.lastTs = null
-      this.notify()
-    }
-  }
-
-  play() {
-    if (this.playing) return
-    if (this.simRef.min >= this.maxMin) this.simRef.min = 0 // replay from start
-    this.playing = true
-    if (this.raf == null) this.raf = requestAnimationFrame(this.tick)
-    this.notify()
-  }
-
-  pause() {
-    this.playing = false
-    this.notify()
-  }
-
-  seek(min: number) {
-    this.simRef.min = Math.max(0, Math.min(min, this.maxMin))
-    this.notify()
-  }
-
-  setFactor(factor: number) {
-    this.factor = factor
-    this.notify()
-  }
-
-  dispose() {
-    if (this.raf != null) cancelAnimationFrame(this.raf)
-    this.listeners.clear()
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Timeline interpolation

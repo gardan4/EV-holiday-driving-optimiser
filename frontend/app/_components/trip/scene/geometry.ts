@@ -1,182 +1,32 @@
-/** Pure geometry helpers for the 3D journey scene.
+/** Geometry for the side-on 2.5D journey world.
  *
- * Coordinate story: route lat/lon → equirectangular plane → rotated so the
- * journey flows left (origin) to right (destination) → scaled into a scene
- * box. The road curve is arc-length parameterized, so a real route offset
- * fraction maps straight to `curve.getPointAt(fraction)` — stop positions and
- * playback stay distance-truthful.
+ * The route is straightened into a line along +X: distance along the trip maps
+ * linearly to world X. Depth comes from parallax — layers sit at different Z
+ * and are translated at different rates (an orthographic camera has no
+ * perspective divide, so moving the camera would slide every layer at the same
+ * speed; the layers have to move themselves).
+ *
+ * Terrain morphs along the route: flat and green near the origin, rising into
+ * snow-capped Alps toward the destination.
  */
 
 import * as THREE from "three"
 
-export const SCENE_HALF_WIDTH = 60 // scene units; the route fits in [-60, 60] on X
+/** World units spanned by the full route. */
+export const WORLD_LEN = 460
+/** Half-width of the orthographic frustum (how much road is on screen). */
+export const VIEW_HALF_W = 24
 
-// ---------------------------------------------------------------------------
-// Route → scene curve
-// ---------------------------------------------------------------------------
+/** Parallax rate per depth layer. 1 = moves with the road. */
+export const LAYER_FACTOR = {
+  farRidge: 0.14,
+  midRidge: 0.34,
+  treeline: 0.62,
+  road: 1,
+  foreground: 1.45,
+} as const
 
-/** Douglas-Peucker simplification on projected 2D points. */
-function simplify(points: [number, number][], epsilon: number): [number, number][] {
-  if (points.length < 3) return points
-  const keep = new Array<boolean>(points.length).fill(false)
-  keep[0] = keep[points.length - 1] = true
-  const stack: [number, number][] = [[0, points.length - 1]]
-  while (stack.length) {
-    const [a, b] = stack.pop()!
-    const [ax, ay] = points[a]
-    const [bx, by] = points[b]
-    const dx = bx - ax
-    const dy = by - ay
-    const len2 = dx * dx + dy * dy
-    let maxD = -1
-    let maxI = -1
-    for (let i = a + 1; i < b; i++) {
-      const [px, py] = points[i]
-      let d: number
-      if (len2 === 0) d = Math.hypot(px - ax, py - ay)
-      else {
-        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2))
-        d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-      }
-      if (d > maxD) {
-        maxD = d
-        maxI = i
-      }
-    }
-    if (maxD > epsilon) {
-      keep[maxI] = true
-      stack.push([a, maxI], [maxI, b])
-    }
-  }
-  return points.filter((_, i) => keep[i])
-}
-
-export interface SceneRoute {
-  curve: THREE.CatmullRomCurve3
-  /** Ground footprint of the route in scene units. */
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number }
-  /** Progress (0..1, origin→destination) for an arbitrary scene position. */
-  progressAt: (x: number, z: number) => number
-  /** Distance from (x,z) to the nearest sampled road point. */
-  roadDistance: (x: number, z: number) => number
-}
-
-export function buildSceneRoute(latlon: [number, number][]): SceneRoute {
-  // Equirectangular projection.
-  const midLat = latlon.reduce((s, p) => s + p[0], 0) / latlon.length
-  const cos = Math.cos((midLat * Math.PI) / 180)
-  let pts: [number, number][] = latlon.map(([la, lo]) => [lo * cos, la])
-
-  // Rotate so origin→destination points along +X.
-  const [sx, sy] = pts[0]
-  const [ex, ey] = pts[pts.length - 1]
-  const angle = -Math.atan2(ey - sy, ex - sx)
-  const ca = Math.cos(angle)
-  const sa = Math.sin(angle)
-  pts = pts.map(([x, y]) => [
-    (x - sx) * ca - (y - sy) * sa,
-    (x - sx) * sa + (y - sy) * ca,
-  ])
-
-  // Simplify to ~40-70 control points (epsilon relative to route extent).
-  const xs = pts.map((p) => p[0])
-  const ys = pts.map((p) => p[1])
-  const extent = Math.max(
-    Math.max(...xs) - Math.min(...xs),
-    Math.max(...ys) - Math.min(...ys)
-  )
-  let simplified = simplify(pts, extent / 400)
-  if (simplified.length > 80) simplified = simplify(pts, extent / 150)
-
-  // Scale into the scene box (keep aspect, X spans the full width).
-  const minX = Math.min(...simplified.map((p) => p[0]))
-  const maxX = Math.max(...simplified.map((p) => p[0]))
-  const scale = (2 * SCENE_HALF_WIDTH) / (maxX - minX || 1)
-  const midZ =
-    (Math.min(...simplified.map((p) => p[1])) + Math.max(...simplified.map((p) => p[1]))) / 2
-  const scenePts = simplified.map(
-    ([x, y]) =>
-      new THREE.Vector3(
-        (x - minX) * scale - SCENE_HALF_WIDTH,
-        0,
-        // Negate: projected +y (north) → scene -Z so the map reads naturally.
-        -(y - midZ) * scale
-      )
-  )
-
-  const curve = new THREE.CatmullRomCurve3(scenePts, false, "centripetal", 0.5)
-  curve.arcLengthDivisions = 600
-
-  const samples = curve.getSpacedPoints(240)
-  const bounds = {
-    minX: Math.min(...samples.map((p) => p.x)),
-    maxX: Math.max(...samples.map((p) => p.x)),
-    minZ: Math.min(...samples.map((p) => p.z)),
-    maxZ: Math.max(...samples.map((p) => p.z)),
-  }
-
-  function nearestSampleIndex(x: number, z: number): number {
-    let best = 0
-    let bestD = Infinity
-    for (let i = 0; i < samples.length; i++) {
-      const dx = samples[i].x - x
-      const dz = samples[i].z - z
-      const d = dx * dx + dz * dz
-      if (d < bestD) {
-        bestD = d
-        best = i
-      }
-    }
-    return best
-  }
-
-  return {
-    curve,
-    bounds,
-    progressAt: (x, z) => nearestSampleIndex(x, z) / (samples.length - 1),
-    roadDistance: (x, z) => {
-      const i = nearestSampleIndex(x, z)
-      return Math.hypot(samples[i].x - x, samples[i].z - z)
-    },
-  }
-}
-
-/** Ribbon road geometry along the curve, slightly above the ground. */
-export function buildRoadGeometry(
-  curve: THREE.CatmullRomCurve3,
-  width = 1.6,
-  y = 0.06,
-  segments = 400
-): THREE.BufferGeometry {
-  const positions: number[] = []
-  const indices: number[] = []
-  for (let i = 0; i <= segments; i++) {
-    const u = i / segments
-    const p = curve.getPointAt(u)
-    const t = curve.getTangentAt(u)
-    // Perpendicular in the ground plane.
-    const nx = -t.z
-    const nz = t.x
-    const n = Math.hypot(nx, nz) || 1
-    const hw = width / 2
-    positions.push(p.x + (nx / n) * hw, y, p.z + (nz / n) * hw)
-    positions.push(p.x - (nx / n) * hw, y, p.z - (nz / n) * hw)
-    if (i < segments) {
-      const a = i * 2
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
-    }
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3))
-  geo.setIndex(indices)
-  geo.computeVertexNormals()
-  return geo
-}
-
-// ---------------------------------------------------------------------------
-// Deterministic scatter (no Math.random — stable across renders)
-// ---------------------------------------------------------------------------
-
+/** Deterministic RNG — the landscape must be identical across re-renders. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
@@ -188,19 +38,152 @@ export function mulberry32(seed: number): () => number {
   }
 }
 
-/** Terrain height: gentle noise that rises toward the destination (progress→1)
- * and flattens near the road. */
-export function terrainHeight(
-  x: number,
-  z: number,
-  progress: number,
-  roadDist: number
-): number {
-  const noise =
-    Math.sin(x * 0.35 + z * 0.2) * 0.5 +
-    Math.sin(x * 0.13 - z * 0.31) * 0.8 +
-    Math.sin(x * 0.71 + z * 0.53) * 0.25
-  const amp = 0.35 + Math.pow(progress, 1.6) * 2.6
-  const roadFlatten = THREE.MathUtils.smoothstep(roadDist, 1.2, 6.0)
-  return Math.max(0, (noise + 1.55) * amp * 0.45) * roadFlatten
+/** How alpine the landscape is at progress p (0 = origin, 1 = destination). */
+export function alpineness(p: number): number {
+  return Math.pow(Math.max(0, Math.min(1, p)), 1.7)
+}
+
+/** A layer's own length: it only has to cover its own (slower) travel. */
+export function layerLength(factor: number): number {
+  return WORLD_LEN * factor + VIEW_HALF_W * 4
+}
+
+// ---------------------------------------------------------------------------
+// Ridges
+// ---------------------------------------------------------------------------
+
+export interface RidgeOptions {
+  seed: number
+  factor: number
+  baseHeight: number
+  amplitude: number
+  minStep: number
+  maxStep: number
+  depth: number
+  /** Peaks above this height get a snow cap (in the returned cap geometry). */
+  snowFrom?: number
+}
+
+export interface RidgeGeometry {
+  body: THREE.BufferGeometry
+  caps: THREE.BufferGeometry | null
+  length: number
+}
+
+/**
+ * A mountain silhouette extruded in Z, so the orthographic camera's slight
+ * downward tilt catches a lit top face — flat 2D art would read as a sticker.
+ */
+export function buildRidge(opts: RidgeOptions): RidgeGeometry {
+  const rand = mulberry32(opts.seed)
+  const length = layerLength(opts.factor)
+
+  const peaks: { x: number; y: number }[] = []
+  let x = -VIEW_HALF_W * 2
+  while (x < length) {
+    const p = Math.max(0, x) / (WORLD_LEN * opts.factor)
+    const grow = 0.45 + alpineness(p) * 1.5
+    peaks.push({ x, y: opts.baseHeight + rand() * opts.amplitude * grow })
+    x += opts.minStep + rand() * (opts.maxStep - opts.minStep)
+  }
+
+  const shape = new THREE.Shape()
+  shape.moveTo(peaks[0].x, 0)
+  peaks.forEach((pk, i) => {
+    // Midpoint valley between peaks keeps the silhouette from reading as a saw.
+    if (i > 0) {
+      const prev = peaks[i - 1]
+      const mx = (prev.x + pk.x) / 2
+      shape.lineTo(mx, Math.min(prev.y, pk.y) * (0.35 + rand() * 0.25))
+    }
+    shape.lineTo(pk.x, pk.y)
+  })
+  shape.lineTo(peaks[peaks.length - 1].x, 0)
+  shape.closePath()
+
+  const body = new THREE.ExtrudeGeometry(shape, {
+    depth: opts.depth,
+    bevelEnabled: false,
+    curveSegments: 1,
+  })
+  body.computeVertexNormals()
+
+  let caps: THREE.BufferGeometry | null = null
+  const snowFrom = opts.snowFrom
+  if (snowFrom !== undefined) {
+    const capShapes: THREE.Shape[] = []
+    peaks.forEach((pk) => {
+      if (pk.y < snowFrom) return
+      const w = 1.6 + (pk.y - snowFrom) * 0.42
+      const drop = w * 0.8
+      const s = new THREE.Shape()
+      s.moveTo(pk.x - w, pk.y - drop)
+      s.lineTo(pk.x, pk.y)
+      s.lineTo(pk.x + w, pk.y - drop)
+      s.closePath()
+      capShapes.push(s)
+    })
+    if (capShapes.length) {
+      caps = new THREE.ExtrudeGeometry(capShapes, {
+        depth: opts.depth * 1.02,
+        bevelEnabled: false,
+        curveSegments: 1,
+      })
+      caps.computeVertexNormals()
+    }
+  }
+
+  return { body, caps, length }
+}
+
+// ---------------------------------------------------------------------------
+// Scatter (trees, houses)
+// ---------------------------------------------------------------------------
+
+export interface Scatter {
+  x: number
+  y: number
+  z: number
+  scale: number
+  /** 0 = green lowland, 1 = snow-dusted alpine. */
+  snow: number
+}
+
+export function scatterTrees(opts: {
+  seed: number
+  factor: number
+  count: number
+  zFrom: number
+  zTo: number
+  baseY?: number
+  scale?: number
+}): Scatter[] {
+  const rand = mulberry32(opts.seed)
+  const length = layerLength(opts.factor)
+  const out: Scatter[] = []
+  for (let i = 0; i < opts.count; i++) {
+    const x = -VIEW_HALF_W * 2 + rand() * (length + VIEW_HALF_W * 2)
+    const p = Math.max(0, x) / (WORLD_LEN * opts.factor)
+    const a = alpineness(p)
+    // Treeline thins out as the route climbs.
+    if (rand() > 1 - a * 0.55) continue
+    out.push({
+      x,
+      y: opts.baseY ?? 0,
+      z: opts.zFrom + rand() * (opts.zTo - opts.zFrom),
+      scale: (0.7 + rand() * 0.75) * (opts.scale ?? 1),
+      snow: a,
+    })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Route mapping
+// ---------------------------------------------------------------------------
+
+/** Distance in metres → world X. */
+export function worldXForDistance(distM: number, totalDistM: number): number {
+  if (totalDistM <= 0) return 0
+  return (distM / totalDistM) * WORLD_LEN
 }
