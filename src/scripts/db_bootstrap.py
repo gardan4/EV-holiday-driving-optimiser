@@ -33,7 +33,12 @@ from app import models  # noqa: F401 — load all models onto Base.metadata
 
 
 logger = logging.getLogger("db_bootstrap")
-TARGET_HEAD_REVISION = "0001_initial"
+# create_all() materialises whatever the models currently describe — i.e. the
+# LATEST schema — so a freshly created DB must be stamped at "head", not at a
+# pinned revision. Pinning it to 0001_initial meant the next boot ran
+# `upgrade head`, replayed 0002's ADD COLUMN against columns create_all had
+# already made, and the container exited 1 in a crash loop.
+TARGET_HEAD_REVISION = "head"
 
 
 def _make_alembic_config() -> Config:
