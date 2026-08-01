@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { SpeedResult, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import BatteryChart from "./BatteryChart"
+import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
 import JourneyHero from "./JourneyHero"
 import SpeedChart from "./SpeedChart"
@@ -170,6 +171,12 @@ export default function ResultsView({ trip }: { trip: Trip }) {
               onSelect={setSelectedSpeed}
             />
             <SpeedPills
+              speeds={result.speeds}
+              optimumSpeed={result.optimum_speed}
+              selectedSpeed={selectedSpeed}
+              onSelect={setSelectedSpeed}
+            />
+            <CostChart
               speeds={result.speeds}
               optimumSpeed={result.optimum_speed}
               selectedSpeed={selectedSpeed}

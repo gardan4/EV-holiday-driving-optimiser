@@ -25,6 +25,8 @@ async def list_vehicles(db: AsyncSession = Depends(get_db)) -> list[VehicleOut]:
             consumption=v.consumption,
             charge_curve=v.charge_curve,
             max_dc_kw=v.max_dc_kw,
+            mass_kg=v.mass_kg,
+            top_speed_kph=v.top_speed_kph,
             source_note=v.source_note,
         )
         for v in result.scalars().all()

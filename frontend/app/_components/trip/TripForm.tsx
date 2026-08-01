@@ -115,8 +115,13 @@ export default function TripForm() {
           />
         </div>
         <div>
-          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
             Conditions
+            <InfoTip>
+              Cold hits twice: the car uses more energy <em>and</em> the battery accepts charge
+              more slowly. The second effect is the bigger one on a long winter drive — it can
+              move the best cruise speed down by 30&nbsp;km/h.
+            </InfoTip>
           </span>
           <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Conditions">
             {CONDITIONS.map((c) => (
@@ -144,6 +149,7 @@ export default function TripForm() {
         <SocSlider
           id="depart-soc"
           label="Battery at departure"
+          explain="How full the car is when you set off — charge at home the night before and this is 100%."
           value={departSoc}
           min={30}
           max={100}
@@ -152,6 +158,7 @@ export default function TripForm() {
         <SocSlider
           id="target-soc"
           label="Battery on arrival (at least)"
+          explain="Leave enough to reach the chalet, the shops and a charger. Low means you arrive nearly empty, which is the fastest plan."
           value={targetSoc}
           min={5}
           max={80}
@@ -173,7 +180,15 @@ export default function TripForm() {
               htmlFor="autobahn"
               className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
             >
-              Autobahn actually open
+              <span className="flex items-center gap-1.5">
+                Autobahn actually open
+                <InfoTip>
+                  How much of the derestricted-looking autobahn you&apos;ll really get to use —
+                  the rest is roadworks, traffic and signposted limits. About 30% is realistic.
+                  Set it to 100% and fast driving looks free, which is the assumption that
+                  flatters high speeds most.
+                </InfoTip>
+              </span>
               <span className="rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-xs font-bold text-brand-700">
                 {autobahnShare}%
               </span>
@@ -188,15 +203,11 @@ export default function TripForm() {
               onChange={(e) => setAutobahnShare(Number(e.target.value))}
               className="w-full accent-brand-500"
             />
-            <p className="mt-1 text-[11px] leading-relaxed text-ink-400">
-              How much of the derestricted-looking autobahn you&apos;ll really get to use —
-              the rest is roadworks, traffic and signposted limits. About 30% is realistic;
-              100% is the optimistic assumption that makes fast driving look free.
-            </p>
           </div>
 
           <Choice
             label="Driving style"
+            explain="How far above the posted limit you actually sit — on the autobahn and on ordinary roads alike. Pushing harder saves driving time but burns more energy, so it can buy you an extra charging stop."
             options={STYLES.map((x) => ({ label: x.label, hint: x.hint }))}
             selected={style.label}
             onSelect={(l) => setStyle(STYLES.find((x) => x.label === l)!)}
@@ -205,20 +216,22 @@ export default function TripForm() {
           <div className="grid gap-4 sm:grid-cols-2">
             <Choice
               label="Time per stop"
+              explain="Everything around the charging itself: leaving the motorway, parking, plugging in, paying, getting back on. Higher values punish plans with many short stops."
               options={[
-                { label: "5 min", hint: "plug and go" },
-                { label: "8 min", hint: "typical" },
-                { label: "12 min", hint: "exit, park, pay, rejoin" },
+                { label: "5 min", hint: "plug and go — optimistic" },
+                { label: "8 min", hint: "typical for a motorway services" },
+                { label: "12 min", hint: "realistic with a detour and payment faff" },
               ]}
               selected={`${stopOverhead} min`}
               onSelect={(l) => setStopOverhead(parseInt(l))}
             />
             <Choice
               label="Queue for a charger"
+              explain="Waiting for a free stall. The more stops a plan makes, the more times you risk it — which is the honest cost of driving fast."
               options={[
-                { label: "0 min", hint: "quiet night" },
-                { label: "5 min", hint: "busy" },
-                { label: "10 min", hint: "holiday rush" },
+                { label: "0 min", hint: "middle of the night, nobody about" },
+                { label: "5 min", hint: "a normal evening" },
+                { label: "10 min", hint: "holiday getaway weekend" },
               ]}
               selected={`${queue} min`}
               onSelect={(l) => setQueue(parseInt(l))}
@@ -234,9 +247,16 @@ export default function TripForm() {
                 className="mt-0.5 accent-brand-500"
               />
               <span className="text-xs leading-relaxed text-ink-600">
-                <span className="font-semibold text-ink-900">Rest breaks</span>
+                <span className="inline-flex items-center gap-1.5 font-semibold text-ink-900">
+                  Rest breaks
+                  <InfoTip>
+                    20 minutes off every 3 hours of driving. Time already spent standing at a
+                    charger counts towards it, so a fast plan with many stops usually gets its
+                    breaks for free — a slow plan with few stops has to add them.
+                  </InfoTip>
+                </span>
                 <br />
-                20 min every 3 h of driving. Charging stops count towards it.
+                20 min every 3 h of driving
               </span>
             </label>
             <div>
@@ -244,7 +264,14 @@ export default function TripForm() {
                 htmlFor="price"
                 className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500"
               >
-                Charging price (€/kWh)
+                <span className="flex items-center gap-1.5">
+                  Charging price (€/kWh)
+                  <InfoTip>
+                    What you pay at a public fast charger — about €0.59 on most European
+                    networks without a subscription. Priced at the plug, so it includes
+                    charging losses.
+                  </InfoTip>
+                </span>
               </label>
               <input
                 id="price"
@@ -285,6 +312,7 @@ export default function TripForm() {
 function SocSlider({
   id,
   label,
+  explain,
   value,
   min,
   max,
@@ -292,6 +320,7 @@ function SocSlider({
 }: {
   id: string
   label: string
+  explain?: string
   value: number
   min: number
   max: number
@@ -303,7 +332,10 @@ function SocSlider({
         htmlFor={id}
         className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
       >
-        {label}
+        <span className="flex items-center gap-1.5">
+          {label}
+          {explain && <InfoTip>{explain}</InfoTip>}
+        </span>
         <span className="rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-xs font-bold text-brand-700">
           {value}%
         </span>
@@ -322,22 +354,62 @@ function SocSlider({
   )
 }
 
+/** Hover/focus explainer. A real <button> so it also works from the keyboard
+ * and on touch, where a title attribute shows nothing. */
+function InfoTip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="group/tip relative inline-flex align-middle">
+      <button
+        type="button"
+        aria-label="What does this mean?"
+        onClick={(e) => e.preventDefault()}
+        className="grid h-4 w-4 place-items-center rounded-full border border-ink-300 text-[9px] font-bold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400"
+      >
+        i
+      </button>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 opacity-0 shadow-xl shadow-ink-900/10 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100"
+      >
+        {children}
+      </span>
+    </span>
+  )
+}
+
 /** Small segmented control used by the fine-tuning panel. */
 function Choice({
   label,
+  explain,
   options,
   selected,
   onSelect,
 }: {
   label: string
+  /** One line saying what the setting actually does. Always visible — a
+   * tooltip is invisible on touch and easy to miss. */
+  explain?: string
   options: { label: string; hint?: string }[]
   selected: string
   onSelect: (label: string) => void
 }) {
   return (
     <div>
-      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+      <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
         {label}
+        {explain && (
+          <InfoTip>
+            {explain}
+            <span className="mt-1.5 block space-y-0.5">
+              {options.map((o) => (
+                <span key={o.label} className="block">
+                  <span className="font-semibold text-ink-900">{o.label}</span>
+                  {o.hint ? ` — ${o.hint}` : ""}
+                </span>
+              ))}
+            </span>
+          </InfoTip>
+        )}
       </span>
       <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={label}>
         {options.map((o) => (
