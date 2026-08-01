@@ -131,7 +131,11 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           <Stat
             label="charging"
             value={fmtDuration(selected.charge_min ?? 0)}
-            sub={`${selected.n_stops} stop${selected.n_stops === 1 ? "" : "s"}`}
+            sub={
+              `${selected.n_stops} stop${selected.n_stops === 1 ? "" : "s"}` +
+              (selected.rest_min > 0 ? ` · +${Math.round(selected.rest_min)} min break` : "") +
+              (selected.cost_eur > 0 ? ` · €${selected.cost_eur.toFixed(2)}` : "")
+            }
           />
           <Stat
             label={vsBaseline != null && slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
@@ -144,6 +148,17 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             sub={vsBaseline != null && vsBaseline > 0 ? "earlier at the chalet" : "slower overall"}
           />
         </div>
+
+        {result.optimum_at_top_speed && (
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
+            <span className="font-semibold">The curve never turned.</span> Under these
+            assumptions the trip keeps getting shorter right up to{" "}
+            {Math.round(result.vehicle.top_speed_kph)} km/h — the {result.vehicle.make}{" "}
+            {result.vehicle.model}&apos;s limiter — so the theoretical optimum is faster
+            than the car goes. Charging is quick enough here that speed simply wins;
+            try colder conditions or a lower open-autobahn share to see it turn.
+          </p>
+        )}
 
         {/* Charts + itinerary */}
         <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_340px]">
@@ -195,14 +210,20 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           <ul className="mt-3 list-disc space-y-1.5 pl-5 leading-relaxed">
             <li>
               Your cruise speed applies on motorway stretches up to each country&apos;s legal cap
-              (130 in AT/NL, derestricted German autobahn where the map data suggests it); everywhere
-              else the road&apos;s normal driving speed governs. No live traffic — planned for quiet
-              roads and overnight departures.
+              (130 in AT/NL). German autobahn is only treated as derestricted for the share you
+              chose — {Math.round((trip.request.autobahn_open_share ?? 0.3) * 100)}% here — because
+              roadworks, traffic and signposted limits take back most of it. Everywhere else the
+              road&apos;s own driving speed governs. No live traffic model.
             </li>
             <li>
-              Consumption is a per-car fit from public range tests (with your conditions multiplier);
-              charging follows the car&apos;s measured fast-charge curve, capped by each site&apos;s
-              power. Real cars vary a few percent either way.
+              Elevation is included: {(result.climb_m / 1000).toFixed(1)} km of cumulative climb on
+              this route, costing energy on the way up and giving about two-thirds of it back
+              through regen on the way down.
+            </li>
+            <li>
+              Consumption is a per-car fit from public range tests, scaled by your conditions
+              setting. Cold weather also slows <em>charging</em> — the bigger of the two effects on
+              a winter trip — so the conditions setting derates the charge curve as well.
             </li>
             <li>
               Every stop includes 5 minutes of plug-in overhead plus an estimated detour off the
@@ -211,6 +232,10 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             <li>
               Chargers come from OpenChargeMap (community data) filtered to operational CCS sites of
               100 kW and up — glance at the operator and Maps link before counting on a specific one.
+            </li>
+            <li>
+              Energy is priced at the plug (including charging losses) at the rate you set, so the
+              cost figure is what you&apos;d actually pay, not the energy that reaches the battery.
             </li>
             <li>Departure time shifts the clock, not the plan — there is no traffic model yet.</li>
           </ul>

@@ -25,6 +25,8 @@ BORN_SEED = dict(
     consumption={"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0105},
     charge_curve=[[0, 50], [10, 120], [30, 120], [45, 85], [55, 68], [75, 42], [100, 10]],
     max_dc_kw=120.0,
+    mass_kg=1900.0,
+    top_speed_kph=160.0,   # the real Born's limiter — the sweep must respect it
     sort_order=10,
 )
 
@@ -165,3 +167,64 @@ class TestTripNotFound:
     async def test_malformed_trip_id_404(self, client):
         resp = await client.get("/api/trips/not-a-uuid")
         assert resp.status_code == 404
+
+
+class TestFactorsThroughTheApi:
+    async def test_new_fields_are_returned(self, client):
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips",
+            json=plan_body(vid, conditions_factor=1.3, charge_power_factor=0.55,
+                           autobahn_open_share=0.3, queue_min=5, stop_overhead_min=8,
+                           rest_interval_min=180, rest_min=20, price_per_kwh=0.60),
+        )
+        assert resp.status_code == 200, resp.text
+        result = resp.json()["result"]
+        assert "climb_m" in result and "optimum_at_top_speed" in result
+        for s in (x for x in result["speeds"] if x["feasible"]):
+            assert s["energy_kwh"] > 0
+            assert s["cost_eur"] == pytest.approx(s["energy_kwh"] * 0.60, rel=0.02)
+            assert s["rest_min"] >= 0
+
+    async def test_sweep_stops_at_the_cars_top_speed(self, client):
+        # The seeded Born is limited to 160; asking for 200 must not invent it.
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips", json=plan_body(vid, speed_min=100.0, speed_max=200.0, speed_step=10.0)
+        )
+        assert resp.status_code == 200, resp.text
+        speeds = [s["speed_kph"] for s in resp.json()["result"]["speeds"]]
+        assert max(speeds) <= 160.0
+
+    async def test_cold_conditions_slow_the_trip(self, client):
+        vid = await vehicle_id(client)
+        warm = await client.post("/api/trips", json=plan_body(vid))
+        cold = await client.post(
+            "/api/trips", json=plan_body(vid, conditions_factor=1.3, charge_power_factor=0.55)
+        )
+        assert warm.status_code == 200 and cold.status_code == 200
+
+        def best(resp):
+            r = resp.json()["result"]
+            return next(s for s in r["speeds"] if s["speed_kph"] == r["optimum_speed"])
+
+        assert best(cold)["total_min"] > best(warm)["total_min"]
+        # And the winter answer should not be faster than the summer one.
+        assert best(cold)["speed_kph"] <= best(warm)["speed_kph"]
+
+    async def test_vehicle_columns_have_usable_defaults(self, client, db_session):
+        # A row written before these columns existed must still plan — the
+        # simulator falls back rather than crashing on a missing attribute.
+        from app.models import Vehicle
+
+        legacy = Vehicle(
+            slug="legacy-car", make="Legacy", model="Car", variant="x",
+            usable_kwh=60.0,
+            consumption={"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0105},
+            charge_curve=[[0, 50], [10, 120], [50, 80], [100, 10]],
+            max_dc_kw=120.0, sort_order=99,
+        )
+        db_session.add(legacy)
+        await db_session.commit()
+        resp = await client.post("/api/trips", json=plan_body(str(legacy.id)))
+        assert resp.status_code == 200, resp.text

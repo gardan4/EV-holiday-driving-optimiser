@@ -83,6 +83,12 @@ class Vehicle(Base):
     consumption: Mapped[dict] = mapped_column(JSON, nullable=False)
     charge_curve: Mapped[list] = mapped_column(JSON, nullable=False)
     max_dc_kw: Mapped[float] = mapped_column(Float, nullable=False)
+    # Kerb mass plus a nominal 180 kg of people and luggage — only the
+    # elevation term uses it.
+    mass_kg: Mapped[float] = mapped_column(Float, nullable=False, default=1900.0)
+    # Electronically limited top speed; the sweep stops here because anything
+    # beyond it is fiction for this car.
+    top_speed_kph: Mapped[float] = mapped_column(Float, nullable=False, default=180.0)
     # Reserved for energy-cost display; charge *time* comes straight from the
     # cable-side curve and must not be scaled by this (no double counting).
     charge_efficiency: Mapped[float] = mapped_column(Float, nullable=False, default=0.92)

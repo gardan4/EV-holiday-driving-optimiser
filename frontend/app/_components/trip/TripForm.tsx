@@ -9,10 +9,19 @@ import { defaultDepartureIso } from "@/lib/format"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
 
+// Cold hits twice: the car uses more, AND the pack accepts charge more slowly.
+// The second effect is the bigger one on a long winter trip.
 const CONDITIONS = [
-  { label: "Mild", factor: 1.0, hint: "≥ 10 °C" },
-  { label: "Cold", factor: 1.15, hint: "around 0 °C" },
-  { label: "Freezing", factor: 1.3, hint: "well below 0 °C" },
+  { label: "Mild", factor: 1.0, charge: 1.0, hint: "≥ 10 °C" },
+  { label: "Cold", factor: 1.15, charge: 0.8, hint: "around 0 °C — slower charging too" },
+  { label: "Freezing", factor: 1.3, charge: 0.55, hint: "below 0 °C — much slower charging" },
+]
+
+// How hard you push where the road allows it.
+const STYLES = [
+  { label: "Legal", cap: 0, flow: 1.0, hint: "sit on the limit" },
+  { label: "Brisk", cap: 10, flow: 1.08, hint: "a little over, everywhere" },
+  { label: "Assertive", cap: 20, flow: 1.15, hint: "press on wherever you can" },
 ]
 
 /** The planner form. On submit: POST /api/trips → navigate to the permalink. */
@@ -25,7 +34,13 @@ export default function TripForm() {
   const [departure, setDeparture] = useState(defaultDepartureIso())
   const [departSoc, setDepartSoc] = useState(100)
   const [targetSoc, setTargetSoc] = useState(10)
-  const [factor, setFactor] = useState(1.0)
+  const [conditions, setConditions] = useState(CONDITIONS[0])
+  const [style, setStyle] = useState(STYLES[0])
+  const [autobahnShare, setAutobahnShare] = useState(30)
+  const [stopOverhead, setStopOverhead] = useState(5)
+  const [queue, setQueue] = useState(0)
+  const [restBreaks, setRestBreaks] = useState(false)
+  const [price, setPrice] = useState(0.59)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -51,7 +66,16 @@ export default function TripForm() {
         departure_iso: departure,
         depart_soc: departSoc,
         target_soc: targetSoc,
-        conditions_factor: factor,
+        conditions_factor: conditions.factor,
+        charge_power_factor: conditions.charge,
+        autobahn_open_share: autobahnShare / 100,
+        over_cap_kph: style.cap,
+        over_freeflow_factor: style.flow,
+        stop_overhead_min: stopOverhead,
+        queue_min: queue,
+        rest_interval_min: restBreaks ? 180 : 0,
+        rest_min: restBreaks ? 20 : 0,
+        price_per_kwh: price,
       })
       router.push(`/trip/${trip.id}`)
     } catch (err) {
@@ -100,11 +124,11 @@ export default function TripForm() {
                 key={c.label}
                 type="button"
                 role="radio"
-                aria-checked={factor === c.factor}
-                onClick={() => setFactor(c.factor)}
+                aria-checked={conditions.label === c.label}
+                onClick={() => setConditions(c)}
                 title={c.hint}
                 className={`rounded-xl border px-2 py-2.5 text-sm font-medium transition-colors ${
-                  factor === c.factor
+                  conditions.label === c.label
                     ? "border-brand-400 bg-brand-50 text-ink-900 ring-2 ring-brand-200"
                     : "border-ink-200 bg-white text-ink-500 hover:border-ink-300"
                 }`}
@@ -134,6 +158,108 @@ export default function TripForm() {
           onChange={setTargetSoc}
         />
       </div>
+
+      <details className="group mt-4 rounded-xl border border-ink-200 bg-white px-4 py-3">
+        <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
+          Fine-tune the assumptions
+          <span className="ml-2 font-normal normal-case tracking-normal text-ink-400">
+            these change the answer more than you&apos;d think
+          </span>
+        </summary>
+
+        <div className="mt-4 space-y-4">
+          <div>
+            <label
+              htmlFor="autobahn"
+              className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
+            >
+              Autobahn actually open
+              <span className="rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-xs font-bold text-brand-700">
+                {autobahnShare}%
+              </span>
+            </label>
+            <input
+              id="autobahn"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={autobahnShare}
+              onChange={(e) => setAutobahnShare(Number(e.target.value))}
+              className="w-full accent-brand-500"
+            />
+            <p className="mt-1 text-[11px] leading-relaxed text-ink-400">
+              How much of the derestricted-looking autobahn you&apos;ll really get to use —
+              the rest is roadworks, traffic and signposted limits. About 30% is realistic;
+              100% is the optimistic assumption that makes fast driving look free.
+            </p>
+          </div>
+
+          <Choice
+            label="Driving style"
+            options={STYLES.map((x) => ({ label: x.label, hint: x.hint }))}
+            selected={style.label}
+            onSelect={(l) => setStyle(STYLES.find((x) => x.label === l)!)}
+          />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Choice
+              label="Time per stop"
+              options={[
+                { label: "5 min", hint: "plug and go" },
+                { label: "8 min", hint: "typical" },
+                { label: "12 min", hint: "exit, park, pay, rejoin" },
+              ]}
+              selected={`${stopOverhead} min`}
+              onSelect={(l) => setStopOverhead(parseInt(l))}
+            />
+            <Choice
+              label="Queue for a charger"
+              options={[
+                { label: "0 min", hint: "quiet night" },
+                { label: "5 min", hint: "busy" },
+                { label: "10 min", hint: "holiday rush" },
+              ]}
+              selected={`${queue} min`}
+              onSelect={(l) => setQueue(parseInt(l))}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={restBreaks}
+                onChange={(e) => setRestBreaks(e.target.checked)}
+                className="mt-0.5 accent-brand-500"
+              />
+              <span className="text-xs leading-relaxed text-ink-600">
+                <span className="font-semibold text-ink-900">Rest breaks</span>
+                <br />
+                20 min every 3 h of driving. Charging stops count towards it.
+              </span>
+            </label>
+            <div>
+              <label
+                htmlFor="price"
+                className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500"
+              >
+                Charging price (€/kWh)
+              </label>
+              <input
+                id="price"
+                type="number"
+                min={0}
+                max={3}
+                step={0.01}
+                value={price}
+                onChange={(e) => setPrice(Number(e.target.value))}
+                className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+              />
+            </div>
+          </div>
+        </div>
+      </details>
 
       <button
         type="submit"
@@ -192,6 +318,46 @@ function SocSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-brand-500"
       />
+    </div>
+  )
+}
+
+/** Small segmented control used by the fine-tuning panel. */
+function Choice({
+  label,
+  options,
+  selected,
+  onSelect,
+}: {
+  label: string
+  options: { label: string; hint?: string }[]
+  selected: string
+  onSelect: (label: string) => void
+}) {
+  return (
+    <div>
+      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+        {label}
+      </span>
+      <div className="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label={label}>
+        {options.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            role="radio"
+            aria-checked={selected === o.label}
+            onClick={() => onSelect(o.label)}
+            title={o.hint}
+            className={`rounded-xl border px-2 py-2 text-xs font-medium transition-colors ${
+              selected === o.label
+                ? "border-brand-400 bg-brand-50 text-ink-900 ring-2 ring-brand-200"
+                : "border-ink-200 bg-white text-ink-500 hover:border-ink-300"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

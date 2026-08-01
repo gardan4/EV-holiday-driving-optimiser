@@ -19,6 +19,8 @@ export interface Vehicle {
   consumption: { model: string; a_wh_km: number; b_wh_km_per_kph2: number }
   charge_curve: [number, number][]
   max_dc_kw: number
+  mass_kg: number
+  top_speed_kph: number
   source_note: string | null
 }
 
@@ -45,7 +47,19 @@ export interface PlanRequest {
   speed_min?: number
   speed_max?: number
   speed_step?: number
+  /** Consumption multiplier: 1.0 mild / 1.15 cold / 1.3 freezing. */
   conditions_factor?: number
+  /** Cold packs charge slower too: 1.0 / 0.8 / 0.55. */
+  charge_power_factor?: number
+  /** Share of derestriction-eligible autobahn that is really open. */
+  autobahn_open_share?: number
+  over_cap_kph?: number
+  over_freeflow_factor?: number
+  queue_min?: number
+  stop_overhead_min?: number
+  rest_interval_min?: number
+  rest_min?: number
+  price_per_kwh?: number
 }
 
 export interface Stop {
@@ -75,6 +89,10 @@ export interface SpeedResult {
   drive_min: number | null
   charge_min: number | null
   n_stops: number | null
+  /** Break time the charging stops did not already absorb. */
+  rest_min: number
+  energy_kwh: number
+  cost_eur: number
   stops: Stop[]
   timeline: TimelinePoint[]
 }
@@ -85,6 +103,9 @@ export interface PlanResult {
   speeds: SpeedResult[]
   optimum_speed: number | null
   vehicle: Vehicle
+  climb_m: number
+  /** The curve was still falling at the car's top speed. */
+  optimum_at_top_speed: boolean
 }
 
 export interface Trip {

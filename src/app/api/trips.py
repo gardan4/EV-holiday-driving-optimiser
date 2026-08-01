@@ -57,6 +57,8 @@ def _vehicle_out(v: Vehicle) -> VehicleOut:
         consumption=v.consumption,
         charge_curve=v.charge_curve,
         max_dc_kw=v.max_dc_kw,
+        mass_kg=v.mass_kg,
+        top_speed_kph=v.top_speed_kph,
         source_note=v.source_note,
     )
 
@@ -71,6 +73,9 @@ def _result_out(r: SpeedResult) -> SpeedResultOut:
         drive_min=round(r.drive_min, 1),
         charge_min=round(r.charge_min, 1),
         n_stops=r.n_stops,
+        rest_min=round(r.rest_min, 1),
+        energy_kwh=round(r.energy_kwh, 1),
+        cost_eur=round(r.cost_eur, 2),
         stops=[
             StopOut(
                 charger_id=s.charger_id,
@@ -129,11 +134,25 @@ async def plan_trip(
         depart_soc=plan.depart_soc,
         target_soc=plan.target_soc,
         consumption_factor=plan.conditions_factor,
+        charge_power_factor=plan.charge_power_factor,
+        autobahn_open_share=plan.autobahn_open_share,
+        over_cap_kph=plan.over_cap_kph,
+        over_freeflow_factor=plan.over_freeflow_factor,
+        queue_min=plan.queue_min,
+        stop_overhead_min=plan.stop_overhead_min,
+        rest_interval_min=plan.rest_interval_min,
+        rest_min=plan.rest_min,
+        price_per_kwh=plan.price_per_kwh,
     )
+    # Never simulate past what the car can actually do — the Born tops out at
+    # 160, so a "175 is optimal" answer would be fiction.
     speeds = [
-        plan.speed_min + i * plan.speed_step
-        for i in range(n_points)
+        s
+        for s in (plan.speed_min + i * plan.speed_step for i in range(n_points))
+        if s <= vehicle.top_speed_kph
     ]
+    if not speeds:
+        speeds = [min(plan.speed_min, vehicle.top_speed_kph)]
 
     # CPU-bound sweep off the event loop (the template widens the executor).
     results = await asyncio.to_thread(
@@ -147,12 +166,23 @@ async def plan_trip(
             "this route for the selected car and charge settings.",
         )
 
+    # If the fastest plan is the fastest speed we were allowed to simulate, the
+    # true optimum probably lies beyond the car's limiter — say so rather than
+    # implying the curve bottomed out.
+    feasible = [r for r in results if r.feasible]
+    at_top = bool(
+        feasible
+        and best.speed_kph == max(r.speed_kph for r in feasible)
+        and best.speed_kph >= vehicle.top_speed_kph - 1e-6
+    )
     result = PlanResult(
         polyline=polyline_encode(route.geometry.coords),
         total_dist_m=round(route.total_dist_m),
         speeds=[_result_out(r) for r in results],
         optimum_speed=best.speed_kph,
         vehicle=_vehicle_out(vehicle),
+        climb_m=round(sum(s.climb_m for s in route.segments)),
+        optimum_at_top_speed=at_top,
     )
 
     trip = Trip(

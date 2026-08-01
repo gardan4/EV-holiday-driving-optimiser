@@ -57,6 +57,13 @@ class VehicleParams:
     b_wh_km_per_kph2: float
     # ((soc_pct, kw), ...) sorted by soc_pct, covering 0..100.
     charge_curve: tuple[tuple[float, float], ...]
+    # Kerb mass + a nominal load; only used for the elevation term.
+    mass_kg: float = 1900.0
+    # Electronically limited top speed. Simulating past it is fiction.
+    top_speed_kph: float = 180.0
+    # Plug → battery efficiency. Charge *times* come straight from the curve
+    # (which is measured at the cable), so this is only used to price energy.
+    charge_efficiency: float = 0.92
 
     @classmethod
     def from_vehicle(cls, vehicle) -> "VehicleParams":
@@ -67,6 +74,9 @@ class VehicleParams:
             a_wh_km=cons["a_wh_km"],
             b_wh_km_per_kph2=cons["b_wh_km_per_kph2"],
             charge_curve=tuple((float(s), float(p)) for s, p in vehicle.charge_curve),
+            mass_kg=float(getattr(vehicle, "mass_kg", None) or 1900.0),
+            top_speed_kph=float(getattr(vehicle, "top_speed_kph", None) or 180.0),
+            charge_efficiency=float(getattr(vehicle, "charge_efficiency", None) or 0.92),
         )
 
 
@@ -75,6 +85,8 @@ class RouteSegment:
     dist_m: float
     freeflow_kph: float
     country: str = ""  # ISO-3166 alpha-2; "" → default cap
+    climb_m: float = 0.0    # metres gained over this segment
+    descent_m: float = 0.0  # metres lost over this segment
 
 
 @dataclass(frozen=True)
@@ -105,6 +117,13 @@ def _default_country_caps() -> dict[str, float]:
     }
 
 
+# Energy recovered per joule of potential energy given back on a descent.
+REGEN_EFFICIENCY = 0.65
+# Battery → wheels efficiency for the climbing term.
+DRIVETRAIN_EFFICIENCY = 0.90
+GRAVITY = 9.81
+
+
 @dataclass(frozen=True)
 class SimParams:
     depart_soc: float = 100.0
@@ -113,6 +132,27 @@ class SimParams:
     stop_overhead_min: float = 5.0
     charge_cap_soc: float = 100.0  # ceiling for charge targets (DP may stop lower)
     consumption_factor: float = 1.0  # conditions multiplier on Wh/km
+    # Cold packs charge far slower than the datasheet curve. This scales the
+    # whole curve; it is the single biggest lever on the winter answer.
+    charge_power_factor: float = 1.0
+    # Minutes queuing for a free stall, added per stop. More stops = more
+    # exposure, which is the honest cost of the many-short-stops strategy.
+    queue_min: float = 0.0
+    # Rest rules: after this much DRIVING you need a break of `rest_min`.
+    # Time spent at a charger counts towards it, so charging stops usually
+    # absorb the break for free. 0 disables the rule.
+    rest_interval_min: float = 0.0
+    rest_min: float = 0.0
+    # Fraction of *derestriction-eligible* German autobahn you will actually be
+    # able to press on (roadworks, traffic, trucks). ~0.3 is realistic; 1.0 is
+    # the old, flattering assumption.
+    autobahn_open_share: float = 0.3
+    # Driving style: how far above the legal cap you are willing to sit, and
+    # how much above a non-motorway road's own flow speed you will push.
+    over_cap_kph: float = 0.0
+    over_freeflow_factor: float = 1.0
+    # Price per kWh delivered at the plug, for the cost readout.
+    price_per_kwh: float = 0.59
     # Free-flow ≥ this → "motorway-like": ORS/OSM under-caps there, so the
     # cruise speed applies up to the country's legal cap instead of free-flow.
     motorway_freeflow_kph: float = 105.0
@@ -157,6 +197,11 @@ class SpeedResult:
     # (t_min, dist_m, soc) samples for playback: stop boundaries + ~5-min drive
     # intervals. Distance is the along-route offset.
     timeline: list[tuple[float, float, float]] = field(default_factory=list)
+    # Break time the charging stops did NOT already cover.
+    rest_min: float = 0.0
+    # Energy bought at the plug, and what it costs.
+    energy_kwh: float = 0.0
+    cost_eur: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -168,16 +213,60 @@ def wh_per_km(v_kph: float, veh: VehicleParams, factor: float = 1.0) -> float:
     return (veh.a_wh_km + veh.b_wh_km_per_kph2 * v_kph * v_kph) * factor
 
 
-def effective_kph(v_kph: float, seg: RouteSegment, p: SimParams) -> float:
+def _open_stretch(index: int, share: float) -> bool:
+    """Is derestriction-eligible segment `index` actually open?
+
+    Deterministic (same route + share → same plan) and interleaved along the
+    route rather than all-open-then-all-closed, so a partially open autobahn
+    behaves like a real one: bursts of speed between restricted stretches.
+    """
+    if share >= 1.0:
+        return True
+    if share <= 0.0:
+        return False
+    h = (index * 2654435761) & 0xFFFFFFFF  # Knuth multiplicative hash
+    return (h / 0x100000000) < share
+
+
+def effective_kph(
+    v_kph: float, seg: RouteSegment, p: SimParams, index: int = 0
+) -> float:
+    """The speed actually held on this segment.
+
+    `index` selects which derestriction-eligible stretches are open; pass the
+    segment's position along the route.
+    """
     if p.freeflow_cap_only or seg.freeflow_kph < p.motorway_freeflow_kph:
-        eff = min(v_kph, seg.freeflow_kph)
+        # Ordinary road: its own flow speed governs, but an assertive driver
+        # still presses a little above it.
+        eff = min(v_kph, seg.freeflow_kph * p.over_freeflow_factor)
     else:
         cap = p.country_caps.get(seg.country, p.default_country_cap_kph)
-        if math.isinf(cap) and seg.freeflow_kph < p.derestrict_freeflow_kph:
-            # German motorway but free-flow says a signposted zone → default cap.
-            cap = p.default_country_cap_kph
+        if math.isinf(cap):
+            if seg.freeflow_kph < p.derestrict_freeflow_kph or not _open_stretch(
+                index, p.autobahn_open_share
+            ):
+                # Signposted zone, roadworks or traffic — the cap binds after all.
+                cap = p.default_country_cap_kph + p.over_cap_kph
+        else:
+            cap = cap + p.over_cap_kph
         eff = min(v_kph, cap)
     return max(eff, 5.0)
+
+
+def grade_kwh(seg: RouteSegment, veh: VehicleParams) -> float:
+    """Energy the elevation of this segment adds (climb) or gives back (descent).
+
+    mgh in kWh, divided by drivetrain efficiency going up and multiplied by
+    regen efficiency coming down — so a climb-and-descend pair is a net loss,
+    as it is in the real car.
+    """
+    if seg.climb_m == 0.0 and seg.descent_m == 0.0:
+        return 0.0
+    j_per_m = veh.mass_kg * GRAVITY / 3_600_000.0  # kWh per metre climbed
+    up = seg.climb_m * j_per_m / DRIVETRAIN_EFFICIENCY
+    down = seg.descent_m * j_per_m * REGEN_EFFICIENCY
+    return up - down
 
 
 def curve_power_kw(soc: float, veh: VehicleParams) -> float:
@@ -195,17 +284,25 @@ def curve_power_kw(soc: float, veh: VehicleParams) -> float:
 
 
 def charge_minutes(
-    veh: VehicleParams, soc_from: float, soc_to: float, site_kw: float
+    veh: VehicleParams,
+    soc_from: float,
+    soc_to: float,
+    site_kw: float,
+    power_factor: float = 1.0,
 ) -> float:
     """Minutes to charge from `soc_from` to `soc_to` percent at a site limited
-    to `site_kw`. Midpoint-rule integral over the piecewise-linear curve."""
+    to `site_kw`. Midpoint-rule integral over the piecewise-linear curve.
+
+    `power_factor` derates the car's curve — a cold pack accepts far less than
+    the datasheet says, which is the dominant winter effect.
+    """
     if soc_to <= soc_from:
         return 0.0
     minutes = 0.0
     soc = soc_from
     while soc < soc_to - 1e-9:
         step = min(_INTEGRATION_STEP, soc_to - soc)
-        p = min(curve_power_kw(soc + step / 2.0, veh), site_kw)
+        p = min(curve_power_kw(soc + step / 2.0, veh) * power_factor, site_kw)
         p = max(p, 1.0)  # guard against degenerate curves
         minutes += 60.0 * (veh.usable_kwh * step / 100.0) / p
         soc += step
@@ -230,11 +327,15 @@ class RouteProfile:
         self.kwh = [0.0] * (n + 1)
         d = t = e = 0.0
         for i, seg in enumerate(segments):
-            eff = effective_kph(v_kph, seg, p)
+            eff = effective_kph(v_kph, seg, p, i)
             dist_km = seg.dist_m / 1000.0
             d += seg.dist_m
             t += (dist_km / eff) * 60.0
+            # Aero + rolling, then the elevation term (net-negative over a
+            # climb-and-descend pair because regen is not free).
             e += wh_per_km(eff, veh, p.consumption_factor) * dist_km / 1000.0
+            e += grade_kwh(seg, veh)
+            e = max(e, 0.0)
             self.offsets[i + 1] = d
             self.t_min[i + 1] = t
             self.kwh[i + 1] = e
@@ -269,13 +370,15 @@ class RouteProfile:
 # ---------------------------------------------------------------------------
 
 
-def _site_cumulative_minutes(veh: VehicleParams, site_kw: float) -> list[float]:
+def _site_cumulative_minutes(
+    veh: VehicleParams, site_kw: float, power_factor: float = 1.0
+) -> list[float]:
     """F[b] = minutes to charge from 0% to bucket b's SoC at this site.
     charge(s→t) = F[t] - F[s]."""
     f = [0.0] * N_BUCKETS
     for b in range(1, N_BUCKETS):
         f[b] = f[b - 1] + charge_minutes(
-            veh, (b - 1) * SOC_BUCKET, b * SOC_BUCKET, site_kw
+            veh, (b - 1) * SOC_BUCKET, b * SOC_BUCKET, site_kw, power_factor
         )
     return f
 
@@ -310,7 +413,7 @@ def simulate(
     for i, c in enumerate(nodes, start=1):
         f = _site_f_cache.get(c.power_kw)
         if f is None:
-            f = _site_cumulative_minutes(veh, c.power_kw)
+            f = _site_cumulative_minutes(veh, c.power_kw, p.charge_power_factor)
             _site_f_cache[c.power_kw] = f
         site_f[i] = f
 
@@ -344,7 +447,7 @@ def simulate(
         else:
             f = site_f[i]
             node = nodes[i - 1]
-            fixed = p.stop_overhead_min + node.detour_min
+            fixed = p.stop_overhead_min + p.queue_min + node.detour_min
             depart_cost = [_INF] * N_BUCKETS
             depart_from = [0] * N_BUCKETS
             run_min, run_arg = _INF, 0
@@ -427,6 +530,39 @@ def _exact_forward_pass(
         clock += leg_min
         return soc_start - (profile.kwh_at(to_off) - e0) / veh.usable_kwh * 100.0
 
+    # Rest rule: you owe a break every `rest_interval_min` of DRIVING. Time
+    # already spent standing at a charger counts, so a plan with many stops
+    # usually absorbs the whole debt for free — which is exactly why the
+    # rule matters more to the slow, few-stop plans.
+    extra_rest_each = 0.0
+    if p.rest_interval_min > 0 and p.rest_min > 0:
+        required = math.floor(profile.total_min / p.rest_interval_min) * p.rest_min
+        covered = 0.0
+        probe_soc = p.depart_soc
+        prev_off = 0.0
+        for ni, t_bucket in stop_nodes:
+            node = nodes[ni - 1]
+            probe_soc -= (
+                profile.kwh_at(node.offset_m) - profile.kwh_at(prev_off)
+            ) / veh.usable_kwh * 100.0
+            pause = (
+                node.detour_min
+                + p.stop_overhead_min
+                + p.queue_min
+                + charge_minutes(
+                    veh, probe_soc, t_bucket * SOC_BUCKET, node.power_kw,
+                    p.charge_power_factor,
+                )
+            )
+            covered += min(pause, p.rest_min)
+            probe_soc = max(probe_soc, t_bucket * SOC_BUCKET)
+            prev_off = node.offset_m
+        shortfall = max(0.0, required - covered)
+        if shortfall > 0:
+            # Spread the shortfall over the stops we already make; with no
+            # stops at all it becomes one standalone break (handled below).
+            extra_rest_each = shortfall / len(stop_nodes) if stop_nodes else shortfall
+
     cur_off = 0.0
     for ni, t_bucket in stop_nodes:
         node = nodes[ni - 1]
@@ -434,8 +570,10 @@ def _exact_forward_pass(
         arrive_soc = soc
         arrive_clock = clock
         target = t_bucket * SOC_BUCKET
-        c_min = charge_minutes(veh, soc, target, node.power_kw)
-        pause = node.detour_min + p.stop_overhead_min + c_min
+        c_min = charge_minutes(veh, soc, target, node.power_kw, p.charge_power_factor)
+        pause = (
+            node.detour_min + p.stop_overhead_min + p.queue_min + c_min + extra_rest_each
+        )
         clock += pause
         charge_total += c_min
         soc = max(soc, target)
@@ -462,16 +600,34 @@ def _exact_forward_pass(
     soc = drive_leg(cur_off, dest_off, soc)
     timeline.append((clock, dest_off, soc))
 
-    overhead_total = sum(s.detour_min + p.stop_overhead_min for s in stops)
+    rest_total = extra_rest_each * len(stops)
+    if not stops and extra_rest_each > 0:
+        # No charging stop to hide the break in — take it, and show it.
+        clock += extra_rest_each
+        rest_total = extra_rest_each
+        timeline.append((clock, dest_off, soc))
+
+    overhead_total = sum(
+        s.detour_min + p.stop_overhead_min + p.queue_min for s in stops
+    )
+    # Energy actually bought, priced at the plug (the curve is cable-side, so
+    # the efficiency factor belongs here and nowhere else).
+    charged_kwh = sum(
+        (s.depart_soc - s.arrive_soc) / 100.0 * veh.usable_kwh for s in stops
+    )
+    plug_kwh = charged_kwh / max(veh.charge_efficiency, 0.5)
     return SpeedResult(
         speed_kph=v_kph,
         feasible=True,
         total_min=clock,
-        drive_min=clock - charge_total - overhead_total,
+        drive_min=clock - charge_total - overhead_total - rest_total,
         charge_min=charge_total,
         n_stops=len(stops),
         stops=stops,
         timeline=timeline,
+        rest_min=rest_total,
+        energy_kwh=plug_kwh,
+        cost_eur=plug_kwh * p.price_per_kwh,
     )
 
 

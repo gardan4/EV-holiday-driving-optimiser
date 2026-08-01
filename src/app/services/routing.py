@@ -97,14 +97,24 @@ async def geocode(q: str, size: int = 5) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# Bump when the shape of the cached payload changes, so old entries are refetched
+# rather than silently missing new fields (v2 added elevation).
+ROUTE_PAYLOAD_VERSION = 2
+
+
 def _cache_key(o_lat: float, o_lon: float, d_lat: float, d_lon: float) -> str:
-    raw = f"{geohash_encode(o_lat, o_lon, 6)}|{geohash_encode(d_lat, d_lon, 6)}|driving-car"
+    raw = (
+        f"{geohash_encode(o_lat, o_lon, 6)}|{geohash_encode(d_lat, d_lon, 6)}"
+        f"|driving-car|v{ROUTE_PAYLOAD_VERSION}"
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def _payload_to_route(payload: dict) -> RouteData:
     coords = [(la, lo) for la, lo in payload["coords"]]
     geometry = RouteGeometry(coords)
+    # Per-vertex elevation, when the route was fetched with it (payload v2+).
+    elev = payload.get("elev") or []
     segments = []
     for step in payload["steps"]:
         dist_m, dur_s = step["d"], step["t"]
@@ -112,11 +122,23 @@ def _payload_to_route(payload: dict) -> RouteData:
             continue
         i, j = step["wp"]
         mid = coords[min((i + j) // 2, len(coords) - 1)]
+        climb = descent = 0.0
+        if elev and j < len(elev):
+            # Sum only real ups and downs; the net difference would hide a
+            # pass that climbs 600 m and gives most of it back.
+            for k in range(i, min(j, len(elev) - 1)):
+                dh = elev[k + 1] - elev[k]
+                if dh > 0:
+                    climb += dh
+                else:
+                    descent += -dh
         segments.append(
             RouteSegment(
                 dist_m=dist_m,
                 freeflow_kph=(dist_m / 1000.0) / (dur_s / 3600.0),
                 country=country_at(*mid),
+                climb_m=climb,
+                descent_m=descent,
             )
         )
     return RouteData(
@@ -135,7 +157,10 @@ async def _fetch_route_payload(
         resp = await _http().post(
             f"{ORS_BASE}/v2/directions/driving-car/geojson",
             headers={"Authorization": key},
-            json={"coordinates": [[o_lon, o_lat], [d_lon, d_lat]]},
+            json={
+                "coordinates": [[o_lon, o_lat], [d_lon, d_lat]],
+                "elevation": True,
+            },
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
@@ -148,7 +173,10 @@ async def _fetch_route_payload(
         raise HTTPException(status_code=503, detail="Routing is temporarily unavailable.")
 
     feat = resp.json()["features"][0]
-    coords = [[la, lo] for lo, la in feat["geometry"]["coordinates"]]
+    raw_coords = feat["geometry"]["coordinates"]
+    # With elevation on, ORS returns [lon, lat, ele] triples.
+    coords = [[c[1], c[0]] for c in raw_coords]
+    elev = [c[2] for c in raw_coords] if raw_coords and len(raw_coords[0]) > 2 else []
     props = feat["properties"]
     steps = []
     for seg in props["segments"]:
@@ -157,6 +185,7 @@ async def _fetch_route_payload(
     summary = props["summary"]
     return {
         "coords": coords,
+        "elev": elev,
         "steps": steps,
         "total_m": summary["distance"],
         "total_s": summary["duration"],

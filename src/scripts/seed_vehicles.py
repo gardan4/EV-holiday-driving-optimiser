@@ -8,6 +8,10 @@ DC charge curve is piecewise-linear (soc% → kW, cable-side), both hand-curated
 to match public fast-charge tests and range tests (Fastned charging guides, P3
 Charging Index, InsideEVs/Bjørn Nyland 1000 km tests). They are deliberately
 conservative approximations — good enough to compare cruise speeds, not lab data.
+
+`mass_kg` is kerb mass plus a nominal 180 kg of occupants and luggage; it only
+feeds the elevation term. `top_speed_kph` is the electronically limited top
+speed — the sweep stops there, because simulating a Born at 175 is fiction.
 """
 
 from __future__ import annotations
@@ -41,6 +45,8 @@ VEHICLES: list[dict] = [
             [55, 68], [65, 55], [75, 42], [85, 30], [95, 18], [100, 10],
         ],
         "max_dc_kw": 120.0,
+        "mass_kg": 1900.0,
+        "top_speed_kph": 160.0,
         "source_note": _MEB_NOTE,
         "sort_order": 10,
     },
@@ -56,6 +62,8 @@ VEHICLES: list[dict] = [
             [60, 75], [70, 60], [80, 45], [90, 28], [100, 12],
         ],
         "max_dc_kw": 135.0,
+        "mass_kg": 2080.0,
+        "top_speed_kph": 160.0,
         "source_note": _MEB_NOTE,
         "sort_order": 11,
     },
@@ -71,6 +79,8 @@ VEHICLES: list[dict] = [
             [55, 68], [65, 55], [75, 42], [85, 30], [95, 18], [100, 10],
         ],
         "max_dc_kw": 120.0,
+        "mass_kg": 1940.0,
+        "top_speed_kph": 160.0,
         "source_note": _MEB_NOTE,
         "sort_order": 20,
     },
@@ -86,6 +96,8 @@ VEHICLES: list[dict] = [
             [60, 75], [70, 60], [80, 45], [90, 28], [100, 12],
         ],
         "max_dc_kw": 135.0,
+        "mass_kg": 2300.0,
+        "top_speed_kph": 180.0,
         "source_note": _MEB_NOTE + " SUV body → higher consumption than ID.3.",
         "sort_order": 21,
     },
@@ -101,6 +113,8 @@ VEHICLES: list[dict] = [
             [60, 85], [70, 65], [80, 45], [90, 30], [100, 15],
         ],
         "max_dc_kw": 170.0,
+        "mass_kg": 1940.0,
+        "top_speed_kph": 201.0,
         "source_note": "LFP pack — relatively flat mid-SoC curve; very low consumption. "
         "Curated from Fastned/InsideEVs tests.",
         "sort_order": 30,
@@ -117,6 +131,8 @@ VEHICLES: list[dict] = [
             [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
         ],
         "max_dc_kw": 250.0,
+        "mass_kg": 2010.0,
+        "top_speed_kph": 201.0,
         "source_note": "V3 Supercharger peak 250 kW at low SoC with steady taper. "
         "Curated from Fastned/InsideEVs tests.",
         "sort_order": 31,
@@ -133,6 +149,8 @@ VEHICLES: list[dict] = [
             [60, 75], [70, 60], [80, 45], [90, 28], [100, 12],
         ],
         "max_dc_kw": 135.0,
+        "mass_kg": 2290.0,
+        "top_speed_kph": 180.0,
         "source_note": _MEB_NOTE,
         "sort_order": 40,
     },
@@ -148,6 +166,8 @@ VEHICLES: list[dict] = [
             [80, 60], [90, 35], [100, 10],
         ],
         "max_dc_kw": 220.0,
+        "mass_kg": 2280.0,
+        "top_speed_kph": 185.0,
         "source_note": "800 V platform — ~220 kW held nearly flat to ~45-50% SoC, then "
         "steep taper. Curated from Fastned/P3 tests.",
         "sort_order": 50,
@@ -164,6 +184,8 @@ VEHICLES: list[dict] = [
             [70, 55], [80, 40], [90, 25], [100, 10],
         ],
         "max_dc_kw": 130.0,
+        "mass_kg": 1890.0,
+        "top_speed_kph": 160.0,
         "source_note": "Curated from Fastned model guide; modest 130 kW peak with early taper.",
         "sort_order": 60,
     },
