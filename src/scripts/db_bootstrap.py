@@ -15,6 +15,11 @@ three cases so the same image works on prod (existing schema), on dev
 3. **Anything goes wrong** → log + exit non-zero so App Service surfaces
    the failure clearly (rather than the container dying inside the
    migration mid-startup).
+
+Then, on every boot, it reconciles the curated vehicle catalog with the
+repo. That step is best-effort: the schema must be right or nothing works,
+but the app serves perfectly well with a stale car list, and this file has
+already cost one crash loop.
 """
 
 from __future__ import annotations
@@ -47,20 +52,49 @@ def _make_alembic_config() -> Config:
     return cfg
 
 
-def _seed_vehicles_if_empty(engine) -> None:
-    """Populate the curated vehicle catalog on first boot (no-op otherwise)."""
-    from sqlalchemy import func, select
+def _sync_vehicle_catalog(engine) -> None:
+    """Reconcile the curated vehicle catalog with the repo, on every boot.
+
+    The catalog is seed data, not user data: `scripts/seed_vehicles.py` is the
+    single source of truth and `seed()` is an idempotent upsert by slug. This
+    used to run only when the table was empty, which meant a deployed database
+    was frozen at whatever it was first seeded with — ten new cars, or a
+    corrected charge curve, could never reach it without someone running the
+    seeder by hand against production. Since the upsert is idempotent, gating
+    it on emptiness bought nothing and cost exactly that.
+
+    Rows are never deleted. `trips.vehicle_id` references them, and a shared
+    permalink must keep resolving to the car it was planned with, so a vehicle
+    dropped from VEHICLES stays in the table and simply stops being offered.
+
+    Best-effort by design. A stale car list is a much smaller problem than an
+    API that will not start, so a failure here is logged loudly and swallowed —
+    unlike the migration above, which is fatal.
+    """
+    from sqlalchemy.exc import IntegrityError
     from sqlalchemy.orm import Session
 
-    from app.models import Vehicle
     from scripts.seed_vehicles import seed
 
-    with Session(engine) as session:
-        count = session.execute(select(func.count()).select_from(Vehicle)).scalar_one()
-        if count:
+    # Two containers restarting together can both find a slug missing and both
+    # insert it; the loser trips the unique index. Retrying is enough — the row
+    # exists by then, so the second pass takes the update branch.
+    for attempt in (1, 2):
+        try:
+            with Session(engine) as session:
+                created, updated = seed(session)
+            logger.info(
+                "Vehicle catalog synced: %d created, %d updated", created, updated
+            )
             return
-        created, updated = seed(session)
-        logger.info("Vehicle catalog empty → seeded %d vehicles", created + updated)
+        except IntegrityError:
+            if attempt == 2:
+                logger.exception("Vehicle catalog sync lost a race twice — skipping")
+                return
+            logger.warning("Vehicle catalog sync raced another boot; retrying")
+        except Exception:
+            logger.exception("Vehicle catalog sync failed — serving the existing list")
+            return
 
 
 def main() -> int:
@@ -82,7 +116,7 @@ def main() -> int:
             cfg = _make_alembic_config()
             command.upgrade(cfg, "head")
             logger.info("alembic upgrade head complete")
-            _seed_vehicles_if_empty(engine)
+            _sync_vehicle_catalog(engine)
             return 0
 
         logger.info(
@@ -94,7 +128,7 @@ def main() -> int:
         cfg = _make_alembic_config()
         command.stamp(cfg, TARGET_HEAD_REVISION)
         logger.info("Fresh DB bootstrapped at revision %s", TARGET_HEAD_REVISION)
-        _seed_vehicles_if_empty(engine)
+        _sync_vehicle_catalog(engine)
         return 0
 
     except Exception as exc:
