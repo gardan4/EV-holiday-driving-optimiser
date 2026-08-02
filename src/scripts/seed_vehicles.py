@@ -32,6 +32,18 @@ _MEB_NOTE = (
     "Curated from Fastned model guide + P3 Charging Index style tests."
 )
 
+_EGMP_NOTE = (
+    "Hyundai/Kia E-GMP 800 V platform — peak power held nearly flat to ~45-50% "
+    "SoC, then a steep taper, so these cars want short stops taken low. "
+    "Curated from Fastned model guides + P3 Charging Index style tests."
+)
+
+_VOLVO_CMA_NOTE = (
+    "Volvo CMA 82 kWh pack (2024 rear-motor Extended Range): ~200 kW peak that "
+    "tapers from ~30% SoC. All Volvos are limited to 180 km/h. Curated from "
+    "Fastned model guide + P3 Charging Index style tests."
+)
+
 VEHICLES: list[dict] = [
     {
         "slug": "cupra-born-58",
@@ -102,6 +114,24 @@ VEHICLES: list[dict] = [
         "sort_order": 21,
     },
     {
+        "slug": "vw-id7-pro-77",
+        "make": "Volkswagen",
+        "model": "ID.7",
+        "variant": "Pro 77 kWh",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0105},
+        "charge_curve": [
+            [0, 70], [5, 165], [10, 175], [35, 172], [45, 140], [55, 112],
+            [65, 88], [75, 65], [85, 42], [95, 22], [100, 10],
+        ],
+        "max_dc_kw": 175.0,
+        "mass_kg": 2350.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_NOTE
+        + " Cd 0.23 saloon — a big car that is genuinely efficient at motorway speed.",
+        "sort_order": 22,
+    },
+    {
         "slug": "tesla-model3-rwd",
         "make": "Tesla",
         "model": "Model 3",
@@ -136,6 +166,24 @@ VEHICLES: list[dict] = [
         "source_note": "V3 Supercharger peak 250 kW at low SoC with steady taper. "
         "Curated from Fastned/InsideEVs tests.",
         "sort_order": 31,
+    },
+    {
+        "slug": "tesla-modely-lr",
+        "make": "Tesla",
+        "model": "Model Y",
+        "variant": "Long Range AWD 75 kWh",
+        "usable_kwh": 75.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0100},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2180.0,
+        "top_speed_kph": 217.0,
+        "source_note": "Model 3 Long Range pack and curve in a taller body — same "
+        "charging, noticeably more drag. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 32,
     },
     {
         "slug": "skoda-enyaq-77",
@@ -173,6 +221,42 @@ VEHICLES: list[dict] = [
         "sort_order": 50,
     },
     {
+        "slug": "hyundai-ioniq6-74-rwd",
+        "make": "Hyundai",
+        "model": "Ioniq 6",
+        "variant": "77 kWh RWD",
+        "usable_kwh": 74.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0084},
+        "charge_curve": [
+            [0, 75], [10, 233], [45, 225], [55, 185], [65, 125], [75, 82],
+            [80, 62], [90, 36], [100, 10],
+        ],
+        "max_dc_kw": 233.0,
+        "mass_kg": 2110.0,
+        "top_speed_kph": 185.0,
+        "source_note": _EGMP_NOTE
+        + " Cd 0.21 — the slipperiest car in this list, so the speed penalty bites "
+        "later than on the Ioniq 5 it shares a pack with.",
+        "sort_order": 51,
+    },
+    {
+        "slug": "kia-ev6-74-rwd",
+        "make": "Kia",
+        "model": "EV6",
+        "variant": "77 kWh RWD",
+        "usable_kwh": 74.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0119},
+        "charge_curve": [
+            [0, 75], [10, 240], [45, 230], [55, 185], [65, 125], [75, 82],
+            [80, 60], [90, 35], [100, 10],
+        ],
+        "max_dc_kw": 240.0,
+        "mass_kg": 2195.0,
+        "top_speed_kph": 185.0,
+        "source_note": _EGMP_NOTE,
+        "sort_order": 55,
+    },
+    {
         "slug": "renault-megane-60",
         "make": "Renault",
         "model": "Mégane E-Tech",
@@ -188,6 +272,120 @@ VEHICLES: list[dict] = [
         "top_speed_kph": 160.0,
         "source_note": "Curated from Fastned model guide; modest 130 kW peak with early taper.",
         "sort_order": 60,
+    },
+    {
+        "slug": "renault-5-52",
+        "make": "Renault",
+        "model": "5 E-Tech",
+        "variant": "Comfort Range 52 kWh",
+        "usable_kwh": 52.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 48.0, "b_wh_km_per_kph2": 0.0100},
+        "charge_curve": [
+            [0, 55], [5, 95], [10, 100], [35, 100], [45, 85], [55, 70],
+            [65, 58], [75, 45], [85, 30], [95, 16], [100, 8],
+        ],
+        "max_dc_kw": 100.0,
+        "mass_kg": 1630.0,
+        "top_speed_kph": 150.0,
+        "source_note": "Light (~1.45 t) but not slippery, and only 100 kW peak on a "
+        "52 kWh pack — the small-battery, modest-charging case this tool is most "
+        "worth running. Limited to 150 km/h, so the sweep stops there. Curated from "
+        "Fastned model guide + P3 Charging Index style tests.",
+        "sort_order": 61,
+    },
+    {
+        "slug": "volvo-ex30-er",
+        "make": "Volvo",
+        "model": "EX30",
+        "variant": "Single Motor Extended Range",
+        "usable_kwh": 64.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0115},
+        "charge_curve": [
+            [0, 70], [5, 145], [10, 153], [25, 150], [35, 125], [45, 105],
+            [55, 85], [65, 68], [75, 50], [85, 33], [95, 18], [100, 10],
+        ],
+        "max_dc_kw": 153.0,
+        "mass_kg": 2030.0,
+        "top_speed_kph": 180.0,
+        "source_note": "Smaller 69 kWh NMC pack (~64 kWh usable), 153 kW peak. The "
+        "180 km/h Volvo limiter caps the sweep well before the curve turns. "
+        "Curated from Fastned model guide + P3 Charging Index style tests.",
+        "sort_order": 70,
+    },
+    {
+        "slug": "volvo-ex40-er",
+        "make": "Volvo",
+        "model": "EX40",
+        "variant": "Single Motor Extended Range",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 64.0, "b_wh_km_per_kph2": 0.0150},
+        "charge_curve": [
+            [0, 90], [5, 190], [10, 200], [20, 190], [30, 160], [40, 135],
+            [50, 110], [60, 90], [70, 70], [80, 50], [90, 30], [100, 12],
+        ],
+        "max_dc_kw": 200.0,
+        "mass_kg": 2230.0,
+        "top_speed_kph": 180.0,
+        "source_note": _VOLVO_CMA_NOTE
+        + " Formerly the XC40 Recharge; a boxy Cd 0.34 SUV, so motorway speed costs "
+        "it more than almost anything else here.",
+        "sort_order": 71,
+    },
+    {
+        "slug": "volvo-ec40-er",
+        "make": "Volvo",
+        "model": "EC40",
+        "variant": "Single Motor Extended Range",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 63.0, "b_wh_km_per_kph2": 0.0141},
+        "charge_curve": [
+            [0, 90], [5, 190], [10, 200], [20, 190], [30, 160], [40, 135],
+            [50, 110], [60, 90], [70, 70], [80, 50], [90, 30], [100, 12],
+        ],
+        "max_dc_kw": 200.0,
+        "mass_kg": 2230.0,
+        "top_speed_kph": 180.0,
+        "source_note": _VOLVO_CMA_NOTE
+        + " Formerly the C40 Recharge — same pack and curve as the EX40, with a "
+        "fastback roof worth a few percent of drag.",
+        "sort_order": 72,
+    },
+    {
+        "slug": "polestar-2-lr-sm",
+        "make": "Polestar",
+        "model": "2",
+        "variant": "Long Range Single Motor",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0115},
+        "charge_curve": [
+            [0, 85], [10, 200], [20, 205], [30, 175], [40, 145], [50, 115],
+            [60, 92], [70, 72], [80, 50], [90, 30], [100, 12],
+        ],
+        "max_dc_kw": 205.0,
+        "mass_kg": 2230.0,
+        "top_speed_kph": 205.0,
+        "source_note": "2024 rear-motor 82 kWh car: 205 kW peak, taper from ~25% SoC. "
+        "Shares the EX40's platform but is far lower and slipperier. "
+        "Curated from Fastned model guide + P3 Charging Index style tests.",
+        "sort_order": 80,
+    },
+    {
+        "slug": "bmw-i4-edrive40",
+        "make": "BMW",
+        "model": "i4",
+        "variant": "eDrive40 84 kWh",
+        "usable_kwh": 81.3,
+        "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0100},
+        "charge_curve": [
+            [0, 85], [10, 200], [20, 205], [35, 180], [45, 150], [55, 120],
+            [65, 95], [75, 70], [85, 45], [95, 22], [100, 10],
+        ],
+        "max_dc_kw": 205.0,
+        "mass_kg": 2305.0,
+        "top_speed_kph": 190.0,
+        "source_note": "Big 81 kWh usable pack with a broad 205 kW plateau — long legs "
+        "and few stops. Curated from Fastned model guide + P3 Charging Index style tests.",
+        "sort_order": 90,
     },
 ]
 

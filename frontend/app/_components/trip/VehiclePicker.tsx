@@ -1,6 +1,7 @@
 "use client"
 
-import { BatteryCharging, Gauge, Zap } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BatteryCharging, Gauge, Search, Zap } from "lucide-react"
 import { Vehicle } from "@/lib/client"
 
 interface VehiclePickerProps {
@@ -9,8 +10,23 @@ interface VehiclePickerProps {
   onChange: (vehicleId: string) => void
 }
 
-/** Card-per-car picker (radio semantics). */
+/** Card-per-car picker (radio semantics), filterable once the catalog is long. */
 export default function VehiclePicker({ vehicles, value, onChange }: VehiclePickerProps) {
+  const [query, setQuery] = useState("")
+
+  // Match the printed name only. Folding the spec numbers in as well seemed
+  // helpful until "ioniq 6" matched the Ioniq 5, whose 72.6 kWh contains a 6 —
+  // people search for their car by name, so the name is what we search.
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return vehicles
+    const terms = q.split(/\s+/)
+    return vehicles.filter((v) => {
+      const hay = `${v.make} ${v.model} ${v.variant ?? ""}`.toLowerCase()
+      return terms.every((t) => hay.includes(t))
+    })
+  }, [vehicles, query])
+
   return (
     <div>
       <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
@@ -39,12 +55,28 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
           Loading the car list… if this stays empty the API isn&apos;t reachable.
         </div>
       )}
+
+      {/* Below about a dozen cars the list is faster to scan than to type into. */}
+      {vehicles.length > 12 && (
+        <div className="relative mb-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={`Filter ${vehicles.length} cars — try "volvo" or "ioniq"`}
+            aria-label="Filter cars"
+            className="w-full rounded-xl border border-ink-200 bg-white py-2 pl-9 pr-3 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
+          />
+        </div>
+      )}
+
       <div
         role="radiogroup"
         aria-label="Your car"
         className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2"
       >
-        {vehicles.map((v) => {
+        {shown.map((v) => {
           const selected = v.id === value
           return (
             <button
@@ -90,6 +122,19 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
           )
         })}
       </div>
+
+      {vehicles.length > 0 && shown.length === 0 && (
+        <p className="mt-2 text-xs text-ink-400">
+          No car matches “{query}”.{" "}
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="font-semibold text-brand-700 underline underline-offset-2"
+          >
+            Show all {vehicles.length}
+          </button>
+        </p>
+      )}
     </div>
   )
 }
