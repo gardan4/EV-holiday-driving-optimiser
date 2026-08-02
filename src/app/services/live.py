@@ -1,0 +1,396 @@
+"""Following a trip while it is actually being driven.
+
+Pure functions over plain dicts and simulator types — no database, no HTTP, no
+clock of its own. `api/runs.py` supplies the persistence and the timestamps;
+everything here is unit-testable the same way `simulator.py` is.
+
+Three jobs:
+
+* **Where are you.** A GPS fix snaps to the route polyline and becomes an
+  offset along it. Off-route beyond `OFF_ROUTE_M` we stop guessing rather than
+  report a confident lie.
+* **What is the battery at.** No car exposes its state of charge to a web page,
+  so it is inferred from progress since the last figure the driver typed in,
+  and every typed figure re-anchors the estimate and calibrates the model.
+* **How is it going against the plan.** Ahead or behind, and whether the
+  divergence is now big enough to be worth re-planning.
+
+The estimate is always presented with its uncertainty (`soc_uncertainty_pct`),
+which grows with the age of the anchor. A bare number would imply a precision
+this cannot have.
+"""
+
+from __future__ import annotations
+
+import math
+from bisect import bisect_left
+from dataclasses import replace
+
+from app.services.simulator import (
+    ChargerNode,
+    RouteProfile,
+    RouteSegment,
+    SimParams,
+    SpeedResult,
+    VehicleParams,
+    charge_forward,
+)
+
+# A fix further than this from the polyline means the driver has left the
+# route — a diversion, a supermarket, a closed motorway. `project` would snap
+# it back and report almost no progress while real energy is being spent, so
+# inference stops and says so.
+OFF_ROUTE_M = 500.0
+
+# Fixes this vague don't move the position; they're recorded but ignored.
+MAX_ACCURACY_M = 200.0
+
+# Standing within this of a planned stop, with the wheels not turning, counts
+# as plugged in.
+AT_CHARGER_M = 150.0
+
+# Below this the observed "speed" is noise, not driving.
+MIN_OBSERVED_KPH = 5.0
+
+# How far the calibration factor may be pushed by readings. A car that really
+# is 40% thirstier than the catalog is a broken model, not a data point.
+RUN_FACTOR_MIN = 0.7
+RUN_FACTOR_MAX = 1.4
+
+# Below this the modelled energy is too small for a 1% SoC reading to calibrate
+# anything: the reading's own noise would swamp the signal.
+MIN_KWH_TO_CALIBRATE = 5.0
+
+# Uncertainty on the inferred SoC: a floor, plus growth with anchor age.
+SOC_UNCERTAINTY_FLOOR = 0.5
+SOC_UNCERTAINTY_PER_30MIN = 0.8
+SOC_UNCERTAINTY_CAP = 15.0
+
+# When to suggest re-planning.
+BEHIND_MIN_TO_REPLAN = 15.0
+SOC_SHORTFALL_TO_REPLAN = 8.0
+
+
+def new_state(offset_m: float, soc: float, lat: float, lon: float, at_min: float) -> dict:
+    """The state a run starts with. `at_min` is minutes since departure."""
+    return {
+        "at_min": at_min,
+        "offset_m": offset_m,
+        "lat": lat,
+        "lon": lon,
+        "soc": soc,
+        # The last figure a human actually read off the dashboard, and where
+        # and when. Everything else is measured from here.
+        "anchor_soc": soc,
+        "anchor_offset_m": offset_m,
+        "anchor_at_min": at_min,
+        "soc_is_measured": True,
+        # Accumulated since the anchor. Driving is tracked in kWh and charging
+        # in SoC, because that is the space each is naturally computed in;
+        # they are combined only when the estimate is read.
+        "kwh_used": 0.0,
+        "soc_gained": 0.0,
+        # Multiplier on consumption learned from the driver's own corrections.
+        "run_factor": 1.0,
+        "off_route_m": 0.0,
+        "at_charger_id": None,
+        "stale": False,
+    }
+
+
+def current_soc(state: dict, usable_kwh: float) -> float:
+    """The battery estimate: the anchor, less what driving has taken, plus
+    what charging has put back."""
+    drop = state["kwh_used"] / max(usable_kwh, 1e-6) * 100.0
+    return _clamp(state["anchor_soc"] - drop + state["soc_gained"], 0.0, 100.0)
+
+
+def soc_uncertainty(state: dict) -> float:
+    """How far off the estimate could plausibly be, in percentage points.
+
+    Zero the instant the driver types a figure in, widening thereafter. Shown
+    next to the number so nobody reads three significant figures into it.
+    """
+    if state.get("soc_is_measured"):
+        return 0.0
+    age = max(0.0, state["at_min"] - state["anchor_at_min"])
+    band = SOC_UNCERTAINTY_FLOOR + SOC_UNCERTAINTY_PER_30MIN * (age / 30.0)
+    return min(band, SOC_UNCERTAINTY_CAP)
+
+
+def advance(
+    state: dict,
+    *,
+    segments: list[RouteSegment],
+    veh: VehicleParams,
+    p: SimParams,
+    offset_m: float,
+    lat: float,
+    lon: float,
+    at_min: float,
+    off_route_m: float,
+    moving_s: float,
+    stationary_s: float,
+    stop_power_kw: float | None = None,
+    at_charger_id: str | None = None,
+) -> dict:
+    """Fold one GPS ping into the state and return the new one.
+
+    Accumulates per ping rather than integrating from the anchor in one go.
+    Energy is convex in speed — `a + b·v²` — so twenty minutes at 150 followed
+    by twenty at 90 costs more than forty at 120, and collapsing a long window
+    to its average would quietly under-bill exactly the fast stretches that
+    matter. Ping by ping the window is short enough for the error to vanish,
+    the work is O(1), and a dropped ping degrades instead of corrupting.
+    """
+    prev_offset = state["offset_m"]
+    dt_move_h = max(0.0, moving_s) / 3600.0
+    dt_still_h = max(0.0, stationary_s) / 3600.0
+
+    out = dict(state)
+    out["at_min"] = at_min
+    out["lat"] = lat
+    out["lon"] = lon
+    out["off_route_m"] = off_route_m
+
+    if off_route_m > OFF_ROUTE_M:
+        # Snapping this to the polyline would report no progress while the car
+        # is demonstrably burning energy somewhere else. Say "unknown" instead.
+        out["stale"] = True
+        out["at_charger_id"] = None
+        return out
+    out["stale"] = False
+
+    # Never let a wobbly fix walk the car backwards along the route.
+    dx = max(0.0, offset_m - prev_offset)
+    out["offset_m"] = max(prev_offset, offset_m)
+
+    parked = at_charger_id is not None and dx < AT_CHARGER_M
+    if parked and stop_power_kw:
+        # Plugged in: integrate the same charge curve the plan used, so the
+        # battery the app shows and the battery the plan assumed can't drift.
+        minutes = (dt_move_h + dt_still_h) * 60.0
+        soc_before = current_soc(out, veh.usable_kwh)
+        soc_after = charge_forward(
+            veh, soc_before, minutes, stop_power_kw, p.charge_power_factor
+        )
+        out["soc_gained"] = out["soc_gained"] + max(0.0, soc_after - soc_before)
+        out["at_charger_id"] = at_charger_id
+        # No aux draw: at a DC charger the cabin is served by the charger, not
+        # the pack, which is what drivers actually observe.
+        out["soc_is_measured"] = False
+        return out
+
+    out["at_charger_id"] = at_charger_id if parked else None
+
+    # The speed to price the drag at: the average while ACTUALLY MOVING, with
+    # standing time billed separately below. The planned cruise would over-bill
+    # a traffic jam, and a plain distance/elapsed average would under-bill the
+    # motorway either side of it.
+    if dt_move_h > 1e-9 and dx > 0.0:
+        v_obs = _clamp((dx / 1000.0) / dt_move_h, MIN_OBSERVED_KPH, veh.top_speed_kph)
+        # `p.consumption_factor` already carries the calibration learned from
+        # this drive's readings — the caller builds it that way, and the
+        # re-planner uses the same params. Multiplying by `run_factor` again
+        # here would square the correction: a car measured 20% thirsty would be
+        # modelled 44% thirsty, and every reading would make it worse.
+        prof = RouteProfile(segments, v_obs, veh, replace(p, aux_kw=0.0))
+        out["kwh_used"] = out["kwh_used"] + max(
+            0.0, prof.kwh_at(out["offset_m"]) - prof.kwh_at(prev_offset)
+        )
+
+    # Conditioning is billed by the hour and keeps running at a standstill —
+    # which is exactly why it is not part of the per-kilometre term.
+    out["kwh_used"] = out["kwh_used"] + p.aux_kw * (dt_move_h + dt_still_h)
+    out["soc_is_measured"] = False
+    return out
+
+
+def apply_reading(state: dict, soc: float, usable_kwh: float) -> dict:
+    """Re-anchor on a figure the driver read off the dashboard, and use the
+    error to calibrate.
+
+    Every correction is free ground truth about this car, on this day, in this
+    wind — none of which any plan-time parameter can know. After a couple of
+    them the remaining-range prediction stops being a catalog figure and starts
+    being a measurement.
+    """
+    out = dict(state)
+    # Compare CONSUMPTION with consumption. Charging since the anchor has to be
+    # added back, or a reading taken after a stop would score the energy the
+    # charger put in as energy the car failed to use.
+    gained_kwh = state["soc_gained"] / 100.0 * usable_kwh
+    modelled = state["kwh_used"]
+    observed = (state["anchor_soc"] - soc) / 100.0 * usable_kwh + gained_kwh
+
+    ratio = observed / modelled if modelled > 0.0 else None
+    plausible = ratio is not None and RUN_FACTOR_MIN <= ratio <= RUN_FACTOR_MAX
+    if modelled >= MIN_KWH_TO_CALIBRATE and plausible:
+        # Half-and-half: one reading should move the model, not define it.
+        blended = 0.5 * state["run_factor"] + 0.5 * state["run_factor"] * ratio
+        out["run_factor"] = _clamp(blended, RUN_FACTOR_MIN, RUN_FACTOR_MAX)
+        out["last_error_pct"] = (observed - modelled) / modelled * 100.0
+    else:
+        # Deliberately NOT clamped-and-applied. A discrepancy this large isn't
+        # a thirstier car, it's something the model never saw — a charge we
+        # weren't pinged through, a detour, a driver correcting a typo. Pinning
+        # the factor to the edge of its range on that evidence would bake the
+        # gap in permanently. Re-anchor and carry on.
+        out["last_error_pct"] = None
+
+    out["anchor_soc"] = soc
+    out["anchor_offset_m"] = state["offset_m"]
+    out["anchor_at_min"] = state["at_min"]
+    out["kwh_used"] = 0.0
+    out["soc_gained"] = 0.0
+    out["soc"] = soc
+    out["soc_is_measured"] = True
+    out["stale"] = False
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Measuring the drive against the plan it came from
+# ---------------------------------------------------------------------------
+
+
+def plan_window_at(timeline: list, offset_m: float) -> tuple[float, float]:
+    """When the plan expected to be at this point — as an interval.
+
+    Stops appear in the timeline TWICE at the same offset, once on arrival and
+    once on departure, so a single "planned time here" does not exist while the
+    car is at a charger. Returning the pair lets the caller report nothing at
+    all during the stop, instead of flapping between "12 minutes ahead" and
+    "8 behind" for the whole time the driver stands at the plug.
+    """
+    if not timeline:
+        return (0.0, 0.0)
+    xs = [pt[1] for pt in timeline]
+    ts = [pt[0] for pt in timeline]
+    if offset_m <= xs[0]:
+        return (ts[0], ts[0])
+    if offset_m >= xs[-1]:
+        return (ts[-1], ts[-1])
+
+    i = bisect_left(xs, offset_m)
+    if i < len(xs) and xs[i] == offset_m:
+        j = i
+        while j + 1 < len(xs) and xs[j + 1] == offset_m:
+            j += 1
+        return (ts[i], ts[j])
+
+    lo = i - 1
+    x0, x1 = xs[lo], xs[lo + 1]
+    if x1 == x0:
+        return (ts[lo], ts[lo + 1])
+    f = (offset_m - x0) / (x1 - x0)
+    t = ts[lo] + f * (ts[lo + 1] - ts[lo])
+    return (t, t)
+
+
+def plan_soc_at(timeline: list, offset_m: float) -> float:
+    """The SoC the plan predicted here. At a stop this is the DEPARTURE value —
+    the useful comparison is "should I have this much leaving", not the dip on
+    the way in."""
+    if not timeline:
+        return 0.0
+    _, hi = plan_window_at(timeline, offset_m)
+    best = timeline[0][2]
+    for t, x, s in timeline:
+        if x <= offset_m + 1e-6 and t <= hi + 1e-6:
+            best = s
+    return best
+
+
+def schedule_delta_min(timeline: list, offset_m: float, elapsed_min: float) -> float:
+    """Minutes behind the plan; negative is ahead. Zero while inside the
+    window a stop occupies."""
+    lo, hi = plan_window_at(timeline, offset_m)
+    if lo - 1e-9 <= elapsed_min <= hi + 1e-9:
+        return 0.0
+    return elapsed_min - hi if elapsed_min > hi else elapsed_min - lo
+
+
+def needs_replan(
+    *, delta_min: float, soc_now: float, soc_planned: float, stale: bool
+) -> tuple[bool, list[str]]:
+    """Whether reality has diverged enough to be worth re-optimising, and the
+    plain-language reasons — which are what the driver is actually shown."""
+    reasons: list[str] = []
+    if stale:
+        return (False, ["off the planned route — position and battery are unknown"])
+    if delta_min >= BEHIND_MIN_TO_REPLAN:
+        reasons.append(f"{delta_min:.0f} min behind the plan")
+    shortfall = soc_planned - soc_now
+    if shortfall >= SOC_SHORTFALL_TO_REPLAN:
+        reasons.append(
+            f"battery {shortfall:.0f}% below what the plan expected by now"
+        )
+    return (bool(reasons), reasons)
+
+
+def benchmark(
+    *,
+    original_speed_kph: float,
+    original_total_min: float,
+    elapsed_min: float,
+    remaining: SpeedResult,
+    original_stops_remaining: int,
+) -> dict:
+    """The revised journey set against the promise it is replacing.
+
+    The point of re-planning mid-drive is not a fresh number in isolation — it
+    is knowing what the delay actually cost, and whether the new plan claws any
+    of it back.
+    """
+    live_total = elapsed_min + (remaining.total_min or 0.0)
+    return {
+        "original_speed_kph": original_speed_kph,
+        "original_total_min": original_total_min,
+        "live_total_min": live_total,
+        "delta_min": live_total - original_total_min,
+        "original_stops_remaining": original_stops_remaining,
+        "live_stops_remaining": remaining.n_stops or 0,
+    }
+
+
+def nearest_planned_stop(
+    stops: list, offset_m: float, lat: float, lon: float
+) -> tuple[str | None, float | None]:
+    """Which planned stop, if any, the car is standing at. Matched on distance
+    along the route rather than straight-line distance, because the route is
+    the only axis the rest of this module speaks."""
+    best_id, best_kw, best_d = None, None, AT_CHARGER_M
+    for s in stops:
+        d = abs(_stop_offset(s) - offset_m)
+        if d <= best_d:
+            best_id, best_kw, best_d = _stop_id(s), _stop_power(s), d
+    return best_id, best_kw
+
+
+def _stop_offset(s) -> float:
+    return s["offset_m"] if isinstance(s, dict) else s.offset_m
+
+
+def _stop_id(s) -> str:
+    return s["charger_id"] if isinstance(s, dict) else s.charger_id
+
+
+def _stop_power(s) -> float:
+    return s["power_kw"] if isinstance(s, dict) else s.power_kw
+
+
+def snapshot_segments(snapshot: dict) -> list[RouteSegment]:
+    return [RouteSegment(**s) for s in snapshot["segments"]]
+
+
+def snapshot_chargers(snapshot: dict) -> list[ChargerNode]:
+    return [ChargerNode(**c) for c in snapshot["chargers"]]
+
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _isclose(a: float, b: float, tol: float = 1e-9) -> bool:
+    return math.isclose(a, b, abs_tol=tol)

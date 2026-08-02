@@ -35,3 +35,16 @@ limiter = Limiter(
     key_func=_client_ip,
     storage_uri=settings.RATE_LIMIT_STORAGE_URI or None,
 )
+
+
+def run_key(request: Request) -> str:
+    """Bucket live-run writes by the run id in the path, not by IP.
+
+    A carful of phones shares one address, and a mobile carrier's CGNAT puts
+    thousands of unrelated drivers behind a single one — an IP bucket tight
+    enough to be worth having would throttle legitimate drivers off the road.
+    The run id is already a per-driver capability, so it is the honest bucket.
+    Falls back to the IP if the path somehow has no run id.
+    """
+    run_id = request.path_params.get("run_id")
+    return f"run:{run_id}" if run_id else _client_ip(request)

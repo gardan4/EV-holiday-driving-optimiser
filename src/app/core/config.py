@@ -109,6 +109,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_PLAN: str = "10/minute"          # trip planning (may trigger ORS/OCM calls) per IP
     RATE_LIMIT_GEOCODE: str = "30/minute"       # geocode autocomplete proxy per IP
     RATE_LIMIT_DEFAULT: str = "60/minute"       # general API per IP
+    # Live runs. The write buckets are keyed on the RUN ID rather than the IP
+    # (see rate_limit.run_key) — a carful shares one address and a mobile
+    # carrier's CGNAT shares one with thousands of strangers.
+    RATE_LIMIT_RUN_START: str = "6/hour"         # per IP: starting a drive is rare
+    RATE_LIMIT_LIVE_PING: str = "12/minute"      # per run: ~25 s cadence + retries
+    RATE_LIMIT_LIVE_REPLAN: str = "6/minute"     # per run: a real CPU sweep
+    RATE_LIMIT_LIVE_READ: str = "120/minute"     # per IP: watchers poll
     # Shared rate-limit backend. Empty = in-process memory (per-instance, resets
     # on restart). Set to a redis://… URI in production so the limit is global
     # across App Service instances and survives restarts.

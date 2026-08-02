@@ -38,6 +38,7 @@ from app.services.simulator import (
     SpeedResult,
     VehicleParams,
     optimum,
+    payload_extra_kg,
     sweep,
 )
 
@@ -151,6 +152,7 @@ async def plan_trip(
         aux_kw=(
             aux_kw_for_temp(plan.temperature_c) if plan.temperature_c is not None else 0.0
         ),
+        extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
         autobahn_open_share=plan.autobahn_open_share,
         over_cap_kph=plan.over_cap_kph,
         over_freeflow_factor=plan.over_freeflow_factor,

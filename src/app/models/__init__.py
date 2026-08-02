@@ -10,6 +10,11 @@ MSSQL note: UUID primary keys use the `GUID` TypeDecorator (CHAR(36)); a plain
 Boolean filters must be written `== True  # noqa: E712` — `.is_(True)` compiles
 to `IS 1`, a T-SQL syntax error. JSON columns use SQLAlchemy `JSON`
 (NVARCHAR(MAX) on MSSQL, JSON-as-TEXT on the SQLite test engine).
+
+JSON columns here are plain `JSON`, not `MutableDict.as_mutable(JSON)`, so
+SQLAlchemy does NOT notice in-place edits: `run.state["soc"] = x` is silently
+discarded on commit. Always reassign the whole value —
+`run.state = {**run.state, "soc": x}` — as `routing.py` already does.
 """
 
 import uuid
@@ -170,3 +175,92 @@ class Trip(Base):
     result: Mapped[dict] = mapped_column(JSON, nullable=False)
     result_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ---------------------------------------------------------------------------
+# Live runs — an actual drive of a Trip, followed in real time
+# ---------------------------------------------------------------------------
+
+
+class TripRun(Base):
+    """One live drive of a `Trip`.
+
+    The UUID id is the DRIVER'S WRITE TOKEN and must never appear in a read
+    response. The trip's own id is a public, read-only share link — anyone
+    holding it can watch the journey, and nobody holding only it can move the
+    car. Watchers read through `GET /api/trips/{trip_id}/live`, which resolves
+    the active run itself and returns `run_ref` (a hash) instead of the id.
+    """
+
+    __tablename__ = "trip_runs"
+    # Every lookup is "the live run of this trip"; nothing queries status alone.
+    __table_args__ = (Index("ix_trip_runs_trip_status", "trip_id", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    trip_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("trips.id"), nullable=False
+    )
+    # "active" | "finished" | "abandoned"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Last contact from the driver — drives "is this still live?" and lets a
+    # stale ping be rejected without a row lock.
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, index=True
+    )
+    # The cruise speed the driver said they'd hold; picks the benchmark plan
+    # out of the trip's sweep.
+    planned_speed_kph: Mapped[float] = mapped_column(Float, nullable=False)
+    # Frozen simulator inputs for THIS run: segments, chargers, the geometry
+    # axis map, polyline. Snapshotted at the start because `Trip` persists the
+    # plan but NOT the segments and chargers behind it — without this, every
+    # re-plan would re-hit ORS/OCM mid-drive and an expired cache could hand
+    # back a different route, quietly making the original-plan benchmark a lie.
+    route_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # Last known position, battery, and the anchor the estimate is measured
+    # from. Reassign wholesale — see the note below.
+    state: Mapped[dict] = mapped_column(JSON, nullable=False)
+    # The current revised plan for the remaining journey; null until the first
+    # re-plan, after which the original stays available on the Trip.
+    plan: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    plan_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_pings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_replans: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_soc_readings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+
+
+class TripEvent(Base):
+    """Append-only log of the material moments in a run.
+
+    Deliberately NOT one row per GPS ping. Pings overwrite `TripRun.state`;
+    only decisions and coarse breadcrumbs land here, so a nine-hour drive is
+    on the order of a hundred rows rather than two thousand — and every one of
+    them is something the post-trip review actually wants to show.
+    """
+
+    __tablename__ = "trip_events"
+    __table_args__ = (Index("ix_trip_events_run_at", "run_id", "at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        GUID(), ForeignKey("trip_runs.id"), nullable=False
+    )
+    # SERVER clock. The phone's clock is not trusted for ordering; if the
+    # device's own timestamp matters it goes in `payload`.
+    at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    # start | breadcrumb | soc_reading | arrive_stop | charge_start |
+    # charge_end | replan | off_route | finish
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    offset_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    soc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
