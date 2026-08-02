@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import AppHeader from "@/app/_components/AppHeader"
 import ResultsView from "@/app/_components/trip/ResultsView"
-import { Trip } from "@/lib/client"
+import { LiveRun, Trip } from "@/lib/client"
 import { fmtDuration, fmtHm } from "@/lib/format"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100"
@@ -44,14 +44,26 @@ export async function generateMetadata({
   }
 }
 
+/** The most recent drive of this trip, if there has been one. Absent is the
+ *  normal case and not an error. */
+async function fetchLive(id: string): Promise<LiveRun | null> {
+  try {
+    const res = await fetch(`${API_URL}/api/trips/${id}/live`, { cache: "no-store" })
+    if (!res.ok) return null
+    return (await res.json()) as LiveRun
+  } catch {
+    return null
+  }
+}
+
 export default async function TripPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const trip = await fetchTrip(id)
+  const [trip, live] = await Promise.all([fetchTrip(id), fetchLive(id)])
   if (!trip) notFound()
   return (
     <main className="min-h-screen">
       <AppHeader />
-      <ResultsView trip={trip} />
+      <ResultsView trip={trip} live={live} />
     </main>
   )
 }

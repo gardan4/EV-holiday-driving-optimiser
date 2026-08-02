@@ -23,7 +23,13 @@ const CHARGE = "#d98e1f" // --color-chart-charge
 // it belongs to the stop, and lightness (not hue) carries the distinction, so
 // it survives every form of colour blindness.
 const STOP = "#efc98f"
-const REST = "#aab6c5" // ink-300, for break time
+// Breaks. Was ink-300, a grey-blue that sat directly against the blue driving
+// block above it and vanished — and a break is usually the thinnest slice in
+// the bar, so it needs the most help, not the least. A plum reads as neither
+// "charging" (amber) nor "moving" (blue), and the hatch below means it stays
+// findable at two pixels tall and under any form of colour blindness.
+const REST = "#8a6aa8"
+const REST_HATCH = "url(#restHatch)"
 const OPTIMUM = "#17a56b" // brand-500
 const INK = "#55677f"
 const GRID = "#e8edf1"
@@ -33,6 +39,15 @@ interface SpeedChartProps {
   optimumSpeed: number | null
   selectedSpeed: number
   onSelect: (speed: number) => void
+  /**
+   * Minutes of driving between required breaks, from the plan's own settings.
+   *
+   * Needed because `rest_min` alone is ambiguous: zero means either "you set
+   * no break rule" or "the rule is satisfied entirely by the charging stops".
+   * Those deserve opposite things on screen — silence, and a statement that
+   * the breaks are already in there.
+   */
+  restIntervalMin?: number
 }
 
 /**
@@ -55,6 +70,7 @@ export default function SpeedChart({
   optimumSpeed,
   selectedSpeed,
   onSelect,
+  restIntervalMin = 0,
 }: SpeedChartProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const data = useMemo(
@@ -134,8 +150,17 @@ export default function SpeedChart({
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
         <Key color={CHARGE} label="charging" />
         {anyStopped && <Key color={STOP} label="plugging in &amp; detours" />}
-        {anyRest && <Key color={REST} label="breaks" />}
+        {anyRest && <Key color={REST} label="breaks" hatched />}
         <Key color={DRIVE} label="driving" />
+        {/* A break rule that costs nothing still has to be visible, or the
+            reader can't tell whether it was applied. This is the common case:
+            the stops are long enough that the breaks happen inside them. */}
+        {restIntervalMin > 0 && !anyRest && (
+          <span className="inline-flex items-center gap-1.5 text-ink-400">
+            <span className="inline-block h-2.5 w-2.5 rounded-sm border border-ink-300 bg-white" />
+            breaks all fit inside the charging stops
+          </span>
+        )}
         {band && !band.sharp && (
           <span className="inline-flex items-center gap-1.5 text-ink-400">
             <span className="inline-block h-2.5 w-2.5 rounded-sm bg-brand-100 ring-1 ring-brand-300" />
@@ -169,6 +194,20 @@ export default function SpeedChart({
             }}
             style={{ cursor: "pointer" }}
           >
+            <defs>
+              {/* Diagonal hatch for break time: identity that doesn't depend on
+                  hue, for the one segment that is often only a few pixels tall. */}
+              <pattern
+                id="restHatch"
+                patternUnits="userSpaceOnUse"
+                width={6}
+                height={6}
+                patternTransform="rotate(45)"
+              >
+                <rect width={6} height={6} fill={REST} />
+                <line x1={0} y1={0} x2={0} y2={6} stroke="#fff" strokeWidth={2.4} />
+              </pattern>
+            </defs>
             <CartesianGrid stroke={GRID} vertical={false} />
             {/* The plateau: every speed in here ties within a few minutes, which
                 matters more than the single winning bar. */}
@@ -281,8 +320,8 @@ export default function SpeedChart({
             <Bar
               dataKey="rest"
               stackId="t"
-              fill={REST}
-              stroke="#fff"
+              fill={REST_HATCH}
+              stroke={REST}
               strokeWidth={1}
               isAnimationActive={false}
             >
@@ -395,10 +434,30 @@ function Row({ color, text }: { color: string; text: string }) {
   )
 }
 
-function Key({ color, label }: { color: string; label?: string }) {
+function Key({
+  color,
+  label,
+  hatched,
+}: {
+  color: string
+  label?: string
+  hatched?: boolean
+}) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+      <span
+        className="inline-block h-2.5 w-2.5 rounded-sm"
+        style={
+          hatched
+            ? {
+                // Mirrors the SVG hatch on the bar, so the swatch and the
+                // segment are recognisably the same thing.
+                background: `repeating-linear-gradient(45deg, ${color} 0 2px, #fff 2px 3.5px)`,
+                outline: `1px solid ${color}`,
+              }
+            : { background: color }
+        }
+      />
       {label}
     </span>
   )

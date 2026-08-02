@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
-import { SpeedResult, Trip } from "@/lib/client"
+import { LiveRun, SpeedResult, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
 import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
@@ -14,12 +14,22 @@ import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
 import JourneyHero from "./JourneyHero"
 import SpeedChart from "./SpeedChart"
+import SendToPhone from "./live/SendToPhone"
+import DriveBanner from "./live/DriveBanner"
 
 /**
  * Results page: the journey band you scroll through sits on top, and the
  * analysis that backs it up reads normally underneath.
  */
-export default function ResultsView({ trip }: { trip: Trip }) {
+export default function ResultsView({
+  trip,
+  live = null,
+}: {
+  trip: Trip
+  /** The most recent drive of this trip, if any. Fetched server-side so a
+   *  passenger opening the share link mid-journey sees it immediately. */
+  live?: LiveRun | null
+}) {
   const { result } = trip
   const [selectedSpeed, setSelectedSpeed] = useState<number>(
     result.optimum_speed ?? result.speeds.find((s) => s.feasible)?.speed_kph ?? 0
@@ -115,6 +125,9 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* A drive already under way replaces the invitation to start one —
+                the banner below is the way in. */}
+            {live?.status !== "active" && <SendToPhone tripId={trip.id} />}
             <button
               onClick={copyLink}
               className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
@@ -131,6 +144,8 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             </Link>
           </div>
         </div>
+
+        <DriveBanner tripId={trip.id} live={live} />
 
         {/* Hero stats for the selected speed */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -225,6 +240,7 @@ export default function ResultsView({ trip }: { trip: Trip }) {
               optimumSpeed={result.optimum_speed}
               selectedSpeed={selectedSpeed}
               onSelect={select}
+              restIntervalMin={trip.request.rest_interval_min ?? 0}
             />
             <SpeedPills
               speeds={result.speeds}

@@ -8,6 +8,7 @@ import { getVehicles, planTrip, PlacePoint, Vehicle } from "@/lib/client"
 import { defaultDepartureIso } from "@/lib/format"
 import { describeTemp } from "@/lib/weather"
 import { freeflowFactorFor } from "@/lib/driving"
+import { describePayload } from "@/lib/payload"
 import { InfoTip, NumberField } from "./fields"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
@@ -32,6 +33,8 @@ export default function TripForm() {
   const [restEveryH, setRestEveryH] = useState(3)
   const [restMin, setRestMin] = useState(20)
   const [price, setPrice] = useState(0.59)
+  const [occupants, setOccupants] = useState(2)
+  const [luggageKg, setLuggageKg] = useState(30)
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -44,6 +47,19 @@ export default function TripForm() {
   }, [])
 
   const ready = origin && dest && vehicleId && !submitting
+
+  // Priced against this car at a typical 130 km/h cruise, so the figure moves
+  // when you switch cars — a 58 kWh Born loses more range per kilo than a big
+  // battery does.
+  const car = vehicles.find((v) => v.id === vehicleId)
+  const payloadReadout = car
+    ? describePayload(
+        occupants,
+        luggageKg,
+        car.usable_kwh,
+        car.consumption.a_wh_km + car.consumption.b_wh_km_per_kph2 * 130 * 130,
+      )
+    : undefined
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -67,6 +83,8 @@ export default function TripForm() {
         rest_interval_min: restEveryH > 0 ? restEveryH * 60 : 0,
         rest_min: restEveryH > 0 ? restMin : 0,
         price_per_kwh: price,
+        occupants,
+        luggage_kg: luggageKg,
       })
       router.push(`/trip/${trip.id}`)
     } catch (err) {
@@ -116,6 +134,32 @@ export default function TripForm() {
           onChange={setTempC}
           explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one — it can move the best cruise speed down by 30 km/h."
           readout={describeTemp(tempC)}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <NumberField
+          id="occupants"
+          label="People aboard"
+          unit="people"
+          value={occupants}
+          min={1}
+          max={9}
+          step={1}
+          onChange={setOccupants}
+          explain="Everyone in the car, driver included, counted at 75 kg each. Weight costs energy through rolling resistance on the flat and through sheer lifting on a climb — a full car on an alpine run is a real handicap."
+        />
+        <NumberField
+          id="luggage"
+          label="Luggage"
+          unit="kg"
+          value={luggageKg}
+          min={0}
+          max={400}
+          step={5}
+          onChange={setLuggageKg}
+          explain="Suitcases, ski gear, the roof box's contents. Note the model prices the WEIGHT only: a roof box or bike rack also wrecks the aerodynamics, which at motorway speed usually costs far more than whatever is inside it."
+          readout={payloadReadout}
         />
       </div>
 

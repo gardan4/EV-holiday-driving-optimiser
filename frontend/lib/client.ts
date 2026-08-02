@@ -64,6 +64,10 @@ export interface PlanRequest {
   rest_interval_min?: number
   rest_min?: number
   price_per_kwh?: number
+  /** People aboard, driver included. Defaults to 2. */
+  occupants?: number
+  /** Luggage in the boot. Defaults to 30 kg. */
+  luggage_kg?: number
 }
 
 export interface Stop {
@@ -146,4 +150,189 @@ export async function planTrip(req: PlanRequest): Promise<Trip> {
 
 export async function getTrip(id: string): Promise<Trip> {
   return unwrap<Trip>(await apiFetch(`/api/trips/${id}`))
+}
+
+// ---------------------------------------------------------------------------
+// Live runs
+//
+// Two capabilities: the trip id is a public read-only share link, the run id
+// is the driver's write token. Only `startRun` ever returns the run id, and it
+// is kept in localStorage on the driving device — a watcher opening the same
+// link simply has no token and gets the read-only view.
+// ---------------------------------------------------------------------------
+
+export interface LiveState {
+  at_min: number
+  offset_m: number
+  lat: number
+  lon: number
+  soc: number
+  soc_is_measured: boolean
+  /** Widens with the age of the last reading — never show `soc` without it. */
+  soc_uncertainty_pct: number
+  anchor_age_min: number
+  off_route_m: number
+  /** Off the planned route: position and battery are unknown, not zero. */
+  stale: boolean
+  at_charger_id: string | null
+  run_factor: number
+  /** Against the original plan. Positive = later than promised. */
+  ahead_behind_min: number
+  soc_vs_plan: number
+  needs_replan: boolean
+  replan_reasons: string[]
+  status: string
+}
+
+export interface Benchmark {
+  original_speed_kph: number
+  original_total_min: number
+  live_total_min: number
+  delta_min: number
+  original_stops_remaining: number
+  live_stops_remaining: number
+}
+
+export interface RevisedPlan {
+  plan_version: number
+  /** The tail's own offsets start at zero; add this to place them. */
+  offset_base_m: number
+  elapsed_min: number
+  remaining: SpeedResult
+  speeds: SpeedResult[]
+  optimum_speed: number | null
+  benchmark: Benchmark
+}
+
+export interface StartRunResult {
+  run_id: string
+  run_ref: string
+  trip_id: string
+  state: LiveState
+}
+
+export interface LiveRun {
+  run_ref: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  planned_speed_kph: number
+  state: LiveState
+  plan: RevisedPlan | null
+  trail: TimelinePoint[]
+  /** How long since the driving phone last reported. A page whose driver lost
+   *  signal must say so rather than show the same numbers under a live badge. */
+  seconds_since_ping: number
+}
+
+export interface RunSummary {
+  run_ref: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  planned_speed_kph: number
+  distance_m: number
+  n_replans: number
+}
+
+export async function listRuns(tripId: string): Promise<RunSummary[]> {
+  return unwrap<RunSummary[]>(await apiFetch(`/api/trips/${tripId}/runs`))
+}
+
+export interface ReviewStop {
+  charger_id: string
+  name: string
+  planned_arrive_min: number | null
+  actual_arrive_min: number | null
+  planned_charge_min: number | null
+  actual_charge_min: number | null
+  planned_soc: number | null
+  actual_soc: number | null
+}
+
+export interface RunReview {
+  run_ref: string
+  status: string
+  started_at: string
+  finished_at: string | null
+  planned_speed_kph: number
+  planned_total_min: number
+  actual_total_min: number | null
+  delta_min: number | null
+  n_replans: number
+  n_soc_readings: number
+  final_run_factor: number
+  stops: ReviewStop[]
+  trail: TimelinePoint[]
+}
+
+export async function startRun(
+  tripId: string,
+  body: {
+    planned_speed_kph: number
+    depart_soc: number
+    lat: number
+    lon: number
+    /** Replace a drive already under way. Only offered after a 409. */
+    supersede?: boolean
+  }
+): Promise<StartRunResult> {
+  return unwrap<StartRunResult>(
+    await apiFetch(`/api/trips/${tripId}/runs`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    })
+  )
+}
+
+export async function pingRun(
+  runId: string,
+  body: {
+    lat: number
+    lon: number
+    moving_s: number
+    stationary_s: number
+    accuracy_m?: number
+  }
+): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/ping`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    })
+  )
+}
+
+export async function recordSoc(runId: string, soc: number): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/soc`, {
+      method: "POST",
+      body: JSON.stringify({ soc }),
+    })
+  )
+}
+
+export async function replanRun(runId: string): Promise<RevisedPlan> {
+  return unwrap<RevisedPlan>(
+    await apiFetch(`/api/runs/${runId}/replan`, { method: "POST", body: "{}" })
+  )
+}
+
+export async function finishRun(runId: string): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/finish`, { method: "POST" })
+  )
+}
+
+export async function getLiveRun(tripId: string): Promise<LiveRun> {
+  return unwrap<LiveRun>(await apiFetch(`/api/trips/${tripId}/live`))
+}
+
+export async function getRunReview(
+  tripId: string,
+  runRef: string
+): Promise<RunReview> {
+  return unwrap<RunReview>(
+    await apiFetch(`/api/trips/${tripId}/runs/${runRef}/review`)
+  )
 }

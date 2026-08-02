@@ -6,7 +6,8 @@ import { ChevronRight, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { PlanRequest, Trip, Vehicle, planTrip } from "@/lib/client"
 import { freeflowFactorFor } from "@/lib/driving"
-import { consumptionFactorForTemp, describeTemp } from "@/lib/weather"
+import { auxKwForTemp, consumptionFactorForTemp, describeTemp } from "@/lib/weather"
+import { describePayload, extraWhPerKm, payloadExtraKg } from "@/lib/payload"
 import { NumberField } from "./fields"
 
 /**
@@ -46,10 +47,20 @@ export default function Assumptions({ trip }: { trip: Trip }) {
       setReplanning(false)
     }
   }
+  const occupants = r.occupants ?? 2
+  const luggageKg = r.luggage_kg ?? 30
+
+  // Three terms, combined the way the simulator combines them. Weather scales
+  // the car's own curve; payload is ADDED, because rolling drag doesn't grow
+  // with v²; and conditioning is a constant kW converted at this speed, so its
+  // per-km cost falls the faster you go. Multiplying the last two in would
+  // make both of them lie in opposite directions.
   const wh = (kph: number) =>
     Math.round(
       (v.consumption.a_wh_km + v.consumption.b_wh_km_per_kph2 * kph * kph) *
-        (tempC != null ? consumptionFactorForTemp(tempC) : (r.conditions_factor ?? 1))
+        (tempC != null ? consumptionFactorForTemp(tempC) : (r.conditions_factor ?? 1)) +
+        extraWhPerKm(occupants, luggageKg) +
+        (tempC != null ? (auxKwForTemp(tempC) / kph) * 1000 : 0)
     )
 
   return (
@@ -81,7 +92,10 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <Row k="Usable battery" val={`${v.usable_kwh} kWh`} />
             <Row k="Peak DC charging" val={`${Math.round(v.max_dc_kw)} kW`} />
             <Row k="Top speed" val={`${Math.round(v.top_speed_kph)} km/h`} />
-            <Row k="Kerb mass" val={`${Math.round(v.mass_kg)} kg`} />
+            <Row
+              k="Mass as modelled"
+              val={`${Math.round(v.mass_kg + payloadExtraKg(occupants, luggageKg))} kg`}
+            />
             <Row
               k="Energy use"
               val={`${wh(100)} · ${wh(130)} · ${wh(160)} Wh/km at 100 · 130 · 160`}
@@ -117,6 +131,21 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               value={r.target_soc ?? 10} min={5} max={80} step={5}
               onChange={(x) => set("target_soc", x)}
             />
+            <NumberField
+              id="a-occupants" label="People aboard" unit="people"
+              value={occupants} min={1} max={9} step={1}
+              onChange={(x) => set("occupants", x)}
+            />
+            <NumberField
+              id="a-luggage" label="Luggage" unit="kg"
+              value={luggageKg} min={0} max={400} step={5}
+              onChange={(x) => set("luggage_kg", x)}
+            />
+            <div className="col-span-2 -mt-1">
+              <p className="text-xs leading-relaxed text-ink-500">
+                {describePayload(occupants, luggageKg, v.usable_kwh, wh(130))}
+              </p>
+            </div>
             <div className="col-span-2">
               <NumberField
                 id="a-temp" label="Temperature" unit="°C"

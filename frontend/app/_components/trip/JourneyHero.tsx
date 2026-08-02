@@ -17,6 +17,7 @@ import { SpeedResult, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
 import { isCharging, sampleTimeline, timeAtDist } from "@/lib/playback"
 import type { JourneyWorldRef } from "./scene/JourneyScene"
+import LiveHud from "./live/LiveHud"
 
 const JourneyScene = dynamic(() => import("./scene/JourneyScene"), {
   ssr: false,
@@ -32,6 +33,10 @@ const RACE = "#e8a33d"
 /** Pixels of scroll per simulated minute — sets how long the road feels. */
 const PX_PER_MIN = 5.2
 const FACTORS = [60, 300, 900]
+/** How long a deliberate look-ahead lasts before the view re-locks to the car.
+ *  Long enough to read a charger label, short enough that a phone put down
+ *  doesn't sit showing a place the car isn't. */
+const BROWSE_TIMEOUT_MS = 20_000
 
 interface JourneyHeroProps {
   trip: Trip
@@ -43,6 +48,39 @@ interface JourneyHeroProps {
   onRaceSpeedChange: (s: number | null) => void
   hoverStop: string | null
   onHoverStop: (id: string | null) => void
+  /**
+   * Present only on a drive that is actually happening.
+   *
+   * Live mode is a different product wearing the same scene. The playhead is a
+   * fact rather than a preview, so the transport verbs (play, scrub, race,
+   * compare) all disappear and are replaced by driving ones (look ahead,
+   * navigate, correct). No verb appears in both.
+   */
+  live?: LiveHeroState | null
+}
+
+export interface LiveHeroState {
+  distM: number
+  /** The measured/inferred battery — NOT what the plan predicted here. */
+  soc: number
+  /** How to render it: "46%" when confirmed, "44–48%" when estimated. */
+  socLabel: string
+  /** Clock anchor. The drive may have started on a different day than planned,
+   *  in which case the planned departure is hours wrong. */
+  startedAtIso: string
+  /** Minutes from `startedAtIso` to arrival, on whichever plan is current. */
+  etaMin: number
+  aheadBehindMin: number
+  socVsPlan: number
+  stale: boolean
+  secondsSincePing: number
+  nextStop: {
+    name: string
+    distanceM: number
+    arriveSoc: number
+    lat: number
+    lon: number
+  } | null
 }
 
 export default function JourneyHero({
@@ -55,6 +93,7 @@ export default function JourneyHero({
   onRaceSpeedChange,
   hoverStop,
   onHoverStop,
+  live = null,
 }: JourneyHeroProps) {
   const scroller = useRef<HTMLDivElement>(null)
   const [night, setNight] = useState(true)
@@ -134,9 +173,97 @@ export default function JourneyHero({
     syncFromScroll()
   }, [syncFromScroll])
 
+  // Live mode: the real position drives the scrollbar, through the very same
+  // funnel autoplay and scrubbing use. Nothing downstream — the scene, the
+  // HUD, the stop markers — needs to know the difference.
+  const liveDistM = live?.distM ?? null
+
+  /**
+   * Live mode has two states, and conflating them is what made the old
+   * behaviour feel broken in both directions.
+   *
+   * `following` — the scene tracks the car. Horizontal scrolling is OFF, so a
+   * thumb can't silently desynchronise the picture from reality at 130 km/h.
+   * `browsing` — entered deliberately, for the passenger who wants to see the
+   * next charger. The car keeps moving underneath as a ghost tick on the rail;
+   * a persistent pill says how far ahead you're looking and brings you back.
+   *
+   * Browsing expires on its own, because a phone put down in a cupholder must
+   * re-lock itself rather than sit lying about where the car is.
+   */
+  const [browsing, setBrowsing] = useState(false)
+  const browseUntil = useRef(0)
+
+  useEffect(() => {
+    if (!browsing) return
+    const tick = () => {
+      if (performance.now() > browseUntil.current) setBrowsing(false)
+    }
+    const h = setInterval(tick, 1000)
+    return () => clearInterval(h)
+  }, [browsing])
+
+  const nudgeBrowse = useCallback(() => {
+    browseUntil.current = performance.now() + BROWSE_TIMEOUT_MS
+  }, [])
+
+  const startBrowsing = useCallback(() => {
+    nudgeBrowse()
+    setBrowsing(true)
+  }, [nudgeBrowse])
+
+  // Anything that changed the plan or the car's situation wins over curiosity.
+  const escalate = live ? live.stale : false
+  useEffect(() => {
+    if (browsing && escalate) setBrowsing(false)
+  }, [browsing, escalate])
+
+  const followLocked = liveDistM != null && !browsing
+
+  // On a real drive the battery shown here is the measured/inferred one, not
+  // what the plan predicted for this point. Showing the plan's figure while
+  // the panel below shows reality would put two different batteries on one
+  // screen and make the reader mistrust both. While browsing ahead, though,
+  // the world IS the plan's, so the plan's number is the honest one.
+  const shownSoc = live && !browsing ? live.soc : hud.soc
+
+  useEffect(() => {
+    if (liveDistM == null || browsing) return
+    const el = scroller.current
+    if (!el) return
+
+    // Placement needs the element's real width, and that arrives late: the 3D
+    // scene is dynamically imported, so the first frames have clientWidth 0.
+    // Checking `max > 0` alone isn't enough and fails plausibly — with
+    // clientWidth 0, `max` is the FULL track width, every position is scaled
+    // by ~1.5, and the car is quietly parked at the wrong charger. A fixed
+    // number of retry frames is just a race with the bundle, so watch the
+    // element instead; this also re-places on rotate and resize.
+    const place = () => {
+      const max = el.scrollWidth - el.clientWidth
+      if (max <= 0 || el.clientWidth <= 0) return
+      const minute = timeAtDist(result.timeline, liveDistM)
+      el.scrollLeft = totalMin > 0 ? (minute / totalMin) * max : 0
+      // Clear the HUD throttle first. It exists to keep 60 fps of scrubbing
+      // from re-rendering React 60 times, but a live placement is rare and
+      // must not be the frame that gets dropped — on mount the mount-time sync
+      // has just claimed the window, and the HUD would keep showing 0 km while
+      // the car sat correctly at 140.
+      hudTick.current = 0
+      syncFromScroll()
+    }
+    place()
+    const ro = new ResizeObserver(place)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [liveDistM, browsing, result.timeline, totalMin, syncFromScroll])
+
+  /** How far ahead of the car the reader is currently looking, in metres. */
+  const browseAheadM = browsing && liveDistM != null ? hud.dist - liveDistM : 0
+
   // Autoplay drives the scrollbar, so play and scrub are the same mechanism.
   useEffect(() => {
-    if (!playing) return
+    if (!playing || liveDistM != null) return
     let raf = 0
     let last = performance.now()
     const step = (now: number) => {
@@ -211,16 +338,28 @@ export default function JourneyHero({
 
   // Vertical wheel scrolls the road — but hand the page back at either end so
   // the reader can carry on down to the charts.
-  const onWheel = useCallback((e: React.WheelEvent) => {
+  /**
+   * The wheel does not drive the journey.
+   *
+   * A trackpad made this hero hostile: a two-finger swipe scrubbed hours of
+   * the drive by accident, and the old handler also turned ordinary vertical
+   * scrolling into scrubbing, so you couldn't get past the hero to read the
+   * page. Both are gone. Moving through the journey is now a deliberate act —
+   * drag the rail on a desktop, swipe the scene on a phone.
+   *
+   * Only horizontal wheel deltas are swallowed. Vertical ones are left alone
+   * so the page scrolls normally with the cursor over the scene, which is most
+   * of the screen. Registered natively because React's wheel listener is
+   * passive and `preventDefault` there does nothing.
+   */
+  useEffect(() => {
     const el = scroller.current
     if (!el) return
-    if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return
-    const max = el.scrollWidth - el.clientWidth
-    const atStart = el.scrollLeft <= 0 && e.deltaY < 0
-    const atEnd = el.scrollLeft >= max - 1 && e.deltaY > 0
-    if (atStart || atEnd) return
-    el.scrollLeft += e.deltaY
-    e.preventDefault()
+    const block = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) e.preventDefault()
+    }
+    el.addEventListener("wheel", block, { passive: false })
+    return () => el.removeEventListener("wheel", block)
   }, [])
 
   const positionStops = useCallback(
@@ -238,6 +377,11 @@ export default function JourneyHero({
 
   const stops = result.stops
   const departIso = trip.request.departure_iso
+  // Clocks on a real drive count from when it actually started. A trip planned
+  // for Friday 22:00 and driven on Saturday morning would otherwise show every
+  // time on the screen — including the arrival everyone is watching — many
+  // hours out.
+  const clockIso = live?.startedAtIso ?? departIso
   const arriveSoc = result.timeline.length
     ? result.timeline[result.timeline.length - 1].soc
     : 0
@@ -347,28 +491,56 @@ export default function JourneyHero({
       <div
         ref={scroller}
         onScroll={syncFromScroll}
-        onWheel={onWheel}
-        tabIndex={0}
-        role="slider"
-        aria-label="Scrub the journey"
-        aria-valuemin={0}
-        aria-valuemax={Math.round(totalMin)}
-        aria-valuenow={Math.round(hud.min)}
-        aria-valuetext={`${clockAt(departIso, hud.min)}, ${Math.round(hud.soc)} percent battery`}
-        className="absolute inset-0 z-10 overflow-x-auto overflow-y-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand-400 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onPointerDown={browsing ? nudgeBrowse : undefined}
+        onTouchStart={browsing ? nudgeBrowse : undefined}
+        tabIndex={followLocked ? -1 : 0}
+        // A slider you cannot move is a lie to a screen reader. While the view
+        // is locked to the car it is a picture, not a control.
+        role={followLocked ? "img" : "slider"}
+        aria-label={followLocked ? "The drive, following the car" : "Scrub the journey"}
+        aria-valuemin={followLocked ? undefined : 0}
+        aria-valuemax={followLocked ? undefined : Math.round(totalMin)}
+        aria-valuenow={followLocked ? undefined : Math.round(hud.min)}
+        aria-valuetext={
+          followLocked
+            ? undefined
+            : `${clockAt(clockIso, hud.min)}, ${Math.round(shownSoc)} percent battery`
+        }
+        className={`absolute inset-0 z-10 overflow-y-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand-400 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+          // Locked: horizontal scroll off entirely, and `pan-y` so a vertical
+          // flick still scrolls the page underneath rather than being eaten.
+          followLocked ? "overflow-x-hidden touch-pan-y" : "overflow-x-auto"
+        }`}
       >
         <div style={{ width: trackWidth, height: "100%" }} />
       </div>
 
-      {/* HUD + transport controls */}
+      {/* HUD. Live and preview share the scene and nothing else: the numbers a
+          driver needs are not the numbers a reader exploring a plan needs, and
+          every transport control is meaningless once the playhead is a fact. */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-4">
+        {live && (
+          <LiveHud
+            live={live}
+            browsing={browsing}
+            browseAheadM={browseAheadM}
+            onLookAhead={startBrowsing}
+            onBackToNow={() => setBrowsing(false)}
+            clockIso={clockIso}
+          />
+        )}
+
+        {!live && (
         <div className="pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-3 rounded-2xl border border-white/12 bg-black/45 px-3 py-2.5 backdrop-blur-md">
           <button
             onClick={() => setPlaying((p) => !p)}
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-ink-900 transition-transform hover:scale-105"
-            aria-label={playing ? "Pause" : "Play the drive"}
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-ink-900 transition-transform hover:scale-105"
+            aria-label={playing ? "Pause the preview" : "Preview the drive"}
           >
             {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+            <span className="text-xs font-semibold">
+              {playing ? "Pause" : "Preview"}
+            </span>
           </button>
 
           <div className="w-16 shrink-0">
@@ -420,13 +592,13 @@ export default function JourneyHero({
               <div
                 className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-150"
                 style={{
-                  width: `${hud.soc}%`,
-                  background: hud.soc < 15 ? "#e8a33d" : MINT,
+                  width: `${shownSoc}%`,
+                  background: shownSoc < 15 ? "#e8a33d" : MINT,
                 }}
               />
             </div>
             <span className="w-9 shrink-0 text-right font-mono text-xs font-bold tabular-nums text-white">
-              {Math.round(hud.soc)}%
+              {Math.round(shownSoc)}%
             </span>
           </div>
 
@@ -477,21 +649,24 @@ export default function JourneyHero({
             </span>
           )}
         </div>
+        )}
 
         {/* Progress rail — draggable. The generous vertical padding is the hit
             area; the visible rail stays hairline-thin. */}
         <div className="mx-auto mt-1 flex max-w-5xl items-center gap-3">
           <div
             ref={railRef}
-            onPointerDown={onRailDown}
-            onPointerMove={onRailMove}
-            onPointerUp={onRailUp}
-            onPointerCancel={onRailUp}
+            // Live: the rail still SHOWS progress, but dragging it would move
+            // the playhead somewhere the car isn't.
+            onPointerDown={live ? undefined : onRailDown}
+            onPointerMove={live ? undefined : onRailMove}
+            onPointerUp={live ? undefined : onRailUp}
+            onPointerCancel={live ? undefined : onRailUp}
             // pointer-events-auto is load-bearing: the HUD wrapper above turns
             // them off so the scene stays scrubbable around the controls, and
             // this rail is a sibling of the card that turns them back on.
             className={`group pointer-events-auto relative flex-1 touch-none py-2.5 ${
-              scrubbing ? "cursor-grabbing" : "cursor-grab"
+              live ? "cursor-default" : scrubbing ? "cursor-grabbing" : "cursor-grab"
             }`}
             // The scroll surface above already exposes this value as a slider,
             // arrow keys and all. A second control for the same number would
@@ -531,7 +706,14 @@ export default function JourneyHero({
             </span>
           </div>
           <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-white/40">
-            drag, or scroll sideways
+            {live
+              ? browsing
+                ? "looking ahead"
+                : "following the car"
+              : // Not "scroll sideways" any more — a trackpad swipe used to
+                // scrub hours of the drive by accident, so the wheel no longer
+                // moves the journey at all. Drag on a desktop, swipe on a phone.
+                "drag, or swipe the scene"}
           </span>
         </div>
       </div>
