@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from bisect import bisect_right
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import httpx
@@ -51,8 +52,53 @@ def _require_key() -> str:
 class RouteData:
     geometry: RouteGeometry            # decoded polyline + cumulative distances
     segments: list[RouteSegment]       # simulator inputs (dist, freeflow, country)
-    total_dist_m: float
-    total_dur_s: float
+    # Geometry-space offset of each segment's START, plus the total — so
+    # len() == len(segments) + 1. There are two distance axes on every route:
+    # ORS reports a distance per step, while the polyline's own haversine sum
+    # is a slightly different number (typically 0.1-0.5% apart). The simulator
+    # lives on the first axis; a GPS fix snapped with `RouteGeometry.project`
+    # lands on the second. This array is the map between them, exact at every
+    # step boundary. `geom_to_segment_m` does the lookup.
+    #
+    # Empty means "no map available" and the two axes are then treated as the
+    # same, which is what synthetic routes in tests want.
+    seg_geom_offsets: list[float] = field(default_factory=list)
+    total_dist_m: float = 0.0
+    total_dur_s: float = 0.0
+
+    def geom_to_segment_m(self, geom_offset_m: float) -> float:
+        """Geometry-space offset (what `project` returns) → segment-space
+        offset (what the simulator and the plan's stops are measured in)."""
+        return _lerp_axis(
+            self.seg_geom_offsets, _cumulative_segment_m(self.segments), geom_offset_m
+        )
+
+    def segment_to_geom_m(self, segment_offset_m: float) -> float:
+        """The inverse — for putting a planned stop back on the polyline."""
+        return _lerp_axis(
+            _cumulative_segment_m(self.segments), self.seg_geom_offsets, segment_offset_m
+        )
+
+
+def _cumulative_segment_m(segments: list[RouteSegment]) -> list[float]:
+    out = [0.0]
+    for s in segments:
+        out.append(out[-1] + s.dist_m)
+    return out
+
+
+def _lerp_axis(xs: list[float], ys: list[float], x: float) -> float:
+    if not xs or not ys:
+        return x
+    if x <= xs[0]:
+        return ys[0]
+    if x >= xs[-1]:
+        return ys[-1]
+    i = bisect_right(xs, x) - 1
+    x0, x1 = xs[i], xs[i + 1]
+    if x1 == x0:
+        return ys[i]
+    return ys[i] + (x - x0) / (x1 - x0) * (ys[i + 1] - ys[i])
 
 
 # ---------------------------------------------------------------------------
@@ -116,11 +162,16 @@ def _payload_to_route(payload: dict) -> RouteData:
     # Per-vertex elevation, when the route was fetched with it (payload v2+).
     elev = payload.get("elev") or []
     segments = []
+    seg_geom_offsets = []
     for step in payload["steps"]:
         dist_m, dur_s = step["d"], step["t"]
         if dist_m <= 0 or dur_s <= 0:
             continue
         i, j = step["wp"]
+        # Where this segment starts in GEOMETRY space (haversine along the
+        # polyline), which is not the same axis as the segment distances ORS
+        # reports. See `RouteData.seg_geom_offsets`.
+        seg_geom_offsets.append(geometry.cum_m[min(i, len(coords) - 1)])
         mid = coords[min((i + j) // 2, len(coords) - 1)]
         climb = descent = 0.0
         if elev and j < len(elev):
@@ -141,9 +192,11 @@ def _payload_to_route(payload: dict) -> RouteData:
                 descent_m=descent,
             )
         )
+    seg_geom_offsets.append(geometry.total_m)
     return RouteData(
         geometry=geometry,
         segments=segments,
+        seg_geom_offsets=seg_geom_offsets,
         total_dist_m=payload["total_m"],
         total_dur_s=payload["total_s"],
     )

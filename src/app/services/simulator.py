@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_right
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # SoC grid for the DP (arrival buckets AND charge targets). 2.5% keeps the
 # plan-quality loss negligible while the exact re-simulation removes any
@@ -123,6 +123,30 @@ REGEN_EFFICIENCY = 0.65
 DRIVETRAIN_EFFICIENCY = 0.90
 GRAVITY = 9.81
 
+# What the car is carrying. `VehicleParams.mass_kg` is kerb mass plus a nominal
+# load, so payload enters as a *deviation* from that nominal — which keeps the
+# default a no-op and every existing permalink's answer unchanged.
+OCCUPANT_KG = 75.0
+NOMINAL_LOAD_KG = 180.0  # the seed catalog's documented convention
+# Rolling resistance coefficient for a low-rolling-resistance EV tyre.
+ROLLING_CRR = 0.010
+# Extra Wh/km per kilogram carried: Crr·m·g newtons dragged over 1000 m gives
+# joules, /3600 gives Wh, then battery→wheels. Works out at ~3.0 Wh/km per
+# 100 kg — about 1.7% of a 180 Wh/km motorway cruise, which matches what
+# real-world payload tests report.
+_ROLLING_WH_KM_PER_KG = (
+    ROLLING_CRR * GRAVITY * 1000.0 / 3600.0 / DRIVETRAIN_EFFICIENCY
+)
+
+
+def payload_extra_kg(occupants: int, luggage_kg: float) -> float:
+    """Payload beyond the nominal load already inside `VehicleParams.mass_kg`.
+
+    Negative for a lone driver with an empty boot, which is real: the catalog
+    mass assumes two people and a weekend bag.
+    """
+    return occupants * OCCUPANT_KG + luggage_kg - NOMINAL_LOAD_KG
+
 
 @dataclass(frozen=True)
 class SimParams:
@@ -142,6 +166,12 @@ class SimParams:
     # Cold packs charge far slower than the datasheet curve. This scales the
     # whole curve; it is the single biggest lever on the winter answer.
     charge_power_factor: float = 1.0
+    # People and luggage beyond the nominal load already inside the car's
+    # `mass_kg`. Deliberately NOT part of `consumption_factor`: the weight
+    # penalty is rolling drag, which is per-kilometre and roughly independent
+    # of speed. A multiplier on `a + b·v²` would instead scale with the drag
+    # term, claiming a full car costs three times as much at 160 as at 90.
+    extra_mass_kg: float = 0.0
     # What fraction of a charger's RATED power you actually receive. A 350 kW
     # cabinet shared with the car next to you delivers nowhere near 350, and a
     # busy Supercharger splits a stall pair. Distinct from queue_min: this is
@@ -155,6 +185,12 @@ class SimParams:
     # absorb the break for free. 0 disables the rule.
     rest_interval_min: float = 0.0
     rest_min: float = 0.0
+    # Live re-planning: what the driver has already done before this plan
+    # starts. Two numbers rather than one because driving ACCRUES the break
+    # debt and standing still PAYS it, and a mid-journey plan inherits both.
+    # Both 0 for a plan that starts at the origin.
+    prior_drive_min: float = 0.0
+    prior_rest_credit_min: float = 0.0
     # Fraction of *derestriction-eligible* German autobahn you will actually be
     # able to press on (roadworks, traffic, trucks). ~0.3 is realistic; 1.0 is
     # the old, flattering assumption.
@@ -266,16 +302,20 @@ def effective_kph(
     return max(eff, 5.0)
 
 
-def grade_kwh(seg: RouteSegment, veh: VehicleParams) -> float:
+def grade_kwh(
+    seg: RouteSegment, veh: VehicleParams, extra_mass_kg: float = 0.0
+) -> float:
     """Energy the elevation of this segment adds (climb) or gives back (descent).
 
     mgh in kWh, divided by drivetrain efficiency going up and multiplied by
     regen efficiency coming down — so a climb-and-descend pair is a net loss,
-    as it is in the real car.
+    as it is in the real car. `extra_mass_kg` is the payload above the nominal
+    load; it is what makes a full car notice a mountain pass.
     """
     if seg.climb_m == 0.0 and seg.descent_m == 0.0:
         return 0.0
-    j_per_m = veh.mass_kg * GRAVITY / 3_600_000.0  # kWh per metre climbed
+    m = veh.mass_kg + extra_mass_kg
+    j_per_m = m * GRAVITY / 3_600_000.0  # kWh per metre climbed
     up = seg.climb_m * j_per_m / DRIVETRAIN_EFFICIENCY
     down = seg.descent_m * j_per_m * REGEN_EFFICIENCY
     return up - down
@@ -321,6 +361,37 @@ def charge_minutes(
     return minutes
 
 
+def charge_forward(
+    veh: VehicleParams,
+    soc: float,
+    minutes: float,
+    site_kw: float,
+    power_factor: float = 1.0,
+) -> float:
+    """SoC reached after `minutes` plugged in at a site limited to `site_kw`.
+
+    The inverse of `charge_minutes`, marched on time instead of SoC. Written
+    against the same integration grid on purpose: a live trip infers how much
+    the battery gained while parked, and if that disagreed with the number the
+    plan used to decide how long to stay, the two would drift apart every stop.
+    """
+    if minutes <= 0.0:
+        return soc
+    remaining = minutes
+    s = soc
+    while s < 100.0 - 1e-9 and remaining > 1e-9:
+        step = min(_INTEGRATION_STEP, 100.0 - s)
+        m = charge_minutes(veh, s, s + step, site_kw, power_factor)
+        if m <= 0.0:
+            break
+        if m >= remaining:
+            # Linear within one 0.5% step.
+            return s + step * (remaining / m)
+        s += step
+        remaining -= m
+    return min(s, 100.0)
+
+
 # ---------------------------------------------------------------------------
 # Per-speed route profile (cumulative distance / time / energy)
 # ---------------------------------------------------------------------------
@@ -331,7 +402,12 @@ class RouteProfile:
     arbitrary offsets, and inverse lookup time → offset for playback."""
 
     def __init__(
-        self, segments: list[RouteSegment], v_kph: float, veh: VehicleParams, p: SimParams
+        self,
+        segments: list[RouteSegment],
+        v_kph: float,
+        veh: VehicleParams,
+        p: SimParams,
+        index_offset: int = 0,
     ):
         n = len(segments)
         self.offsets = [0.0] * (n + 1)
@@ -339,14 +415,20 @@ class RouteProfile:
         self.kwh = [0.0] * (n + 1)
         d = t = e = 0.0
         for i, seg in enumerate(segments):
-            eff = effective_kph(v_kph, seg, p, i)
+            # `index_offset` keeps the derestriction pattern anchored to the
+            # ORIGINAL route when this profile covers only a tail of it — see
+            # `slice_route`.
+            eff = effective_kph(v_kph, seg, p, index_offset + i)
             dist_km = seg.dist_m / 1000.0
             d += seg.dist_m
             t += (dist_km / eff) * 60.0
             # Aero + rolling, then the elevation term (net-negative over a
             # climb-and-descend pair because regen is not free).
             e += wh_per_km(eff, veh, p.consumption_factor) * dist_km / 1000.0
-            e += grade_kwh(seg, veh)
+            # Payload rides on top: extra rolling drag every kilometre, and
+            # extra mgh on every climb. Both fall out of the same kilograms.
+            e += _ROLLING_WH_KM_PER_KG * p.extra_mass_kg * dist_km / 1000.0
+            e += grade_kwh(seg, veh, p.extra_mass_kg)
             # Conditioning is billed by the hour, not by the kilometre — which
             # is the whole point of keeping it out of the Wh/km term.
             e += p.aux_kw * (dist_km / eff)
@@ -398,6 +480,100 @@ def _site_cumulative_minutes(
     return f
 
 
+@dataclass(frozen=True)
+class RouteSlice:
+    """The remainder of a route from `from_offset_m` onwards.
+
+    `index_offset` is the ORIGINAL index of `segments[0]`, and it is not
+    optional bookkeeping: `_open_stretch` decides which derestricted autobahn
+    stretches are open by hashing the segment index, and index 0 hashes to 0.0
+    — which is open at every non-zero share. Renumber the segments and every
+    re-plan silently inherits a free open autobahn starting exactly where the
+    driver happens to be standing.
+    """
+
+    segments: list[RouteSegment]
+    chargers: list[ChargerNode]
+    index_offset: int
+    from_offset_m: float  # the cut, on the ORIGINAL route
+    total_dist_m: float  # distance remaining
+
+
+def slice_route(
+    segments: list[RouteSegment],
+    chargers: list[ChargerNode],
+    from_offset_m: float,
+    index_offset: int = 0,
+) -> RouteSlice:
+    """The part of the route still ahead of `from_offset_m`.
+
+    Feeds straight into `simulate`/`sweep` with the slice's `index_offset`, so
+    re-planning mid-journey needs no changes to the DP at all.
+
+    The straddled segment is split pro rata, including its climb and descent.
+    That is an approximation: `routing` accumulates elevation per ORS step, so
+    cutting halfway through a step that crests a pass charges part of the climb
+    twice. One step is a few km at most, bounding the error at ~50 m of
+    spurious climb — under half a percent of SoC on a typical car — and fixing
+    it properly would mean carrying the elevation profile into `RouteSegment`,
+    which would break this module's zero-I/O contract for very little.
+    """
+    total = sum(s.dist_m for s in segments)
+    if from_offset_m <= 0.0:
+        # Identity, deliberately including `index_offset`, so slicing at the
+        # origin is a genuine no-op rather than merely a similar answer.
+        return RouteSlice(list(segments), list(chargers), index_offset, 0.0, total)
+    if from_offset_m >= total:
+        return RouteSlice([], [], index_offset + len(segments), total, 0.0)
+
+    out: list[RouteSegment] = []
+    first_index = 0
+    walked = 0.0
+    for i, seg in enumerate(segments):
+        seg_end = walked + seg.dist_m
+        if seg_end <= from_offset_m:
+            walked = seg_end
+            continue
+        if not out:
+            # The straddled segment: keep the tail fraction of it.
+            frac = (seg_end - from_offset_m) / seg.dist_m if seg.dist_m > 0 else 0.0
+            if frac < 1e-6:
+                # Nothing meaningful left — a zero-length segment would put
+                # duplicate x-values into RouteProfile.offsets. Skip it.
+                first_index = i + 1
+                walked = seg_end
+                continue
+            first_index = i
+            out.append(
+                RouteSegment(
+                    dist_m=seg.dist_m * frac,
+                    freeflow_kph=seg.freeflow_kph,
+                    country=seg.country,
+                    climb_m=seg.climb_m * frac,
+                    descent_m=seg.descent_m * frac,
+                )
+            )
+        else:
+            out.append(seg)
+        walked = seg_end
+
+    ahead = [
+        replace(c, offset_m=c.offset_m - from_offset_m)
+        for c in chargers
+        # Strictly ahead: a charger you are standing at is not a stop you can
+        # still plan. `simulate` drops offset 0 anyway; deciding how much
+        # longer to stay put is a different question — see `live.py`.
+        if c.offset_m > from_offset_m + 1.0
+    ]
+    return RouteSlice(
+        segments=out,
+        chargers=ahead,
+        index_offset=index_offset + first_index,
+        from_offset_m=from_offset_m,
+        total_dist_m=sum(s.dist_m for s in out),
+    )
+
+
 def simulate(
     segments: list[RouteSegment],
     chargers: list[ChargerNode],
@@ -405,10 +581,15 @@ def simulate(
     v_kph: float,
     p: SimParams,
     _site_f_cache: dict[float, list[float]] | None = None,
+    index_offset: int = 0,
 ) -> SpeedResult:
     """Optimal plan at one cruise speed. Returns an infeasible SpeedResult when
-    no charging plan can complete the route within the SoC constraints."""
-    profile = RouteProfile(segments, v_kph, veh, p)
+    no charging plan can complete the route within the SoC constraints.
+
+    `index_offset` is the original index of `segments[0]`; pass it when
+    simulating a tail of a longer route so the derestriction pattern matches.
+    """
+    profile = RouteProfile(segments, v_kph, veh, p, index_offset)
     total = profile.total_dist_m
 
     nodes = sorted(
@@ -553,8 +734,13 @@ def _exact_forward_pass(
     # rule matters more to the slow, few-stop plans.
     extra_rest_each = 0.0
     if p.rest_interval_min > 0 and p.rest_min > 0:
-        required = math.floor(profile.total_min / p.rest_interval_min) * p.rest_min
-        covered = 0.0
+        required = (
+            math.floor(
+                (p.prior_drive_min + profile.total_min) / p.rest_interval_min
+            )
+            * p.rest_min
+        )
+        covered = p.prior_rest_credit_min
         probe_soc = p.depart_soc
         prev_off = 0.0
         for ni, t_bucket in stop_nodes:
@@ -666,14 +852,30 @@ def sweep(
     veh: VehicleParams,
     speeds: list[float],
     p: SimParams,
+    index_offset: int = 0,
 ) -> list[SpeedResult]:
     """Simulate every candidate cruise speed. Site charge-time cumulatives are
     speed-independent and shared across the whole sweep."""
     site_f_cache: dict[float, list[float]] = {}
     return [
-        simulate(segments, chargers, veh, v, p, _site_f_cache=site_f_cache)
+        simulate(
+            segments, chargers, veh, v, p,
+            _site_f_cache=site_f_cache, index_offset=index_offset,
+        )
         for v in speeds
     ]
+
+
+def sweep_slice(
+    sl: RouteSlice, veh: VehicleParams, speeds: list[float], p: SimParams
+) -> list[SpeedResult]:
+    """`sweep` over a `RouteSlice`, carrying its `index_offset` for you.
+
+    Prefer this to calling `sweep` with a slice's lists by hand — forgetting
+    the offset produces a plausible answer that quietly disagrees with the
+    plan it is supposed to be revising.
+    """
+    return sweep(sl.segments, sl.chargers, veh, speeds, p, index_offset=sl.index_offset)
 
 
 def optimum(results: list[SpeedResult]) -> SpeedResult | None:

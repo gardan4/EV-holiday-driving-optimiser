@@ -10,8 +10,12 @@ import pytest
 from app.services.simulator import (
     DRIVETRAIN_EFFICIENCY,
     GRAVITY,
+    NOMINAL_LOAD_KG,
+    OCCUPANT_KG,
     REGEN_EFFICIENCY,
+    ROLLING_CRR,
     ChargerNode,
+    RouteProfile,
     RouteSegment,
     SimParams,
     VehicleParams,
@@ -19,10 +23,11 @@ from app.services.simulator import (
     effective_kph,
     grade_kwh,
     optimum,
+    payload_extra_kg,
     simulate,
     sweep,
 )
-from tests.fixtures import BORN_58, chargers_every, flat_motorway
+from tests.fixtures import BORN_58, chargers_every, flat_motorway, nl_to_austria_route
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +161,13 @@ class TestGrade:
         seg = RouteSegment(dist_m=10_000, freeflow_kph=100, climb_m=800.0, descent_m=800.0)
         assert grade_kwh(seg, BORN_58) > 0
 
+    def test_a_full_car_notices_the_mountain(self):
+        seg = RouteSegment(dist_m=10_000, freeflow_kph=100, climb_m=1000.0)
+        light = grade_kwh(seg, BORN_58)
+        heavy = grade_kwh(seg, BORN_58, extra_mass_kg=200.0)
+        # mgh is linear in m, so 200 kg on a 1900 kg car is 200/1900 more.
+        assert heavy == pytest.approx(light * (2100 / 1900), rel=1e-9)
+
     def test_climbing_costs_time_over_the_trip(self):
         flat = flat_motorway(600, freeflow=125, country="DE")
         hilly = [
@@ -168,6 +180,134 @@ class TestGrade:
         a = simulate(flat, chargers, BORN_58, 130.0, p)
         b = simulate(hilly, chargers, BORN_58, 130.0, p)
         assert b.total_min > a.total_min
+
+
+# ---------------------------------------------------------------------------
+# Payload: people and luggage
+# ---------------------------------------------------------------------------
+
+
+def _hilly(segments: list[RouteSegment], climb: float = 25.0, descent: float = 10.0):
+    return [
+        RouteSegment(
+            dist_m=s.dist_m,
+            freeflow_kph=s.freeflow_kph,
+            country=s.country,
+            climb_m=climb,
+            descent_m=descent,
+        )
+        for s in segments
+    ]
+
+
+class TestPayload:
+    def test_two_up_with_a_weekend_bag_is_the_nominal_load(self):
+        """The catalog `mass_kg` already includes 180 kg of people and luggage,
+        so the request defaults must measure zero against it — otherwise every
+        trip planned before these fields existed would silently re-plan."""
+        assert payload_extra_kg(2, 30.0) == 0.0
+        assert payload_extra_kg(4, 60.0) == 4 * OCCUPANT_KG + 60.0 - NOMINAL_LOAD_KG
+
+    def test_a_lone_driver_is_lighter_than_the_catalog_car(self):
+        assert payload_extra_kg(1, 0.0) < 0.0
+
+    def test_the_default_load_changes_nothing(self):
+        """The compatibility guarantee, end to end."""
+        segs, chargers = nl_to_austria_route()
+        base = simulate(segs, chargers, BORN_58, 130.0, SimParams())
+        same = simulate(
+            segs, chargers, BORN_58, 130.0,
+            SimParams(extra_mass_kg=payload_extra_kg(2, 30.0)),
+        )
+        assert same.total_min == base.total_min
+        assert same.energy_kwh == base.energy_kwh
+        assert [s.charger_id for s in same.stops] == [s.charger_id for s in base.stops]
+
+    def test_weight_costs_energy_even_on_the_flat(self):
+        """The point of the rolling term. Before it, `mass_kg` fed only mgh, so
+        four passengers on a flat motorway cost exactly nothing."""
+        segs = flat_motorway(100, freeflow=125, country="DE")
+        p = SimParams(autobahn_open_share=0.0)
+        light = RouteProfile(segs, 120.0, BORN_58, p)
+        heavy = RouteProfile(segs, 120.0, BORN_58, SimParams(
+            autobahn_open_share=0.0, extra_mass_kg=100.0,
+        ))
+        per_kg_wh_km = ROLLING_CRR * GRAVITY * 1000.0 / 3600.0 / DRIVETRAIN_EFFICIENCY
+        expected = 100.0 * per_kg_wh_km * 100.0 / 1000.0  # kg × Wh/km/kg × km → kWh
+        assert heavy.total_kwh - light.total_kwh == pytest.approx(expected, rel=1e-9)
+        # Sanity on the magnitude: ~3 Wh/km per 100 kg, not 0.3 and not 30.
+        assert 2.5 <= per_kg_wh_km * 100.0 <= 3.5
+
+    def test_the_rolling_penalty_does_not_scale_with_speed(self):
+        """Rolling drag is roughly speed-independent — which is exactly why it
+        is a separate term and not a multiplier on `a + b·v²`."""
+        segs = flat_motorway(100, freeflow=125, country="DE")
+        p = SimParams(autobahn_open_share=0.0, over_cap_kph=30.0)
+        heavy = SimParams(autobahn_open_share=0.0, over_cap_kph=30.0, extra_mass_kg=150.0)
+        slow = RouteProfile(segs, 90.0, BORN_58, heavy).total_kwh - \
+            RouteProfile(segs, 90.0, BORN_58, p).total_kwh
+        fast = RouteProfile(segs, 150.0, BORN_58, heavy).total_kwh - \
+            RouteProfile(segs, 150.0, BORN_58, p).total_kwh
+        assert slow == pytest.approx(fast, rel=1e-9)
+
+    def test_more_weight_never_uses_less_energy(self):
+        segs = flat_motorway(300, freeflow=125, country="DE")
+        p = SimParams(autobahn_open_share=0.3)
+        for v in (90.0, 110.0, 130.0, 150.0):
+            prev = None
+            for extra in (0.0, 100.0, 200.0, 400.0):
+                kwh = RouteProfile(
+                    segs, v, BORN_58, SimParams(
+                        autobahn_open_share=p.autobahn_open_share, extra_mass_kg=extra,
+                    ),
+                ).total_kwh
+                if prev is not None:
+                    assert kwh >= prev
+                prev = kwh
+
+    def test_weight_costs_more_over_a_pass_than_on_the_flat(self):
+        """Both terms are live: rolling drag everywhere, mgh on the climbs."""
+        flat = flat_motorway(300, freeflow=125, country="DE")
+        hilly = _hilly(flat)
+        p = SimParams(autobahn_open_share=0.0)
+        heavy = SimParams(autobahn_open_share=0.0, extra_mass_kg=200.0)
+        flat_delta = RouteProfile(flat, 120.0, BORN_58, heavy).total_kwh - \
+            RouteProfile(flat, 120.0, BORN_58, p).total_kwh
+        hilly_delta = RouteProfile(hilly, 120.0, BORN_58, heavy).total_kwh - \
+            RouteProfile(hilly, 120.0, BORN_58, p).total_kwh
+        assert flat_delta > 0
+        assert hilly_delta > flat_delta
+
+    def test_a_loaded_car_never_arrives_earlier(self):
+        segs, chargers = nl_to_austria_route()
+        p = SimParams(autobahn_open_share=0.3)
+        light = simulate(segs, chargers, BORN_58, 130.0, p)
+        heavy = simulate(
+            segs, chargers, BORN_58, 130.0,
+            SimParams(autobahn_open_share=0.3, extra_mass_kg=payload_extra_kg(5, 100.0)),
+        )
+        assert heavy.total_min >= light.total_min
+
+    def test_loading_the_car_never_makes_the_best_plan_faster(self):
+        """Monotone in TIME, not in speed.
+
+        The optimum *speed* is deliberately not asserted here: the total-time
+        curve is flat near its minimum (the UI has a callout for exactly that),
+        so a few kWh flips which discrete speed wins and the optimum wanders
+        non-monotonically — measured at 155/145/160/…/145/160 across this
+        range. What cannot happen is a heavier car finishing sooner.
+        """
+        segs, chargers = nl_to_austria_route()
+        speeds = [90.0 + 5.0 * i for i in range(15)]
+        prev = None
+        for extra in (-100.0, 0.0, 100.0, 200.0, 300.0, 400.0):
+            best = optimum(sweep(segs, chargers, BORN_58, speeds, SimParams(
+                autobahn_open_share=0.3, extra_mass_kg=extra,
+            )))
+            assert best is not None
+            if prev is not None:
+                assert best.total_min >= prev
+            prev = best.total_min
 
 
 # ---------------------------------------------------------------------------
