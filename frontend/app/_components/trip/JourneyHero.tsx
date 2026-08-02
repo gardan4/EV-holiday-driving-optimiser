@@ -125,35 +125,23 @@ export default function JourneyHero({
    * trip died on a 3440px monitor, and zooming the browser in "fixed" it only
    * because zoom shrinks the CSS viewport.
    */
-  const [viewW, setViewW] = useState(0)
-  useEffect(() => {
-    const el = scroller.current
-    if (!el) return
-    const measure = () => setViewW((w) => (w === el.clientWidth ? w : el.clientWidth))
-    measure()
-    // Both, deliberately. The observer catches layout changes the window
-    // never hears about (a sidebar opening, the pane resizing); the window
-    // listener is the one that survives environments where observer callbacks
-    // aren't delivered. Neither alone has been reliable everywhere.
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    window.addEventListener("resize", measure)
-    window.addEventListener("orientationchange", measure)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener("resize", measure)
-      window.removeEventListener("orientationchange", measure)
-    }
-  }, [])
-
   /**
-   * The journey's own length in scroll pixels — and now the scrollable range
-   * exactly, because the track is this plus one viewport. Scrubbing a given
-   * trip therefore covers the same distance on every screen, which it did not
-   * before: the same plan moved at a different rate on a laptop and a monitor.
+   * The journey's own length in scroll pixels — and the scrollable range
+   * exactly, because the track below is this plus one viewport.
+   *
+   * The width is handed to CSS as `calc(100% + journeyPx)` rather than
+   * measured in JS. A percentage on this child resolves against the scroll
+   * container's content box, i.e. its `clientWidth`, so the browser does the
+   * arithmetic at layout time — correct on the very first paint, on resize,
+   * and on zoom, with nothing to observe and nothing to race.
+   *
+   * This matters because the scrollable range is `scrollWidth - clientWidth`.
+   * Sizing the track to the journey alone made the range shrink as the window
+   * widened and go negative on a wide monitor, at which point play, drag and
+   * swipe all silently did nothing.
    */
   const journeyPx = Math.max(Math.round(totalMin * PX_PER_MIN), 1200)
-  const trackWidth = journeyPx + viewW
+  const trackWidth = `calc(100% + ${journeyPx}px)`
 
   // Mutated every frame without re-rendering React; the scene reads it.
   const world = useRef<JourneyWorldRef>({
@@ -306,20 +294,34 @@ export default function JourneyHero({
     if (!playing || liveDistM != null) return
     let raf = 0
     let last = performance.now()
+    /**
+     * The playhead, in floating-point pixels, kept HERE rather than read back
+     * out of `scrollLeft` each frame.
+     *
+     * That read-back is why playback appeared dead below the fastest speed.
+     * Browsers may quantise `scrollLeft` to whole (device) pixels, and one
+     * frame is a fraction of a pixel at ordinary rates — 0.09px at 60×, 0.43px
+     * at 300×. Written to a quantised property those round straight back to
+     * where they started, so the position never advances at all: not slowly,
+     * never. Only 900× (1.3px/frame) cleared a whole pixel and moved. The
+     * fraction has to accumulate somewhere the browser isn't allowed to round,
+     * and that's a local.
+     */
+    let pos = scroller.current?.scrollLeft ?? 0
     const step = (now: number) => {
       const el = scroller.current
       if (!el) return
       const dtMin = ((now - last) / 1000 / 60) * factor
       last = now
       const max = el.scrollWidth - el.clientWidth
-      const next = el.scrollLeft + (dtMin / (totalMin || 1)) * max
-      el.scrollLeft = next
+      pos += (dtMin / (totalMin || 1)) * max
+      el.scrollLeft = pos
       // Drive the sync directly rather than waiting for the scroll event this
       // assignment *should* fire. Dragging and live placement already do; not
       // doing it here left playback's correctness resting on event delivery
       // the component neither controls nor needs.
       syncFromScroll()
-      if (next >= max - 1) {
+      if (pos >= max - 1) {
         setPlaying(false)
         return
       }
