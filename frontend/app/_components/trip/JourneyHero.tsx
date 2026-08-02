@@ -113,7 +113,47 @@ export default function JourneyHero({
   const totalDistM = result.timeline.length
     ? result.timeline[result.timeline.length - 1].dist_m
     : 1
-  const trackWidth = Math.max(Math.round(totalMin * PX_PER_MIN), 1200)
+
+  /**
+   * How wide the scroll surface actually is, tracked so the track can be sized
+   * relative to it.
+   *
+   * This is load-bearing, not cosmetic. The scrollable range of an element is
+   * `scrollWidth - clientWidth`, so sizing the track to the journey alone made
+   * the range shrink as the window widened — and go NEGATIVE on a wide screen,
+   * at which point play, drag and swipe all silently did nothing. A 9½-hour
+   * trip died on a 3440px monitor, and zooming the browser in "fixed" it only
+   * because zoom shrinks the CSS viewport.
+   */
+  const [viewW, setViewW] = useState(0)
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const measure = () => setViewW((w) => (w === el.clientWidth ? w : el.clientWidth))
+    measure()
+    // Both, deliberately. The observer catches layout changes the window
+    // never hears about (a sidebar opening, the pane resizing); the window
+    // listener is the one that survives environments where observer callbacks
+    // aren't delivered. Neither alone has been reliable everywhere.
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    window.addEventListener("resize", measure)
+    window.addEventListener("orientationchange", measure)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener("resize", measure)
+      window.removeEventListener("orientationchange", measure)
+    }
+  }, [])
+
+  /**
+   * The journey's own length in scroll pixels — and now the scrollable range
+   * exactly, because the track is this plus one viewport. Scrubbing a given
+   * trip therefore covers the same distance on every screen, which it did not
+   * before: the same plan moved at a different rate on a laptop and a monitor.
+   */
+  const journeyPx = Math.max(Math.round(totalMin * PX_PER_MIN), 1200)
+  const trackWidth = journeyPx + viewW
 
   // Mutated every frame without re-rendering React; the scene reads it.
   const world = useRef<JourneyWorldRef>({
@@ -274,6 +314,11 @@ export default function JourneyHero({
       const max = el.scrollWidth - el.clientWidth
       const next = el.scrollLeft + (dtMin / (totalMin || 1)) * max
       el.scrollLeft = next
+      // Drive the sync directly rather than waiting for the scroll event this
+      // assignment *should* fire. Dragging and live placement already do; not
+      // doing it here left playback's correctness resting on event delivery
+      // the component neither controls nor needs.
+      syncFromScroll()
       if (next >= max - 1) {
         setPlaying(false)
         return
@@ -282,7 +327,7 @@ export default function JourneyHero({
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [playing, factor, totalMin])
+  }, [playing, factor, totalMin, syncFromScroll])
 
   // Dragging the progress rail is the same mechanism as scrolling and as
   // autoplay: all three only ever move `scrollLeft`, and everything else in the
