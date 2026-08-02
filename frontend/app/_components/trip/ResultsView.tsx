@@ -14,7 +14,7 @@ import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
 import JourneyHero from "./JourneyHero"
 import SpeedChart from "./SpeedChart"
-import SendToPhone from "./live/SendToPhone"
+import { DriveThisButton, SendToPhonePanel } from "./live/SendToPhone"
 import DriveBanner from "./live/DriveBanner"
 
 /**
@@ -35,6 +35,9 @@ export default function ResultsView({
     result.optimum_speed ?? result.speeds.find((s) => s.feasible)?.speed_kph ?? 0
   )
   const [hoverStop, setHoverStop] = useState<string | null>(null)
+  // Lifted out of the button so the panel can render full-width below the
+  // header instead of as a flex sibling of Share and New trip.
+  const [sendOpen, setSendOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [raceSpeed, setRaceSpeed] = useState<number | null>(null)
 
@@ -127,7 +130,12 @@ export default function ResultsView({
           <div className="flex items-center gap-2">
             {/* A drive already under way replaces the invitation to start one —
                 the banner below is the way in. */}
-            {live?.status !== "active" && <SendToPhone tripId={trip.id} />}
+            {live?.status !== "active" && (
+              <DriveThisButton
+                tripId={trip.id}
+                onShowQr={() => setSendOpen(true)}
+              />
+            )}
             <button
               onClick={copyLink}
               className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
@@ -144,6 +152,10 @@ export default function ResultsView({
             </Link>
           </div>
         </div>
+
+        {sendOpen && (
+          <SendToPhonePanel tripId={trip.id} onClose={() => setSendOpen(false)} />
+        )}
 
         <DriveBanner tripId={trip.id} live={live} />
 

@@ -3,31 +3,69 @@
 /**
  * Getting the plan onto the phone that's actually coming along.
  *
- * This replaced a "Start this drive" button on the results page, and the
- * change is the whole point: the driver token is created wherever the button
- * is pressed, and a laptop on Tuesday is never the right device. Pressing it
- * there started the clock days early, asked a desktop for a GPS fix, and left
- * the phone as a permanent spectator of its own journey.
+ * This replaced a "Start this drive" button on the results page, and the change
+ * is the whole point: the driver token is created wherever the button is
+ * pressed, and a laptop on Tuesday is never the right device. Pressing it there
+ * started the clock days early, asked a desktop for a GPS fix, and left the
+ * phone a permanent spectator of its own journey.
  *
  * So nothing is started here. This hands the trip to a phone, and the phone
  * starts the drive — see `/trip/[id]/drive`.
  *
- * The QR encoder is dynamically imported so it never reaches the initial
- * bundle, and it renders a plain inline SVG: no network, no external origin,
- * nothing for the CSP to object to.
+ * Unless you are already on one. A touch device can be the driving device, and
+ * showing it a QR code it would have to scan with itself is a small absurdity,
+ * so it skips straight to the start screen. The decision is made on click
+ * rather than at render, so there's no hydration mismatch and no flash of the
+ * wrong label.
  */
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Check, Link2, Loader2, Share2, Smartphone } from "lucide-react"
 
-export default function SendToPhone({ tripId }: { tripId: string }) {
-  const [open, setOpen] = useState(false)
+/** Can this device plausibly be the one in the car? A coarse pointer means a
+ *  touchscreen, which is the closest thing to an honest signal for "phone". */
+function isHandheld(): boolean {
+  if (typeof window === "undefined") return false
+  return window.matchMedia("(pointer: coarse)").matches
+}
+
+export function DriveThisButton({
+  tripId,
+  onShowQr,
+}: {
+  tripId: string
+  onShowQr: () => void
+}) {
+  const router = useRouter()
+  return (
+    <button
+      onClick={() => (isHandheld() ? router.push(`/trip/${tripId}/drive`) : onShowQr())}
+      className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
+    >
+      <Smartphone className="h-4 w-4" />
+      Drive this
+    </button>
+  )
+}
+
+/**
+ * The hand-off card. Rendered full-width BELOW the header rather than inside
+ * its button row — as a flex sibling of Share and New trip it collapsed into a
+ * narrow column on a phone, with the QR squeezed against the buttons.
+ */
+export function SendToPhonePanel({
+  tripId,
+  onClose,
+}: {
+  tripId: string
+  onClose: () => void
+}) {
   const [svg, setSvg] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [url, setUrl] = useState("")
 
   useEffect(() => {
-    if (!open) return
     const target = `${window.location.origin}/trip/${tripId}/drive`
     setUrl(target)
     let alive = true
@@ -44,7 +82,7 @@ export default function SendToPhone({ tripId }: { tripId: string }) {
     return () => {
       alive = false
     }
-  }, [open, tripId])
+  }, [tripId])
 
   async function copy() {
     await navigator.clipboard.writeText(url)
@@ -64,20 +102,8 @@ export default function SendToPhone({ tripId }: { tripId: string }) {
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
-      >
-        <Smartphone className="h-4 w-4" />
-        Drive this
-      </button>
-    )
-  }
-
   return (
-    <div className="w-full rounded-2xl border border-brand-200 bg-brand-50/60 p-4 sm:p-5">
+    <div className="mb-6 rounded-2xl border border-brand-200 bg-brand-50/60 p-4 sm:p-5">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
         <div className="grid h-[190px] w-[190px] shrink-0 place-items-center self-center rounded-xl bg-white p-2 shadow-sm sm:self-auto">
           {svg ? (
@@ -127,7 +153,7 @@ export default function SendToPhone({ tripId }: { tripId: string }) {
               {copied ? "Copied" : "Copy driver link"}
             </button>
             <button
-              onClick={() => setOpen(false)}
+              onClick={onClose}
               className="px-2 py-2 text-sm text-ink-500 underline underline-offset-2"
             >
               Close
