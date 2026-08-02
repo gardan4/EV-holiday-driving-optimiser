@@ -243,19 +243,64 @@ class TestCost:
 
 
 def test_temperature_reproduces_the_presets_it_replaced() -> None:
-    """The old Mild/Cold/Freezing chips are still the anchors of the curve."""
+    """The old Mild/Cold/Freezing chips are still the anchors of the curve.
+
+    The cold penalty is now split between a per-km multiplier and a constant
+    conditioning draw, so the anchor is the TOTAL at a typical cruise speed
+    rather than the multiplier alone.
+    """
     from app.services.simulator import (
+        aux_kw_for_temp,
         charge_power_factor_for_temp,
         consumption_factor_for_temp,
     )
 
+    def total_wh_km(temp_c: float, kph: float, mild_wh_km: float) -> float:
+        return (
+            mild_wh_km * consumption_factor_for_temp(temp_c)
+            + aux_kw_for_temp(temp_c) * 1000.0 / kph
+        )
+
     assert consumption_factor_for_temp(15.0) == pytest.approx(1.0)
-    assert consumption_factor_for_temp(0.0) == pytest.approx(1.15, abs=0.01)
-    assert consumption_factor_for_temp(-10.0) == pytest.approx(1.30, abs=0.01)
+    assert aux_kw_for_temp(15.0) == pytest.approx(0.0)
+
+    # At a typical 120 km/h the old presets were 1.00 / 1.15 / 1.30 on 200 Wh/km.
+    assert total_wh_km(15.0, 120, 200.0) == pytest.approx(200.0, rel=0.02)
+    assert total_wh_km(0.0, 120, 200.0) == pytest.approx(230.0, rel=0.03)
+    assert total_wh_km(-10.0, 120, 200.0) == pytest.approx(260.0, rel=0.05)
 
     assert charge_power_factor_for_temp(20.0) == pytest.approx(1.0)
     assert charge_power_factor_for_temp(0.0) == pytest.approx(0.80, abs=0.01)
     assert charge_power_factor_for_temp(-10.0) == pytest.approx(0.55, abs=0.01)
+
+
+def test_conditioning_costs_less_per_km_the_faster_you_go() -> None:
+    """Heating is a power draw, not a tax on distance.
+
+    The bug this pins: folding conditioning into the Wh/km multiplier made it
+    scale with the v² drag term, so the model implied a heater four times
+    stronger at 160 km/h than at 90 — and talked you out of driving fast for a
+    reason that does not exist.
+    """
+    from app.services.simulator import RouteProfile, aux_kw_for_temp
+
+    aux = aux_kw_for_temp(-10.0)
+    assert 2.0 < aux < 4.5, "a plausible continuous heater draw"
+
+    segs = flat_motorway(600, freeflow=130, country="DE")
+    per_km, per_hour = {}, {}
+    for kph in (90.0, 160.0):
+        warm = RouteProfile(segs, kph, BORN_58, SimParams())
+        cold = RouteProfile(segs, kph, BORN_58, SimParams(aux_kw=aux))
+        extra = cold.total_kwh - warm.total_kwh
+        per_km[kph] = extra / (cold.total_dist_m / 1000.0)
+        per_hour[kph] = extra / (cold.total_min / 60.0)
+
+    # An hour is an hour: the draw is the same however fast you were going.
+    # (Per km it cannot be — that is the point.)
+    for kph in (90.0, 160.0):
+        assert per_hour[kph] == pytest.approx(aux, rel=1e-9)
+    assert per_km[90.0] > per_km[160.0], "slower driving must carry more heating per km"
 
 
 def test_temperature_factors_are_monotonic_and_bounded() -> None:

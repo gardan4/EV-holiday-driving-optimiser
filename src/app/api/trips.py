@@ -31,6 +31,7 @@ from app.services import chargers as chargers_svc
 from app.services import routing
 from app.services.geo import polyline_encode
 from app.services.simulator import (
+    aux_kw_for_temp,
     charge_power_factor_for_temp,
     consumption_factor_for_temp,
     SimParams,
@@ -144,6 +145,11 @@ async def plan_trip(
             charge_power_factor_for_temp(plan.temperature_c)
             if plan.temperature_c is not None
             else plan.charge_power_factor
+        ),
+        # Only a real temperature implies a conditioning load; the legacy
+        # conditions_factor path is a bare Wh/km multiplier and carries none.
+        aux_kw=(
+            aux_kw_for_temp(plan.temperature_c) if plan.temperature_c is not None else 0.0
         ),
         autobahn_open_share=plan.autobahn_open_share,
         over_cap_kph=plan.over_cap_kph,

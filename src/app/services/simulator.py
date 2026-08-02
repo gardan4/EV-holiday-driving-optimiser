@@ -132,6 +132,13 @@ class SimParams:
     stop_overhead_min: float = 5.0
     charge_cap_soc: float = 100.0  # ceiling for charge targets (DP may stop lower)
     consumption_factor: float = 1.0  # conditions multiplier on Wh/km
+    # Cabin and battery conditioning, in kW. Deliberately NOT part of
+    # `consumption_factor`: heating is a roughly constant power draw, so its
+    # cost per kilometre falls as you speed up. Folding it into a multiplier on
+    # Wh/km — which is dominated by the v² drag term — would claim the heater
+    # pulls 4 kW at 90 km/h and 15 kW at 160, and would bias the whole answer
+    # towards driving slowly in exactly the weather this app is used in.
+    aux_kw: float = 0.0
     # Cold packs charge far slower than the datasheet curve. This scales the
     # whole curve; it is the single biggest lever on the winter answer.
     charge_power_factor: float = 1.0
@@ -340,6 +347,9 @@ class RouteProfile:
             # climb-and-descend pair because regen is not free).
             e += wh_per_km(eff, veh, p.consumption_factor) * dist_km / 1000.0
             e += grade_kwh(seg, veh)
+            # Conditioning is billed by the hour, not by the kilometre — which
+            # is the whole point of keeping it out of the Wh/km term.
+            e += p.aux_kw * (dist_km / eff)
             e = max(e, 0.0)
             self.offsets[i + 1] = d
             self.t_min[i + 1] = t
@@ -674,24 +684,46 @@ def optimum(results: list[SpeedResult]) -> SpeedResult | None:
 
 
 # --- Weather ---------------------------------------------------------------
-# Cold hits an EV twice, and the second effect is the one people forget: the
-# pack also ACCEPTS charge more slowly, which on a long winter trip costs far
-# more time than the extra kWh does. Both curves are anchored to the presets
-# this replaced (mild 1.00/1.00, ~0 °C 1.15/0.80, ~-10 °C 1.30/0.55) and
-# interpolated between, so a real temperature can be entered instead.
+# Cold hits an EV three ways, and they do NOT share a shape:
+#   1. conditioning the cabin and pack — roughly constant POWER, so its cost
+#      per kilometre falls the faster you go            → `aux_kw_for_temp`
+#   2. denser air and stiffer tyres/lubricants — a true per-kilometre effect
+#      that scales with the existing terms              → `consumption_factor_for_temp`
+#   3. the pack ACCEPTS charge more slowly, which on a long winter trip costs
+#      more time than the extra kWh does                → `charge_power_factor_for_temp`
+# (1) and (2) used to be a single multiplier on Wh/km. Because Wh/km is
+# dominated by the v² drag term, that made the heater appear to draw four times
+# more power at 160 km/h than at 90 — pushing the recommended speed down for a
+# reason that isn't physical. Splitting them keeps the same total at a typical
+# cruise while getting the speed-dependence right.
+
 
 def consumption_factor_for_temp(temp_c: float) -> float:
-    """Multiplier on Wh/km for ambient temperature.
+    """Multiplier on Wh/km for ambient temperature — the per-distance part only.
 
-    Flat in the mild band; rises ~1.5%/°C once it drops below 10 °C (cabin
-    heating plus a stiffer drivetrain), and creeps up again in real heat as
-    air-conditioning starts to draw.
+    Cold air is denser (drag rises ~0.35%/°C) and cold tyres and lubricants
+    lose more, so ~0.5%/°C below 15 °C. Cabin heating is NOT in here; it is a
+    power draw, and lives in `aux_kw_for_temp`.
     """
-    if temp_c < 10.0:
-        return min(1.55, 1.0 + (10.0 - temp_c) * 0.015)
-    if temp_c > 28.0:
-        return min(1.15, 1.0 + (temp_c - 28.0) * 0.005)
+    if temp_c < 15.0:
+        return min(1.20, 1.0 + (15.0 - temp_c) * 0.005)
     return 1.0
+
+
+def aux_kw_for_temp(temp_c: float) -> float:
+    """Cabin and battery conditioning draw, in kW, for ambient temperature.
+
+    Zero in the mild band — the baseline hotel load (pumps, lights, screens) is
+    already inside each car's fitted `a_wh_km`, so counting it again here would
+    double it. This is only the *extra* load weather imposes: heating ramps to
+    ~3 kW around -10 °C and caps near a resistive heater's continuous output;
+    air-conditioning is the much smaller summer equivalent.
+    """
+    if temp_c < 15.0:
+        return min(4.5, (15.0 - temp_c) * 0.13)
+    if temp_c > 28.0:
+        return min(1.5, (temp_c - 28.0) * 0.12)
+    return 0.0
 
 
 def charge_power_factor_for_temp(temp_c: float) -> float:
