@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Bar,
   BarChart,
@@ -19,6 +19,10 @@ import { nearOptimalBand } from "@/lib/verdict"
 
 const DRIVE = "#3f6dbf" // --color-chart-drive (validated)
 const CHARGE = "#d98e1f" // --color-chart-charge
+// Plug-in overhead + detour + queueing. A lighter tint of the charging amber:
+// it belongs to the stop, and lightness (not hue) carries the distinction, so
+// it survives every form of colour blindness.
+const STOP = "#efc98f"
 const REST = "#aab6c5" // ink-300, for break time
 const OPTIMUM = "#17a56b" // brand-500
 const INK = "#55677f"
@@ -37,6 +41,12 @@ interface SpeedChartProps {
  * quantity — the whole argument is "faster driving buys more charging" — with
  * the charging cost direct-labelled above each bar.
  *
+ * The four segments must add up to `total_min`, or the bar heights and the
+ * y-axis tell a different story from the tooltip. `drive_min` excludes the
+ * per-stop overhead the simulator charges (plug-in + detour + queue), so that
+ * slice is recovered here by difference — and it is not a rounding error: it
+ * scales with the stop count, which is exactly where the curve turns.
+ *
  * Bars start at zero (their length encodes magnitude); cost lives in a label
  * rather than a second y-axis, which would invite false crossing-point reads.
  */
@@ -49,16 +59,27 @@ export default function SpeedChart({
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const data = useMemo(
     () =>
-      speeds.map((s) => ({
-        speed: s.speed_kph,
-        drive: s.feasible ? (s.drive_min ?? 0) : 0,
-        charge: s.feasible ? (s.charge_min ?? 0) : 0,
-        rest: s.feasible ? (s.rest_min ?? 0) : 0,
-        total: s.feasible ? s.total_min : null,
-        cost: s.feasible ? s.cost_eur : 0,
-        stops: s.n_stops,
-        feasible: s.feasible,
-      })),
+      speeds.map((s) => {
+        const drive = s.feasible ? (s.drive_min ?? 0) : 0
+        const charge = s.feasible ? (s.charge_min ?? 0) : 0
+        const rest = s.feasible ? (s.rest_min ?? 0) : 0
+        return {
+          speed: s.speed_kph,
+          drive,
+          charge,
+          rest,
+          // Everything the stop costs beyond the electricity itself. Derived
+          // rather than read from a field so trips planned before this existed
+          // still add up.
+          stopped: s.feasible
+            ? Math.max(0, (s.total_min ?? 0) - drive - charge - rest)
+            : 0,
+          total: s.feasible ? s.total_min : null,
+          cost: s.feasible ? s.cost_eur : 0,
+          stops: s.n_stops,
+          feasible: s.feasible,
+        }
+      }),
     [speeds]
   )
 
@@ -67,18 +88,36 @@ export default function SpeedChart({
   // in a production build.
   const plotWidth = useChartWidth(wrapRef)
 
-  const feasible = speeds.filter((s) => s.feasible)
-  if (feasible.length === 0) return null
-  const anyRest = feasible.some((s) => (s.rest_min ?? 0) > 0)
-  const anyCost = feasible.some((s) => s.cost_eur > 0)
-  const maxTotal = Math.max(...feasible.map((s) => s.total_min ?? 0))
-  const band = nearOptimalBand(speeds)
-
   // A "€108" label needs ~30px; on a phone each bar only gets ~21px, so every
   // label after the first few collides into an unreadable smear. Thin them to
   // whatever actually fits and always keep the ones carrying the argument.
   const slotPx = plotWidth > 0 ? plotWidth / Math.max(1, data.length) : 999
   const labelStride = Math.max(1, Math.ceil(30 / slotPx))
+
+  // Recharts rebuilds a LabelList whenever `content` changes identity, so an
+  // inline arrow would tear down and redraw every € label on every render —
+  // including ones that have nothing to do with the labels.
+  const renderCostLabel = useCallback(
+    (props: object) => (
+      <CostLabel
+        {...props}
+        data={data}
+        optimumSpeed={optimumSpeed}
+        selectedSpeed={selectedSpeed}
+        stride={labelStride}
+        compact={slotPx < 34}
+      />
+    ),
+    [data, optimumSpeed, selectedSpeed, labelStride, slotPx]
+  )
+
+  const feasible = speeds.filter((s) => s.feasible)
+  if (feasible.length === 0) return null
+  const anyRest = feasible.some((s) => (s.rest_min ?? 0) > 0)
+  const anyStopped = data.some((d) => d.stopped > 0.5)
+  const anyCost = feasible.some((s) => s.cost_eur > 0)
+  const maxTotal = Math.max(...feasible.map((s) => s.total_min ?? 0))
+  const band = nearOptimalBand(speeds)
 
   return (
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
@@ -86,12 +125,15 @@ export default function SpeedChart({
         <h2 className="font-display text-base font-semibold text-ink-900">
           Where the time goes, by cruise speed
         </h2>
-        <span className="text-xs text-ink-400">click a bar to explore it</span>
+        <span className="text-xs text-ink-400">
+          click a bar to drive that plan up top
+        </span>
       </div>
 
       {/* Legend: two or more series, so identity is never colour-alone. */}
       <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-500">
         <Key color={CHARGE} label="charging" />
+        {anyStopped && <Key color={STOP} label="plugging in &amp; detours" />}
         {anyRest && <Key color={REST} label="breaks" />}
         <Key color={DRIVE} label="driving" />
         {band && !band.sharp && (
@@ -111,7 +153,7 @@ export default function SpeedChart({
         ref={wrapRef}
         className="h-72 sm:h-80"
         role="img"
-        aria-label="Stacked bar chart of driving and charging time by cruise speed, with charging cost labelled above each bar"
+        aria-label="Stacked bar chart of driving, charging and stop time by cruise speed, with charging cost labelled above each bar"
       >
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -183,6 +225,12 @@ export default function SpeedChart({
                         p.stops != null ? ` · ${p.stops} stops` : ""
                       }`}
                     />
+                    {p.stopped > 0.5 && (
+                      <Row
+                        color={STOP}
+                        text={`plugging in & detours ${fmtDuration(p.stopped)}`}
+                      />
+                    )}
                     {p.rest > 0 && <Row color={REST} text={`breaks ${fmtDuration(p.rest)}`} />}
                     {p.cost > 0 && (
                       <div className="pt-0.5 font-semibold text-ink-900">
@@ -195,15 +243,49 @@ export default function SpeedChart({
             />
 
             {/* Charging sits on the baseline: comparing it across bars is what
-                this chart is for, and a shared baseline makes that easy. Driving
-                goes on top so the label always has a non-zero segment to sit on
-                (breaks are usually absorbed by the charging stops). */}
-            <Bar dataKey="charge" stackId="t" fill={CHARGE} stroke="#fff" strokeWidth={1}>
+                this chart is for, and a shared baseline makes that easy. The
+                stop overhead sits directly on top of it — both are time spent
+                standing at a charger, and stacking them together makes the real
+                price of an extra stop legible. Driving goes on top so the label
+                always has a non-zero segment to sit on (breaks are usually
+                absorbed by the charging stops). */}
+            {/* Selecting a speed changes every <Cell>, which makes recharts
+                rebuild the rectangles. With animation left on (the default)
+                they would replay their grow-from-zero entrance on every click,
+                so the whole chart appears to reload. The other two charts on
+                this page disable it for the same reason. */}
+            <Bar
+              dataKey="charge"
+              stackId="t"
+              fill={CHARGE}
+              stroke="#fff"
+              strokeWidth={1}
+              isAnimationActive={false}
+            >
               {data.map((d) => (
                 <Cell key={d.speed} fillOpacity={dim(d.speed, selectedSpeed) ? 0.45 : 1} />
               ))}
             </Bar>
-            <Bar dataKey="rest" stackId="t" fill={REST} stroke="#fff" strokeWidth={1}>
+            <Bar
+              dataKey="stopped"
+              stackId="t"
+              fill={STOP}
+              stroke="#fff"
+              strokeWidth={1}
+              isAnimationActive={false}
+            >
+              {data.map((d) => (
+                <Cell key={d.speed} fillOpacity={dim(d.speed, selectedSpeed) ? 0.45 : 1} />
+              ))}
+            </Bar>
+            <Bar
+              dataKey="rest"
+              stackId="t"
+              fill={REST}
+              stroke="#fff"
+              strokeWidth={1}
+              isAnimationActive={false}
+            >
               {data.map((d) => (
                 <Cell key={d.speed} fillOpacity={dim(d.speed, selectedSpeed) ? 0.45 : 1} />
               ))}
@@ -215,24 +297,12 @@ export default function SpeedChart({
               stroke="#fff"
               strokeWidth={1}
               radius={[4, 4, 0, 0]}
+              isAnimationActive={false}
             >
               {data.map((d) => (
                 <Cell key={d.speed} fillOpacity={dim(d.speed, selectedSpeed) ? 0.45 : 1} />
               ))}
-              <LabelList
-                dataKey="cost"
-                position="top"
-                content={(props) => (
-                  <CostLabel
-                    {...props}
-                    data={data}
-                    optimumSpeed={optimumSpeed}
-                    selectedSpeed={selectedSpeed}
-                    stride={labelStride}
-                    compact={slotPx < 34}
-                  />
-                )}
-              />
+              <LabelList dataKey="cost" position="top" content={renderCostLabel} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
