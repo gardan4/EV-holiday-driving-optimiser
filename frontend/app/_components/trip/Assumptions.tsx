@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2, RotateCw } from "lucide-react"
+import { ChevronRight, Loader2, RotateCw } from "lucide-react"
 import { toast } from "sonner"
 import { PlanRequest, Trip, Vehicle, planTrip } from "@/lib/client"
 import { freeflowFactorFor } from "@/lib/driving"
@@ -53,13 +53,21 @@ export default function Assumptions({ trip }: { trip: Trip }) {
     )
 
   return (
-    <details className="group mt-4 rounded-2xl border border-ink-100 bg-white px-4 py-3 sm:px-5">
-      <summary className="cursor-pointer select-none list-none text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
-        <span className="text-brand-700 group-open:hidden">▸ </span>
-        <span className="hidden text-brand-700 group-open:inline">▾ </span>
-        What this answer assumes
-        <span className="ml-2 font-normal normal-case tracking-normal text-ink-400">
-          the car, your settings, and what the model can&apos;t see
+    <details className="group mt-6 rounded-2xl border border-ink-100 bg-white px-4 py-3 transition-colors hover:border-ink-200 sm:px-5">
+      <summary className="flex cursor-pointer select-none list-none items-center gap-3 marker:content-['']">
+        <ChevronRight className="h-4 w-4 shrink-0 text-brand-700 transition-transform group-open:rotate-90" />
+        <span className="min-w-0 flex-1">
+          <span className="block font-display text-base font-semibold text-ink-900">
+            What this answer assumes
+          </span>
+          <span className="block text-xs text-ink-400">
+            the car, every number you set, how the route is modelled, and what the
+            model can&apos;t see — all of it editable
+          </span>
+        </span>
+        <span className="shrink-0 rounded-lg border border-ink-200 px-2.5 py-1 text-xs font-semibold text-ink-600 group-hover:border-brand-300 group-hover:text-brand-700">
+          <span className="group-open:hidden">Show</span>
+          <span className="hidden group-open:inline">Hide</span>
         </span>
       </summary>
 
@@ -211,35 +219,70 @@ export default function Assumptions({ trip }: { trip: Trip }) {
         </section>
       </div>
 
-      {/* --- Caveats ---------------------------------------------------- */}
-      <div className="mt-5 border-t border-ink-100 pt-3">
-        <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-400">
-          What the model can&apos;t see
-        </p>
-        <ul className="space-y-1 text-xs leading-relaxed text-ink-500">
-          <li>
-            <b className="font-semibold text-ink-700">Which autobahn is open.</b> Road
-            data doesn&apos;t mark derestricted stretches, so a motorway-like segment is
-            treated as unlimited for the share you set above and capped at the country
-            limit otherwise.
-          </li>
-          <li>
-            <b className="font-semibold text-ink-700">Traffic.</b> Not modelled at all —
-            the times assume a clear road, which is close enough overnight and
-            optimistic in daylight.
-          </li>
-          <li>
-            <b className="font-semibold text-ink-700">Charger detours.</b> Estimated from
-            how far the site sits off the route, not routed door to door. Expect a few
-            minutes either way per stop.
-          </li>
-          <li>
-            <b className="font-semibold text-ink-700">Whether the charger works.</b> Sites
-            come from OpenChargeMap and are filtered to operational CCS above 100 kW, but
-            a broken or occupied stall is exactly the thing a crowdsourced database is
-            worst at.
-          </li>
-        </ul>
+      {/* --- How the route is modelled ---------------------------------- */}
+      <div className="mt-5 grid gap-5 border-t border-ink-100 pt-3 lg:grid-cols-2">
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-400">
+            How this route is modelled
+          </p>
+          <ul className="space-y-1 text-xs leading-relaxed text-ink-500">
+            <li>
+              <b className="font-semibold text-ink-700">Speed.</b>{" "}
+              Your cruise speed applies on motorway stretches up to each country&apos;s legal cap (130 in
+              AT/NL). German autobahn counts as derestricted only for the{" "}
+              {Math.round((r.autobahn_open_share ?? 0.3) * 100)}% you set above —
+              roadworks, traffic and posted limits take back the rest. Everywhere else
+              the road&apos;s own driving speed governs.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Elevation.</b>{" "}
+              {(trip.result.climb_m / 1000).toFixed(1)} km of cumulative climb on this
+              route, costing energy on the way up and giving about two-thirds of it back
+              through regen on the way down.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Weather.</b> Consumption is a
+              per-car fit from public range tests, scaled by the temperature above. Cold
+              also slows <em>charging</em> — the bigger of the two effects on a winter
+              trip — so it derates the charge curve as well.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Cost.</b>{" "}
+              Energy is priced at the plug, including charging losses, so the figure is what you&apos;d pay — not
+              the energy that reaches the battery.
+            </li>
+          </ul>
+        </div>
+
+        {/* --- Caveats -------------------------------------------------- */}
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-400">
+            What the model can&apos;t see
+          </p>
+          <ul className="space-y-1 text-xs leading-relaxed text-ink-500">
+            <li>
+              <b className="font-semibold text-ink-700">Which autobahn is open.</b>{" "}
+              Road data doesn&apos;t mark derestricted stretches, so the share above is a
+              guess you get to make, not a measurement.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Traffic.</b> Not modelled at all —
+              the times assume a clear road, which is close enough overnight and
+              optimistic in daylight. Departure time shifts the clock, not the plan.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Charger detours.</b> Estimated from
+              how far the site sits off the route, not routed door to door — so arrival
+              times at chargers are ±5 minutes.
+            </li>
+            <li>
+              <b className="font-semibold text-ink-700">Whether the charger works.</b> Sites
+              come from OpenChargeMap and are filtered to operational CCS above 100 kW, but
+              a broken or occupied stall is exactly the thing a crowdsourced database is
+              worst at — glance at the operator and Maps link before counting on one.
+            </li>
+          </ul>
+        </div>
       </div>
     </details>
   )

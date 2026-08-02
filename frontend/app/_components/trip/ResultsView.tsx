@@ -78,10 +78,15 @@ export default function ResultsView({ trip }: { trip: Trip }) {
     return <p className="mx-auto max-w-6xl px-4 py-10 text-ink-500">No feasible plan at this speed.</p>
   }
 
+  // Minutes this plan saves against the friend's 100 km/h plan. Positive =
+  // arrives earlier. Anything under a minute is a tie, not a win — the DP plans
+  // on a 2.5% SoC grid, so differences that small are quantisation, not driving.
   const vsBaseline =
     slowBaseline && slowBaseline.total_min != null && selected.total_min != null
       ? slowBaseline.total_min - selected.total_min
       : null
+  const isBaseline = slowBaseline?.speed_kph === selected.speed_kph
+  const vsTie = vsBaseline != null && Math.abs(vsBaseline) < 1
 
   return (
     <div>
@@ -91,6 +96,7 @@ export default function ResultsView({ trip }: { trip: Trip }) {
         race={raceRun}
         raceSpeed={raceSpeed}
         feasibleSpeeds={feasibleSpeeds}
+        onSpeedChange={select}
         onRaceSpeedChange={setRaceSpeed}
         hoverStop={hoverStop}
         onHoverStop={setHoverStop}
@@ -150,14 +156,26 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             }
           />
           <Stat
-            label={vsBaseline != null && slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
+            label={slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
             value={
-              vsBaseline != null
-                ? `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}`
-                : "—"
+              vsBaseline == null
+                ? "—"
+                : isBaseline || vsTie
+                  ? "±0"
+                  : `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}`
             }
-            accent={vsBaseline != null && vsBaseline > 0}
-            sub={vsBaseline != null && vsBaseline > 0 ? "earlier at the chalet" : "slower overall"}
+            accent={vsBaseline != null && !isBaseline && !vsTie && vsBaseline > 0}
+            sub={
+              vsBaseline == null
+                ? undefined
+                : isBaseline
+                  ? "this is that plan"
+                  : vsTie
+                    ? "the same, to the minute"
+                    : vsBaseline > 0
+                      ? "earlier at the chalet"
+                      : "slower overall"
+            }
           />
         </div>
 
@@ -227,7 +245,7 @@ export default function ResultsView({ trip }: { trip: Trip }) {
             />
             {best && selected.speed_kph !== best.speed_kph && (
               <button
-                onClick={() => setSelectedSpeed(best.speed_kph)}
+                onClick={() => select(best.speed_kph)}
                 className="w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-800 transition-colors hover:bg-brand-100"
               >
                 Jump to the fastest plan — {best.speed_kph} km/h, arrives{" "}
@@ -248,45 +266,7 @@ export default function ResultsView({ trip }: { trip: Trip }) {
           </aside>
         </div>
 
-        <details className="mt-6 rounded-2xl border border-ink-100 bg-white px-5 py-4 text-sm text-ink-500 open:pb-5">
-          <summary className="cursor-pointer select-none font-semibold text-ink-700">
-            What this simulation assumes
-          </summary>
-          <ul className="mt-3 list-disc space-y-1.5 pl-5 leading-relaxed">
-            <li>
-              Your cruise speed applies on motorway stretches up to each country&apos;s legal cap
-              (130 in AT/NL). German autobahn is only treated as derestricted for the share you
-              chose — {Math.round((trip.request.autobahn_open_share ?? 0.3) * 100)}% here — because
-              roadworks, traffic and signposted limits take back most of it. Everywhere else the
-              road&apos;s own driving speed governs. No live traffic model.
-            </li>
-            <li>
-              Elevation is included: {(result.climb_m / 1000).toFixed(1)} km of cumulative climb on
-              this route, costing energy on the way up and giving about two-thirds of it back
-              through regen on the way down.
-            </li>
-            <li>
-              Consumption is a per-car fit from public range tests, scaled by your conditions
-              setting. Cold weather also slows <em>charging</em> — the bigger of the two effects on
-              a winter trip — so the conditions setting derates the charge curve as well.
-            </li>
-            <li>
-              Every stop includes 5 minutes of plug-in overhead plus an estimated detour off the
-              route, so arrival times at chargers are ±5 minutes.
-            </li>
-            <li>
-              Chargers come from OpenChargeMap (community data) filtered to operational CCS sites of
-              100 kW and up — glance at the operator and Maps link before counting on a specific one.
-            </li>
-            <li>
-              Energy is priced at the plug (including charging losses) at the rate you set, so the
-              cost figure is what you&apos;d actually pay, not the energy that reaches the battery.
-            </li>
-            <li>Departure time shifts the clock, not the plan — there is no traffic model yet.</li>
-          </ul>
-        </details>
         <Assumptions trip={trip} />
-
       </div>
     </div>
   )
@@ -308,32 +288,40 @@ function SpeedPills({
   onSelect: (speed: number) => void
 }) {
   return (
-    <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cruise speed">
-      {speeds.map((s) => {
-        const isSelected = s.speed_kph === selectedSpeed
-        const isBest = s.speed_kph === optimumSpeed
-        return (
-          <button
-            key={s.speed_kph}
-            role="radio"
-            aria-checked={isSelected}
-            disabled={!s.feasible}
-            onClick={() => onSelect(s.speed_kph)}
-            title={!s.feasible ? "Not feasible — charger gaps too large at this speed" : undefined}
-            className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
-              isSelected
-                ? "border-ink-900 bg-ink-900 text-white"
-                : isBest
-                  ? "border-brand-400 bg-brand-50 text-brand-800 hover:bg-brand-100"
-                  : s.feasible
-                    ? "border-ink-200 bg-white text-ink-700 hover:border-ink-300"
-                    : "cursor-not-allowed border-ink-100 bg-ink-100/50 text-ink-300 line-through"
-            }`}
-          >
-            {s.speed_kph}
-          </button>
-        )
-      })}
+    <div>
+      {/* The pills, the two charts and the journey band at the top of the page
+          are all one selection. Say so once, next to the plainest control. */}
+      <p className="mb-1.5 px-0.5 text-xs text-ink-400">
+        <span className="font-semibold text-ink-500">Cruise speed</span> — sets the
+        itinerary, both charts, and the journey you scroll through at the top.
+      </p>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cruise speed">
+        {speeds.map((s) => {
+          const isSelected = s.speed_kph === selectedSpeed
+          const isBest = s.speed_kph === optimumSpeed
+          return (
+            <button
+              key={s.speed_kph}
+              role="radio"
+              aria-checked={isSelected}
+              disabled={!s.feasible}
+              onClick={() => onSelect(s.speed_kph)}
+              title={!s.feasible ? "Not feasible — charger gaps too large at this speed" : undefined}
+              className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
+                isSelected
+                  ? "border-ink-900 bg-ink-900 text-white"
+                  : isBest
+                    ? "border-brand-400 bg-brand-50 text-brand-800 hover:bg-brand-100"
+                    : s.feasible
+                      ? "border-ink-200 bg-white text-ink-700 hover:border-ink-300"
+                      : "cursor-not-allowed border-ink-100 bg-ink-100/50 text-ink-300 line-through"
+              }`}
+            >
+              {s.speed_kph}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

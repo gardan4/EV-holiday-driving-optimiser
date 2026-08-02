@@ -39,6 +39,7 @@ interface JourneyHeroProps {
   race: SpeedResult | null
   raceSpeed: number | null
   feasibleSpeeds: number[]
+  onSpeedChange: (s: number) => void
   onRaceSpeedChange: (s: number | null) => void
   hoverStop: string | null
   onHoverStop: (id: string | null) => void
@@ -50,6 +51,7 @@ export default function JourneyHero({
   race,
   raceSpeed,
   feasibleSpeeds,
+  onSpeedChange,
   onRaceSpeedChange,
   hoverStop,
   onHoverStop,
@@ -154,6 +156,58 @@ export default function JourneyHero({
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
   }, [playing, factor, totalMin])
+
+  // Dragging the progress rail is the same mechanism as scrolling and as
+  // autoplay: all three only ever move `scrollLeft`, and everything else in the
+  // hero is derived from it.
+  const railRef = useRef<HTMLDivElement>(null)
+  // The ref is what the handlers read — a pointermove can land before React has
+  // committed the state, and dropping the first frame of a drag is visible.
+  // The state exists only to restyle the handle.
+  const dragging = useRef(false)
+  const [scrubbing, setScrubbing] = useState(false)
+
+  const scrubTo = useCallback(
+    (clientX: number) => {
+      const rail = railRef.current
+      const el = scroller.current
+      if (!rail || !el) return
+      const r = rail.getBoundingClientRect()
+      const f = Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)))
+      el.scrollLeft = f * (el.scrollWidth - el.clientWidth)
+      // Don't wait for the scroll event: a fast drag emits pointermove faster
+      // than scroll, and the world would trail the handle.
+      syncFromScroll()
+    },
+    [syncFromScroll]
+  )
+
+  const onRailDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      setPlaying(false) // you took the wheel
+      dragging.current = true
+      setScrubbing(true)
+      e.currentTarget.setPointerCapture(e.pointerId)
+      scrubTo(e.clientX)
+    },
+    [scrubTo]
+  )
+
+  const onRailMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (dragging.current) scrubTo(e.clientX)
+    },
+    [scrubTo]
+  )
+
+  const onRailUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    dragging.current = false
+    setScrubbing(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }, [])
 
   // Vertical wheel scrolls the road — but hand the page back at either end so
   // the reader can carry on down to the charts.
@@ -332,6 +386,32 @@ export default function JourneyHero({
             <div className="text-[9px] uppercase tracking-wider text-white/40">driven</div>
           </div>
 
+          {/* Your cruise speed, as a control rather than a readout. The chart
+              and the pills far below drive this same value, and nothing on the
+              page said so — putting the twin of the race picker here makes the
+              two halves visibly one thing, whichever end you reach for. */}
+          <div className="shrink-0">
+            <div className="flex items-center gap-1.5 rounded-lg border border-brand-400/50 bg-brand-400/10 py-0.5 pl-1.5 pr-1">
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: MINT }} />
+              <select
+                value={result.speed_kph}
+                onChange={(e) => onSpeedChange(Number(e.target.value))}
+                className="bg-transparent font-mono text-sm font-bold tabular-nums text-white outline-none [&>option]:text-ink-900"
+                aria-label="Your cruise speed"
+              >
+                {feasibleSpeeds.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] font-medium text-white/50">km/h</span>
+            </div>
+            <div className="mt-0.5 text-[9px] uppercase tracking-wider text-white/40">
+              your speed
+            </div>
+          </div>
+
           <div className="flex min-w-[140px] flex-1 items-center gap-2">
             <BatteryCharging
               className={`h-4 w-4 shrink-0 ${hud.charging ? "animate-pulse-soft text-brand-400" : "text-white/40"}`}
@@ -398,20 +478,60 @@ export default function JourneyHero({
           )}
         </div>
 
-        {/* Progress rail */}
-        <div className="mx-auto mt-2 flex max-w-5xl items-center gap-2">
-          <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-white/15">
-            <div className="absolute inset-y-0 left-0 bg-white/70" style={{ width: `${progressPct}%` }} />
+        {/* Progress rail — draggable. The generous vertical padding is the hit
+            area; the visible rail stays hairline-thin. */}
+        <div className="mx-auto mt-1 flex max-w-5xl items-center gap-3">
+          <div
+            ref={railRef}
+            onPointerDown={onRailDown}
+            onPointerMove={onRailMove}
+            onPointerUp={onRailUp}
+            onPointerCancel={onRailUp}
+            // pointer-events-auto is load-bearing: the HUD wrapper above turns
+            // them off so the scene stays scrubbable around the controls, and
+            // this rail is a sibling of the card that turns them back on.
+            className={`group pointer-events-auto relative flex-1 touch-none py-2.5 ${
+              scrubbing ? "cursor-grabbing" : "cursor-grab"
+            }`}
+            // The scroll surface above already exposes this value as a slider,
+            // arrow keys and all. A second control for the same number would
+            // only give a screen reader two ways to say the same thing.
+            aria-hidden="true"
+          >
+            <div className="relative h-1 overflow-hidden rounded-full bg-white/15">
+              <div
+                className="absolute inset-y-0 left-0 bg-white/70"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
             {stops.map((s) => (
               <span
                 key={s.charger_id}
-                className="absolute top-1/2 h-2 w-0.5 -translate-y-1/2 rounded-full bg-brand-400"
+                className="pointer-events-none absolute top-1/2 h-2 w-0.5 -translate-y-1/2 rounded-full bg-brand-400"
                 style={{ left: `${(s.arrive_min / (totalMin || 1)) * 100}%` }}
               />
             ))}
+            {/* The handle. Positioned with `left` alone — Tailwind v4 compiles
+                -translate-y-1/2 to the standalone `translate` property, so an
+                inline `transform` here would compose instead of override. */}
+            <span
+              // Scale rather than width for the grab affordance: it keeps the
+              // handle centred on the playhead at every size. In Tailwind v4
+              // `scale-*` and `-translate-y-1/2` are separate properties, so
+              // they compose instead of fighting.
+              className={`pointer-events-none absolute top-1/2 grid h-4 w-4 -translate-y-1/2 place-items-center rounded-full bg-white shadow-lg shadow-black/40 ring-2 ring-[#0b1626] transition-transform duration-100 ${
+                scrubbing ? "scale-125" : "group-hover:scale-125"
+              }`}
+              style={{ left: `calc(${progressPct}% - 8px)` }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: hud.charging ? "#d98e1f" : MINT }}
+              />
+            </span>
           </div>
-          <span className="font-mono text-[10px] uppercase tracking-wider text-white/40">
-            scroll sideways to drive
+          <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-white/40">
+            drag, or scroll sideways
           </span>
         </div>
       </div>
