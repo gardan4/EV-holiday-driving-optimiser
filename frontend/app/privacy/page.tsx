@@ -86,9 +86,11 @@ export default function PrivacyPage() {
         <Section title="If you send feedback">
           The feedback box stores what you wrote, and the email address you type
           in only if you choose to add one. It goes to this app&apos;s own
-          database, not to a form somewhere else — that is the whole reason it
-          is a box here and not a link to Google. Nothing else is attached to
-          it: no name, no address, no record of which trips were yours.
+          database rather than a form somewhere else, and nothing else is
+          attached to it: no name, no location, no record of which trips were
+          yours. What you write is also forwarded to a private Discord channel
+          so it actually gets read — but your email address is not, ever. It
+          stays in the database.
         </Section>
 
         <Section title="Who runs this">

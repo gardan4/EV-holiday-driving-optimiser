@@ -16,7 +16,8 @@ from __future__ import annotations
 import logging
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,10 +32,58 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _notify(message: str, path: str | None, has_contact: bool) -> None:
+    """Post the feedback to Discord so it is read rather than merely stored.
+
+    The message goes in; the sender's email address does not. The webhook URL is
+    a secret and the channel is private, so the text is fine — but the contact
+    address is the one field that identifies a person, and a chat channel is a
+    place things get screenshotted and forwarded. If somebody wants a reply the
+    notification says so, and the address is one command away in the inbox.
+
+    Best-effort by construction. It runs after the response is sent, and a dead
+    webhook must never turn somebody's feedback into an error.
+    """
+    if not settings.DISCORD_WEBHOOK_URL:
+        return
+    # Discord rejects an embed description over 4096; keep well clear and mark
+    # a truncation rather than silently dropping the tail.
+    body = message if len(message) <= 1500 else message[:1500] + "…"
+    fields = []
+    if path:
+        fields.append({"name": "Page", "value": path[:100], "inline": True})
+    if has_contact:
+        fields.append(
+            {"name": "Reply wanted", "value": "address is in the inbox", "inline": True}
+        )
+    payload = {
+        "username": "evtrip.dev",
+        "embeds": [
+            {
+                "title": "New feedback",
+                "description": body,
+                "color": 0x2ED3A0,
+                "fields": fields,
+            }
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(settings.DISCORD_WEBHOOK_URL, json=payload)
+            resp.raise_for_status()
+    except Exception:
+        # No exc_info: a webhook failure embeds the URL — which is the secret —
+        # in the exception message, and that would write it to the logs.
+        logger.warning("Discord feedback notification failed")
+
+
 @router.post("", status_code=201)
 @limiter.limit(settings.RATE_LIMIT_FEEDBACK)
 async def leave_feedback(
-    request: Request, body: FeedbackIn, db: AsyncSession = Depends(get_db)
+    request: Request,
+    body: FeedbackIn,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     message = body.message.strip()
     if not message:
@@ -51,6 +100,10 @@ async def leave_feedback(
     # The message itself is not logged — it may contain whatever someone chose
     # to type, including a way to contact them.
     logger.info("feedback received (%d chars)", len(message))
+    # After the response, so a slow or dead ntfy costs the sender nothing.
+    background.add_task(
+        _notify, message, (body.path or "").strip()[:60] or None, bool(body.contact)
+    )
     return {"ok": True}
 
 

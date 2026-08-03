@@ -136,6 +136,14 @@ class Settings(BaseSettings):
     # per request and every IP-keyed limit below becomes decorative.
     TRUSTED_PROXY_HEADERS: bool = False
 
+    # Discord webhook posted to when feedback arrives. Empty = no notifications.
+    #
+    # Unlike an ntfy topic (public to anyone who guesses the name), a webhook
+    # URL is a real secret and the channel behind it is private — so the message
+    # itself can go in the notification, which is the entire point of having one.
+    # The sender's email address still does not: see `_notify`.
+    DISCORD_WEBHOOK_URL: str = ""
+
     # Read the feedback inbox by sending this as an X-Feedback-Token header.
     # Empty (the default) means the read route does not exist — better than a
     # route guarded by a secret nobody set.

@@ -123,6 +123,10 @@ param ocmApiKey string = ''
 @secure()
 param feedbackToken string = ''
 
+@description('Discord webhook posted to when feedback arrives. Empty ⇒ no notifications.')
+@secure()
+param discordWebhookUrl string = ''
+
 // ── Public URLs / CORS ──────────────────────────────────────────────────────
 @description('Public frontend URL (used for CORS + email links). Empty ⇒ derive the *.azurewebsites.net host.')
 param frontendUrl string = ''
@@ -499,6 +503,10 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'FEEDBACK_TOKEN'
           value: feedbackToken
+        }
+        {
+          name: 'DISCORD_WEBHOOK_URL'
+          value: discordWebhookUrl
         }
         {
           // Derived from the origin lock ON PURPOSE, never set independently.
