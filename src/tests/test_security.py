@@ -159,7 +159,7 @@ class TestFeedbackNotification:
     """The Discord ping is a convenience. It must never cost the sender their
     message, and it must never carry their email address into a chat channel."""
 
-    async def test_the_email_address_never_reaches_discord(self, monkeypatch):
+    async def test_the_reply_address_travels_with_the_message(self, monkeypatch):
         from app.api import feedback as fb
 
         sent = {}
@@ -185,13 +185,13 @@ class TestFeedbackNotification:
         monkeypatch.setattr(fb.settings, "DISCORD_WEBHOOK_URL", "https://discord/x")
         monkeypatch.setattr(fb.httpx, "AsyncClient", lambda **kw: _Client())
 
-        await fb._notify("the curve looks off", "/trip/abc", has_contact=True)
+        await fb._notify("the curve looks off", "/trip/abc", "someone@example.com")
 
         blob = str(sent["json"])
         assert "the curve looks off" in blob, "the message should be in the ping"
-        assert "someone@example.com" not in blob
-        # Only the fact that a reply is wanted travels — never the address.
-        assert "address is in the inbox" in blob
+        # Deliberate: the address is sent so a reply is one click. The privacy
+        # page says so — if this assertion is ever flipped back, flip the page too.
+        assert "someone@example.com" in blob
 
     async def test_a_dead_webhook_does_not_raise(self, monkeypatch):
         from app.api import feedback as fb
@@ -208,7 +208,7 @@ class TestFeedbackNotification:
 
         monkeypatch.setattr(fb.settings, "DISCORD_WEBHOOK_URL", "https://discord/x")
         monkeypatch.setattr(fb.httpx, "AsyncClient", lambda **kw: _Boom())
-        await fb._notify("hello", None, False)  # must not raise
+        await fb._notify("hello", None, None)  # must not raise
 
     async def test_nothing_is_sent_when_no_webhook_is_configured(self, monkeypatch):
         from app.api import feedback as fb
@@ -222,5 +222,5 @@ class TestFeedbackNotification:
 
         monkeypatch.setattr(fb.settings, "DISCORD_WEBHOOK_URL", "")
         monkeypatch.setattr(fb.httpx, "AsyncClient", _boom)
-        await fb._notify("hello", None, False)
+        await fb._notify("hello", None, None)
         assert not called

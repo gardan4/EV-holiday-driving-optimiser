@@ -89,8 +89,10 @@ export default function PrivacyPage() {
           database rather than a form somewhere else, and nothing else is
           attached to it: no name, no location, no record of which trips were
           yours. What you write is also forwarded to a private Discord channel
-          so it actually gets read — but your email address is not, ever. It
-          stays in the database.
+          so it actually gets read, and if you add an email address it goes
+          there too, so a reply is easy. If you would rather not have your
+          address in a chat channel, leave that field empty — the feedback is
+          just as welcome without it.
         </Section>
 
         <Section title="Who runs this">

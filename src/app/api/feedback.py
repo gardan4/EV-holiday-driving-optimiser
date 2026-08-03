@@ -32,14 +32,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _notify(message: str, path: str | None, has_contact: bool) -> None:
+async def _notify(message: str, path: str | None, contact: str | None) -> None:
     """Post the feedback to Discord so it is read rather than merely stored.
 
-    The message goes in; the sender's email address does not. The webhook URL is
-    a secret and the channel is private, so the text is fine — but the contact
-    address is the one field that identifies a person, and a chat channel is a
-    place things get screenshotted and forwarded. If somebody wants a reply the
-    notification says so, and the address is one command away in the inbox.
+    The contact address goes in too, so a reply is one click rather than a
+    round trip through the inbox. That does put the one identifying field into
+    a chat channel — somewhere things get screenshotted and forwarded, and
+    somewhere anyone added to the server can read it later. It is a private
+    channel behind a secret URL, the address was volunteered specifically to
+    get a reply, and the privacy page says plainly that this is where it goes.
 
     Best-effort by construction. It runs after the response is sent, and a dead
     webhook must never turn somebody's feedback into an error.
@@ -52,10 +53,8 @@ async def _notify(message: str, path: str | None, has_contact: bool) -> None:
     fields = []
     if path:
         fields.append({"name": "Page", "value": path[:100], "inline": True})
-    if has_contact:
-        fields.append(
-            {"name": "Reply wanted", "value": "address is in the inbox", "inline": True}
-        )
+    if contact:
+        fields.append({"name": "Reply to", "value": contact[:200], "inline": True})
     payload = {
         "username": "evtrip.dev",
         "embeds": [
@@ -102,7 +101,10 @@ async def leave_feedback(
     logger.info("feedback received (%d chars)", len(message))
     # After the response, so a slow or dead ntfy costs the sender nothing.
     background.add_task(
-        _notify, message, (body.path or "").strip()[:60] or None, bool(body.contact)
+        _notify,
+        message,
+        (body.path or "").strip()[:60] or None,
+        (body.contact or "").strip() or None,
     )
     return {"ok": True}
 
