@@ -34,11 +34,16 @@ param location string = resourceGroup().location
 @description('GitHub owner / GHCR namespace that hosts the container images.')
 param githubOwner string = 'gardan4'
 
-@description('Tag of the API image to run (CI overrides with the git sha).')
-param apiImageTag string = 'latest'
+// CI pushes `dev-latest` and `dev-<sha>` and nothing else — there is no
+// `latest` tag in GHCR. Defaulting to one pointed the apps at an image that
+// does not exist, so applying infra would have taken the site down rather than
+// merely rolling it back. The infra job overrides these with whatever tag is
+// running right now, so an infra deploy never moves the deployed code.
+@description('Tag of the API image to run (the infra job overrides with the running tag).')
+param apiImageTag string = 'dev-latest'
 
-@description('Tag of the Web image to run (CI overrides with the git sha).')
-param webImageTag string = 'latest'
+@description('Tag of the Web image to run (the infra job overrides with the running tag).')
+param webImageTag string = 'dev-latest'
 
 @description('GHCR pull token (PAT with read:packages). Leave empty for public images.')
 @secure()

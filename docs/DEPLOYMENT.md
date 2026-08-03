@@ -87,10 +87,11 @@ docker build -t evtrip-web ./frontend
 - SQL location follows the deployment `location` (default: the resource group's).
 - The backend container's startup runs `scripts/db_bootstrap.py`: `create_all` +
   stamp on a fresh DB, else `alembic upgrade head`.
-- **An infra deploy can roll the containers back to `:dev-latest`,** because the
-  template sets the image tag it was authored with while the backend/frontend
-  jobs pin the exact SHA. After an infra-only change, re-run the workflow
-  (`workflow_dispatch`) to re-pin. The job prints a notice saying so.
+- **An infra deploy never moves deployed code.** The template has to set some
+  image tag, and any fixed default goes stale the moment CI ships a new SHA —
+  the original default was `latest`, which CI has never pushed, so applying
+  infra would have pointed both apps at an image that does not exist. The infra
+  job now reads the running tag off the live apps and passes it back in.
 - **App Service Plan sizing** lives in `appSkuName`/`appSkuTier`
   (`infra/main.parameters.json`). `P0v3` is the cheapest tier that can
   autoscale; `B1` is the cheapest overall and cannot autoscale at all. The

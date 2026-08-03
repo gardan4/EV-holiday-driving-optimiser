@@ -103,6 +103,26 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # Pin the images that are running RIGHT NOW. The template has to set some
+      # tag, and any fixed default is wrong the moment CI ships a new SHA — so
+      # read it back off the live apps instead of guessing. This makes an
+      # infra-only deploy provably code-neutral.
+      - name: Resolve the running image tags
+        if: steps.pre.outputs.ready == 'true'
+        id: tags
+        run: |
+          api=$(az webapp config show -g ${{ secrets.RESOURCE_GROUP }} -n ${{ env.API_APP_NAME }} --query linuxFxVersion -o tsv)
+          web=$(az webapp config show -g ${{ secrets.RESOURCE_GROUP }} -n ${{ env.WEB_APP_NAME }} --query linuxFxVersion -o tsv)
+          api_tag="${api##*:}"
+          web_tag="${web##*:}"
+          if [ -z "$api_tag" ] || [ -z "$web_tag" ] || [ "$api_tag" = "$api" ]; then
+            echo "::error title=Could not read running image tags::api='$api' web='$web'"
+            exit 1
+          fi
+          echo "api_tag=$api_tag" >> "$GITHUB_OUTPUT"
+          echo "web_tag=$web_tag" >> "$GITHUB_OUTPUT"
+          echo "Pinning api=$api_tag web=$web_tag"
+
       # What-if first: the diff lands in the job log, so a surprising change
       # (a recreated database, a dropped app setting) is visible after the fact
       # even though this does not block.
@@ -117,6 +137,8 @@ jobs:
             --parameters \
               environmentName=${{ env.ENVIRONMENT }} \
               githubOwner=${{ github.repository_owner }} \
+              apiImageTag=${{ steps.tags.outputs.api_tag }} \
+              webImageTag=${{ steps.tags.outputs.web_tag }} \
               sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
               secretKey='${{ secrets.APP_SECRET_KEY }}' \
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
@@ -135,6 +157,8 @@ jobs:
             --parameters \
               environmentName=${{ env.ENVIRONMENT }} \
               githubOwner=${{ github.repository_owner }} \
+              apiImageTag=${{ steps.tags.outputs.api_tag }} \
+              webImageTag=${{ steps.tags.outputs.web_tag }} \
               sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
               secretKey='${{ secrets.APP_SECRET_KEY }}' \
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
@@ -143,14 +167,9 @@ jobs:
               ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output none
 
-      # The template sets the container image to whatever tag it was authored
-      # with, so an infra deploy can roll the apps back to `:dev-latest`. The
-      # backend/frontend jobs re-pin the exact SHA on every push, but an
-      # infra-only change would leave them on latest — say so rather than let it
-      # be discovered later.
       - name: Note
         if: steps.pre.outputs.ready == 'true'
-        run: echo "::notice title=Infra applied::App Services may now be on the ':dev-latest' tag. Re-run the workflow (workflow_dispatch) to re-pin the current SHA."
+        run: echo "::notice title=Infra applied::Images left on api=${{ steps.tags.outputs.api_tag }} web=${{ steps.tags.outputs.web_tag }} — infra deploys do not move deployed code."
 
   # --- Backend: test + build (+ deploy when Azure is configured) -------------
   backend:

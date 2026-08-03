@@ -9,10 +9,10 @@
       "value": "gardan4"
     },
     "apiImageTag": {
-      "value": "latest"
+      "value": "dev-latest"
     },
     "webImageTag": {
-      "value": "latest"
+      "value": "dev-latest"
     },
     "ghcrToken": {
       "value": ""
