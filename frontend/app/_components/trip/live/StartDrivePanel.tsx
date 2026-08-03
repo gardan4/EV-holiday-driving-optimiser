@@ -138,7 +138,17 @@ export default function StartDrivePanel({
           </button>
           <p className="mt-3 text-center text-xs leading-relaxed text-ink-400">
             This phone will follow the drive and share its location. Anyone with
-            the trip link can watch; only this phone can steer.
+            the trip link can watch; only this phone can steer. A coarse trail
+            is stored on the server and deleted after 90 days.{" "}
+            {/* The browser permission prompt is about to fire. Whatever this
+                app has to say about what it records, this is the moment it is
+                worth reading — not buried in a footer on another page. */}
+            <Link
+              href="/privacy"
+              className="underline underline-offset-2 hover:text-ink-600"
+            >
+              What we record
+            </Link>
           </p>
         </>
       )}
