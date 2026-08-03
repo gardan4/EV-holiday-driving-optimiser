@@ -46,7 +46,20 @@ add one to the Bicep + CI if you introduce `PROCESS_ROLE=worker` work.
    `RESOURCE_GROUP`, `GHCR_TOKEN` (a PAT with `write:packages`).
    Until `AZURE_CLIENT_ID` exists the pipeline runs tests/builds and skips the
    deploy steps.
-4. **Provision infra** (manual — the workflows deploy app *images*, not infra):
+
+   For the **infra** job, additionally: `SQL_ADMIN_PASSWORD`, `APP_SECRET_KEY`,
+   `APP_ENCRYPTION_KEY`, `ORS_API_KEY`, `OCM_API_KEY`. These must match what the
+   running app already has — the Bicep template writes them into App Service
+   settings, and ARM treats an omitted `@secure()` param as an empty string, so
+   a deploy missing one *succeeds* and blanks the setting. That has happened
+   here (empty ORS/OCM keys reached production), which is why the job refuses to
+   run rather than deploying a partial set.
+4. **Provision infra.** After the secrets above exist, CI owns this: any push
+   touching `infra/**` runs `what-if` (the diff goes to the job log) and then
+   applies the template. A `workflow_dispatch` run applies it too.
+
+   The first provision still has to be by hand, because the OIDC app needs a
+   resource group to be Contributor on before it can deploy into one:
 
    ```bash
    az deployment group create \
@@ -74,5 +87,12 @@ docker build -t evtrip-web ./frontend
 - SQL location follows the deployment `location` (default: the resource group's).
 - The backend container's startup runs `scripts/db_bootstrap.py`: `create_all` +
   stamp on a fresh DB, else `alembic upgrade head`.
-- If you want CI to own infra too, add an `az deployment group create` job gated
-  on `infra/**` changes.
+- **An infra deploy can roll the containers back to `:dev-latest`,** because the
+  template sets the image tag it was authored with while the backend/frontend
+  jobs pin the exact SHA. After an infra-only change, re-run the workflow
+  (`workflow_dispatch`) to re-pin. The job prints a notice saying so.
+- **App Service Plan sizing** lives in `appSkuName`/`appSkuTier`
+  (`infra/main.parameters.json`). `P0v3` is the cheapest tier that can
+  autoscale; `B1` is the cheapest overall and cannot autoscale at all. The
+  autoscale resource is conditional on the tier, so switching back to Basic is a
+  parameter change, not an edit.

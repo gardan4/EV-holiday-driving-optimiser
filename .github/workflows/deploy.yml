@@ -32,6 +32,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      infra: ${{ steps.filter.outputs.infra }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v3
@@ -42,6 +43,114 @@ jobs:
               - 'src/**'
             frontend:
               - 'frontend/**'
+            infra:
+              - 'infra/**'
+
+  # --- Infra: apply the Bicep template when infra/** changes -----------------
+  # Infra used to be applied by hand, so the template and the running resources
+  # drifted: `main.bicep` said one thing and Azure did another, and the only way
+  # to notice was to go and look. The SKU change that motivated this job is
+  # exactly that shape — committed, reviewed, and doing nothing.
+  #
+  # The reason it was manual is real, though. Every secret is an @secure()
+  # param, and ARM treats an omitted one as empty, so a deployment missing a
+  # secret does not fail — it succeeds and blanks the app setting. That has
+  # already happened once here (empty ORS/OCM keys reached production). Hence
+  # the preflight below: this job refuses to deploy at all unless every secret
+  # is present and non-empty.
+  infra:
+    needs: [changes]
+    if: needs.changes.outputs.infra == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Preflight — are all infra secrets present?
+        id: pre
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
+          APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
+          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+          OCM_API_KEY: ${{ secrets.OCM_API_KEY }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -z "$AZURE_CLIENT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Infra skipped::Azure is not configured yet."
+            exit 0
+          fi
+          missing=""
+          for v in SQL_ADMIN_PASSWORD APP_SECRET_KEY APP_ENCRYPTION_KEY ORS_API_KEY OCM_API_KEY GHCR_TOKEN; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::error title=Infra deploy refused::Missing repo secrets:$missing — deploying without them would overwrite the live app settings with empty values. Add them, or apply infra by hand."
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Azure (OIDC)
+        if: steps.pre.outputs.ready == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # What-if first: the diff lands in the job log, so a surprising change
+      # (a recreated database, a dropped app setting) is visible after the fact
+      # even though this does not block.
+      - name: What-if
+        if: steps.pre.outputs.ready == 'true'
+        continue-on-error: true
+        run: |
+          az deployment group what-if \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters infra/main.parameters.json \
+            --parameters \
+              environmentName=${{ env.ENVIRONMENT }} \
+              githubOwner=${{ github.repository_owner }} \
+              sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
+              secretKey='${{ secrets.APP_SECRET_KEY }}' \
+              encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
+              orsApiKey='${{ secrets.ORS_API_KEY }}' \
+              ocmApiKey='${{ secrets.OCM_API_KEY }}' \
+              ghcrToken='${{ secrets.GHCR_TOKEN }}' \
+            --output table
+
+      - name: Deploy infra
+        if: steps.pre.outputs.ready == 'true'
+        run: |
+          az deployment group create \
+            --resource-group ${{ secrets.RESOURCE_GROUP }} \
+            --template-file infra/main.bicep \
+            --parameters infra/main.parameters.json \
+            --parameters \
+              environmentName=${{ env.ENVIRONMENT }} \
+              githubOwner=${{ github.repository_owner }} \
+              sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
+              secretKey='${{ secrets.APP_SECRET_KEY }}' \
+              encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
+              orsApiKey='${{ secrets.ORS_API_KEY }}' \
+              ocmApiKey='${{ secrets.OCM_API_KEY }}' \
+              ghcrToken='${{ secrets.GHCR_TOKEN }}' \
+            --output none
+
+      # The template sets the container image to whatever tag it was authored
+      # with, so an infra deploy can roll the apps back to `:dev-latest`. The
+      # backend/frontend jobs re-pin the exact SHA on every push, but an
+      # infra-only change would leave them on latest — say so rather than let it
+      # be discovered later.
+      - name: Note
+        if: steps.pre.outputs.ready == 'true'
+        run: echo "::notice title=Infra applied::App Services may now be on the ':dev-latest' tag. Re-run the workflow (workflow_dispatch) to re-pin the current SHA."
 
   # --- Backend: test + build (+ deploy when Azure is configured) -------------
   backend:
