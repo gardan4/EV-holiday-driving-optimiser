@@ -129,6 +129,17 @@ jobs:
           echo "web_tag=$web_tag" >> "$GITHUB_OUTPUT"
           echo "Pinning api=$api_tag web=$web_tag"
 
+          # The SQL firewall allowlist. ARM cannot loop over a runtime property,
+          # so resolve it here and pass it in. Re-read every deploy because the
+          # outbound set changes with the plan's SKU.
+          sql_ips=$(az webapp show -g ${{ secrets.RESOURCE_GROUP }} -n ${{ env.API_APP_NAME }} --query possibleOutboundIpAddresses -o tsv)
+          if [ -z "$sql_ips" ]; then
+            echo "::error title=Could not read outbound IPs::Refusing to deploy — an empty allowlist would cut the app off from its database."
+            exit 1
+          fi
+          echo "sql_ips=$sql_ips" >> "$GITHUB_OUTPUT"
+          echo "SQL allowlist: $(echo "$sql_ips" | tr ',' '\n' | wc -l | tr -d ' ') address(es)"
+
       # What-if first: the diff lands in the job log, so a surprising change
       # (a recreated database, a dropped app setting) is visible after the fact
       # even though this does not block.
@@ -145,6 +156,7 @@ jobs:
               githubOwner=${{ github.repository_owner }} \
               apiImageTag=${{ steps.tags.outputs.api_tag }} \
               webImageTag=${{ steps.tags.outputs.web_tag }} \
+              sqlAllowedIps='${{ steps.tags.outputs.sql_ips }}' \
               sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
               secretKey='${{ secrets.APP_SECRET_KEY }}' \
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
@@ -165,6 +177,7 @@ jobs:
               githubOwner=${{ github.repository_owner }} \
               apiImageTag=${{ steps.tags.outputs.api_tag }} \
               webImageTag=${{ steps.tags.outputs.web_tag }} \
+              sqlAllowedIps='${{ steps.tags.outputs.sql_ips }}' \
               sqlAdminPassword='${{ secrets.SQL_ADMIN_PASSWORD }}' \
               secretKey='${{ secrets.APP_SECRET_KEY }}' \
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \

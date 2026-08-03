@@ -21,14 +21,14 @@ const isDev = process.env.NODE_ENV === "development"
 // procedural (no tile servers, no CDNs) and all API traffic goes to our own
 // backend, so connect-src stays locked to our origins.
 //
-// `*.azurewebsites.net` used to be in here, which is a hostname anyone can
-// register for free — i.e. a ready-made exfiltration target for any XSS that
-// ever lands. Name the one host we actually call instead. Add a custom domain
-// here when there is one; the placeholder that used to sit here belonged to
-// someone else.
+// One host, named exactly. This was `*.azurewebsites.net` at one point, which
+// is a hostname anyone can register for free — a ready-made exfiltration target
+// for any XSS that ever lands. The origin's own azurewebsites name has now gone
+// too: it is locked to Cloudflare and 403s from a browser, so allowing it was
+// dead weight that only widened the target.
 const connectExtra = isDev
   ? "http://localhost:* ws://localhost:*"
-  : "https://api.evtrip.dev https://evtrip-api-dev.azurewebsites.net"
+  : "https://api.evtrip.dev"
 
 const csp = [
   "default-src 'self'",

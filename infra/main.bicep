@@ -92,6 +92,9 @@ param autoscaleMaxInstances int = 3
 @description('Only accept traffic from Cloudflare. Set false to expose the App Services directly (e.g. before a custom domain is proxied).')
 param restrictToCloudflare bool = true
 
+@description('Comma-separated IPs allowed through the SQL firewall (the App Service outbound set). Empty ⇒ no app rules are created; the infra job resolves this from the live app.')
+param sqlAllowedIps string = ''
+
 @description('SQL Database SKU name (e.g. Basic, S0, S1).')
 param sqlSkuName string = 'S0'
 
@@ -224,16 +227,44 @@ resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   }
 }
 
-// Allow other Azure services (the App Services) to reach SQL. The 0.0.0.0
-// sentinel rule is Azure's documented "Allow Azure services" toggle.
-resource sqlFirewallAzure 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = {
-  parent: sqlServer
-  name: 'AllowAzureServices'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
+// SQL firewall.
+//
+// This used to be the `0.0.0.0` sentinel — Azure's "Allow Azure services"
+// toggle. The name is misleading: it does not mean "my Azure services", it
+// means *any* VM, Function or Container App in *any* Azure subscription can
+// open a session to this server. On a server with SQL auth and no Defender,
+// no auditing and no lockout, the only thing left between a stranger's
+// container and the database is guessing one password.
+//
+// Replaced with the App Services' own outbound addresses. Derived from the app
+// rather than pasted in, so it re-resolves on every deploy — the set changes
+// with the plan's SKU, and it just changed (B1 -> P0v3). Both apps sit on one
+// plan and report the same 19 addresses; the API's list is the source since it
+// is the only tier that talks to SQL.
+//
+// To connect from a laptop, add your own address — `infra/scripts/add-dev-ip.ps1`
+// exists for exactly that, and it is now the only way in.
+//
+// First-deploy note: on a brand-new resource group the app boots before these
+// rules exist, so `db_bootstrap` fails and the container retries. It settles
+// once the rules land; it is not a failed deployment.
+// ARM cannot loop over a value it does not know before the deployment starts,
+// so this arrives as a parameter instead of being read off the app inline. The
+// infra job resolves it from the live App Service immediately before deploying
+// — the same trick it uses for the image tags — which keeps it self-correcting
+// without hardcoding 19 addresses into source.
+var apiOutboundIps = empty(sqlAllowedIps) ? [] : split(sqlAllowedIps, ',')
+
+resource sqlFirewallAppOutbound 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = [
+  for (ip, i) in apiOutboundIps: {
+    parent: sqlServer
+    name: 'appservice-outbound-${i}'
+    properties: {
+      startIpAddress: ip
+      endIpAddress: ip
+    }
   }
-}
+]
 
 
 // ============================================================================
