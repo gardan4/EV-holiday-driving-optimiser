@@ -11,11 +11,15 @@ _INSECURE_DEFAULTS = frozenset({
 class Settings(BaseSettings):
     PROJECT_NAME: str = "EV Trip Optimizer"
     ENV: str = "production"  # "development" | "production" — controls docs exposure + prod guards
-    # Serve /docs, /redoc and /openapi.json. Defaults to "whatever ENV implies",
-    # but is settable on its own: the public deployment runs under the `dev`
-    # environment name, which was quietly publishing a full map of every route —
-    # including the live-drive write endpoints — to anyone who asked.
-    EXPOSE_DOCS: bool | None = None
+    # Serve /docs, /redoc and /openapi.json — a full map of every route,
+    # including the live-drive write endpoints.
+    #
+    # Default-deny, and deliberately NOT derived from ENV. The public
+    # deployment runs with ENV=development (it is the environment named "dev"),
+    # so anything keyed on ENV publishes Swagger to the internet while looking
+    # correct in the template. `.env.example` turns it on for local work; the
+    # only way it reaches production is somebody typing it there.
+    EXPOSE_DOCS: bool = False
 
     # Process role — which half of the app this process runs (web/worker split).
     #   "web"    → serve the API; start NO background loops

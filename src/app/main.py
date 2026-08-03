@@ -45,10 +45,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         forwarded_proto = request.headers.get("x-forwarded-proto", request.url.scheme)
         if forwarded_proto == "https":
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        # The API only ever serves JSON (and, in dev, Swagger). Lock responses
-        # down hard in production — docs are disabled there, so a strict policy
-        # can't break anything. Skip it in dev so /docs keeps working.
-        if settings.ENV == "production":
+        # The API only ever serves JSON, unless Swagger is switched on. Tie the
+        # strict policy to that rather than to ENV: the public deployment runs
+        # with ENV=development, so keying on it skipped this everywhere it
+        # actually mattered.
+        if not settings.EXPOSE_DOCS:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
             )
@@ -161,11 +162,7 @@ async def lifespan(app: FastAPI):
 # Hide Swagger UI + OpenAPI schema in production — the schema is a full map of
 # every route. `EXPOSE_DOCS` overrides, because the publicly-reachable
 # deployment is the one named "dev" and was therefore serving them.
-_expose_docs = (
-    settings.ENV != "production"
-    if settings.EXPOSE_DOCS is None
-    else settings.EXPOSE_DOCS
-)
+_expose_docs = settings.EXPOSE_DOCS
 
 app = FastAPI(
     title="EV Trip Optimizer API",

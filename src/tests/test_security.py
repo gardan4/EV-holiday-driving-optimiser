@@ -52,17 +52,17 @@ class TestRateLimitKey:
 
 
 class TestDocsExposure:
-    def test_docs_are_off_under_production_by_default(self, monkeypatch):
-        """The public deployment is the one named `dev`, which is exactly how
-        Swagger ended up published. EXPOSE_DOCS decides, not the name."""
+    def test_swagger_is_off_even_under_a_development_env(self):
+        """The publicly-reachable deployment runs with ENV=development, because
+        it is the environment named "dev". Anything keyed on ENV therefore
+        publishes a map of every route — including the live-drive writes — to
+        the internet while looking correct in the template. Default-deny."""
         from app.core.config import Settings
 
-        s = Settings(ENV="production", SECRET_KEY="x" * 40, ENCRYPTION_KEY="y" * 40)
-        assert s.EXPOSE_DOCS is None  # → falls back to the ENV rule
-        assert Settings(
-            ENV="development", EXPOSE_DOCS=False,
-            SECRET_KEY="x" * 40, ENCRYPTION_KEY="y" * 40,
-        ).EXPOSE_DOCS is False
+        kw = dict(SECRET_KEY="x" * 40, ENCRYPTION_KEY="y" * 40)
+        assert Settings(ENV="development", **kw).EXPOSE_DOCS is False
+        assert Settings(ENV="production", **kw).EXPOSE_DOCS is False
+        assert Settings(ENV="development", EXPOSE_DOCS=True, **kw).EXPOSE_DOCS is True
 
 
 class TestGeocodeCache:
