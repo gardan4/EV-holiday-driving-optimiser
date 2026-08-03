@@ -83,6 +83,14 @@ export default function PrivacyPage() {
           it the same way you would treat the trip itself.
         </Section>
 
+        <Section title="If you send feedback">
+          The feedback box stores what you wrote, and the email address you type
+          in only if you choose to add one. It goes to this app&apos;s own
+          database, not to a form somewhere else — that is the whole reason it
+          is a box here and not a link to Google. Nothing else is attached to
+          it: no name, no address, no record of which trips were yours.
+        </Section>
+
         <Section title="Who runs this">
           A personal project, run by an individual in the Netherlands, not a
           company. If something here looks wrong, the source is public and

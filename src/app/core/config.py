@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_PLAN: str = "10/minute"          # trip planning (may trigger ORS/OCM calls) per IP
     RATE_LIMIT_GEOCODE: str = "30/minute"       # geocode autocomplete proxy per IP
     RATE_LIMIT_DEFAULT: str = "60/minute"       # general API per IP
+    RATE_LIMIT_FEEDBACK: str = "5/hour"         # per IP: writing free text is rare and abusable
     # Live runs. The write buckets are keyed on the RUN ID rather than the IP
     # (see rate_limit.run_key) — a carful shares one address and a mobile
     # carrier's CGNAT shares one with thousands of strangers.
@@ -134,6 +135,11 @@ class Settings(BaseSettings):
     # the sole route to the app — otherwise any caller can spoof a fresh bucket
     # per request and every IP-keyed limit below becomes decorative.
     TRUSTED_PROXY_HEADERS: bool = False
+
+    # Read the feedback inbox by sending this as an X-Feedback-Token header.
+    # Empty (the default) means the read route does not exist — better than a
+    # route guarded by a secret nobody set.
+    FEEDBACK_TOKEN: str = ""
 
     # ----- CORS / URLs -----
     # Comma-separated allowed origins (e.g. "https://evtrip.app,https://www.evtrip.app").

@@ -205,11 +205,12 @@ app.add_middleware(
 # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only / and
 # /health below, so health probes pass without exposing the API surface.
 if _serves_api():
-    from app.api import geocode, runs, trips, vehicles
+    from app.api import feedback, geocode, runs, trips, vehicles
 
     app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
     app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
     app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
+    app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
     # Live runs own routes under both /api/trips/{id}/… and /api/runs/{id}/…,
     # so they mount at /api rather than under either one.
     app.include_router(runs.router, prefix="/api", tags=["live"])

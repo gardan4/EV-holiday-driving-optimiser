@@ -162,6 +162,7 @@ jobs:
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
               orsApiKey='${{ secrets.ORS_API_KEY }}' \
               ocmApiKey='${{ secrets.OCM_API_KEY }}' \
+              feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
               ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output table
 
@@ -183,6 +184,7 @@ jobs:
               encryptionKey='${{ secrets.APP_ENCRYPTION_KEY }}' \
               orsApiKey='${{ secrets.ORS_API_KEY }}' \
               ocmApiKey='${{ secrets.OCM_API_KEY }}' \
+              feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
               ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output none
 

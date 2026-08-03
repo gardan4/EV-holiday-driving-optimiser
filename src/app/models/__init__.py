@@ -264,3 +264,30 @@ class TripEvent(Base):
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     soc: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class Feedback(Base):
+    """A note somebody left about the app.
+
+    Kept in our own database rather than pointed at a third-party form. Two
+    reasons: a visitor who has to leave the site and load someone else's page
+    mostly doesn't, and the privacy notice now says no third party is involved,
+    which stops being true the moment feedback goes somewhere else.
+
+    Deliberately thin. No IP, no user agent, no session — there is nothing here
+    to correlate anyone with, and a feedback box is not a reason to start.
+    `contact` is optional and only exists so a reply is possible when somebody
+    wants one.
+    """
+
+    __tablename__ = "feedback"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    message: Mapped[str] = mapped_column(String(2000), nullable=False)
+    contact: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Which page it was sent from — the only context worth having when someone
+    # writes "this is broken".
+    path: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)

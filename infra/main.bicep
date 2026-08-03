@@ -119,6 +119,10 @@ param orsApiKey string = ''
 @secure()
 param ocmApiKey string = ''
 
+@description('Send as an X-Feedback-Token header to read the feedback inbox. Empty ⇒ the read route does not exist.')
+@secure()
+param feedbackToken string = ''
+
 // ── Public URLs / CORS ──────────────────────────────────────────────────────
 @description('Public frontend URL (used for CORS + email links). Empty ⇒ derive the *.azurewebsites.net host.')
 param frontendUrl string = ''
@@ -491,6 +495,10 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           // named "dev" — served Swagger and skipped the hardened response CSP.
           name: 'ENV'
           value: 'production'
+        }
+        {
+          name: 'FEEDBACK_TOKEN'
+          value: feedbackToken
         }
         {
           // Derived from the origin lock ON PURPOSE, never set independently.

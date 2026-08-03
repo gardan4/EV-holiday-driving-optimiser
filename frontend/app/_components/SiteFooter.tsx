@@ -1,4 +1,5 @@
 import Link from "next/link"
+import FeedbackLink from "./FeedbackLink"
 
 /**
  * There was no footer at all, which meant `/privacy` existed but was reachable
@@ -26,6 +27,7 @@ export default function SiteFooter() {
         >
           Source
         </a>
+        <FeedbackLink />
         <span className="ml-auto text-xs text-ink-400">
           Routes by OpenRouteService · chargers by OpenChargeMap
         </span>

@@ -347,3 +347,29 @@ export async function getRunReview(
     await apiFetch(`/api/trips/${tripId}/runs/${runRef}/review`)
   )
 }
+
+export interface FeedbackRequest {
+  message: string
+  contact?: string | null
+  path?: string | null
+}
+
+/** Feedback goes to our own API, not to a third-party form — see
+ *  `app/_components/FeedbackLink.tsx` for why. */
+export async function sendFeedback(req: FeedbackRequest): Promise<void> {
+  const resp = await apiFetch("/api/feedback", {
+    method: "POST",
+    body: JSON.stringify(req),
+  })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}))
+    throw new Error(
+      getErrorMessage(
+        data.detail,
+        resp.status === 429
+          ? "That's a few messages already — try again a bit later."
+          : "Could not send that"
+      )
+    )
+  }
+}

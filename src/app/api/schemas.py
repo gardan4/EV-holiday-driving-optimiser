@@ -307,3 +307,20 @@ class ReviewOut(BaseModel):
     final_run_factor: float = 1.0
     stops: list[ReviewStopOut] = []
     trail: list[TimelinePoint] = []
+
+
+# ── Feedback ────────────────────────────────────────────────────────────────
+class FeedbackIn(BaseModel):
+    """Bounded on every field: this is the one endpoint that stores free text a
+    stranger typed, so the caps are the whole validation story."""
+
+    message: str = Field(min_length=1, max_length=2000)
+    contact: str | None = Field(default=None, max_length=200)
+    path: str | None = Field(default=None, max_length=300)
+
+
+class FeedbackItem(BaseModel):
+    created_at: datetime
+    message: str
+    contact: str | None = None
+    path: str | None = None

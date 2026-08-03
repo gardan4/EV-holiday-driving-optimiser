@@ -289,3 +289,42 @@ def _plan_body(vehicle_id: str) -> dict:
         "vehicle_id": vehicle_id,
         "departure_iso": "2026-08-10T07:00:00",
     }
+
+
+class TestFeedback:
+    """Feedback is stored here rather than at a third-party form, which means
+    this is the one endpoint that persists free text a stranger typed."""
+
+    async def test_anyone_can_leave_feedback(self, client):
+        r = await client.post("/api/feedback", json={"message": "the Born curve looks off"})
+        assert r.status_code == 201
+
+    async def test_an_empty_message_is_refused(self, client):
+        assert (await client.post("/api/feedback", json={"message": "   "})).status_code == 422
+        assert (await client.post("/api/feedback", json={"message": ""})).status_code == 422
+
+    async def test_an_overlong_message_is_refused_not_truncated(self, client):
+        r = await client.post("/api/feedback", json={"message": "x" * 2001})
+        assert r.status_code == 422, "a 2001-char message must not reach a 2000-char column"
+
+    async def test_the_inbox_is_invisible_without_a_token(self, client):
+        """With no FEEDBACK_TOKEN configured the route should not exist at all —
+        a 403 would confirm there is something there to guess at."""
+        await client.post("/api/feedback", json={"message": "secret note"})
+        r = await client.get("/api/feedback")
+        assert r.status_code == 404
+        assert "secret note" not in r.text
+
+    async def test_a_wrong_token_is_indistinguishable_from_no_inbox(
+        self, client, monkeypatch
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "FEEDBACK_TOKEN", "s3cret")
+        await client.post("/api/feedback", json={"message": "hello"})
+        assert (await client.get("/api/feedback")).status_code == 404
+        bad = await client.get("/api/feedback", headers={"X-Feedback-Token": "wrong"})
+        assert bad.status_code == 404
+        good = await client.get("/api/feedback", headers={"X-Feedback-Token": "s3cret"})
+        assert good.status_code == 200
+        assert good.json()[0]["message"] == "hello"
