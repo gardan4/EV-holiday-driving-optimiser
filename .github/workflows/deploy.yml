@@ -22,6 +22,12 @@ env:
   WEB_IMAGE: ${{ github.repository_owner }}/evtrip-web
   API_APP_NAME: evtrip-api-dev
   WEB_APP_NAME: evtrip-web-dev
+  # Public URLs. These are baked into the web bundle at BUILD time (Next inlines
+  # NEXT_PUBLIC_*), so changing the domain means rebuilding, not just re-pointing
+  # DNS. The azurewebsites hosts stay reachable but are no longer what the app
+  # calls itself.
+  SITE_URL: https://evtrip.dev
+  API_URL: https://api.evtrip.dev
 
 jobs:
   # --- Decide what changed ---------------------------------------------------
@@ -296,8 +302,8 @@ jobs:
       - name: Type-check & build
         working-directory: frontend
         env:
-          NEXT_PUBLIC_API_URL: https://${{ env.API_APP_NAME }}.azurewebsites.net
-          NEXT_PUBLIC_SITE_URL: https://${{ env.WEB_APP_NAME }}.azurewebsites.net
+          NEXT_PUBLIC_API_URL: ${{ env.API_URL }}
+          NEXT_PUBLIC_SITE_URL: ${{ env.SITE_URL }}
         run: |
           npm ci
           npx tsc --noEmit
@@ -330,8 +336,8 @@ jobs:
           context: ./frontend
           push: ${{ steps.az.outputs.configured == 'true' }}
           build-args: |
-            NEXT_PUBLIC_API_URL=https://${{ env.API_APP_NAME }}.azurewebsites.net
-            NEXT_PUBLIC_SITE_URL=https://${{ env.WEB_APP_NAME }}.azurewebsites.net
+            NEXT_PUBLIC_API_URL=${{ env.API_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.SITE_URL }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-${{ github.sha }}
             ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ env.ENVIRONMENT }}-latest

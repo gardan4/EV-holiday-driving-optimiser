@@ -19,6 +19,9 @@ function getApiUrl(): string {
     // NEXT_PUBLIC_API_URL is set at build time by the deploy workflow — and it
     // used to hardcode a custom domain that was never registered to us, which
     // would have sent every API call to a stranger's server had it ever run.
+    if (hostname === "evtrip.dev" || hostname === "www.evtrip.dev") {
+      return "https://api.evtrip.dev"
+    }
     if (hostname.endsWith(".azurewebsites.net")) {
       const apiHostname = hostname.replace("evtrip-web", "evtrip-api")
       return `https://${apiHostname}`

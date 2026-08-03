@@ -51,16 +51,16 @@
       "value": ""
     },
     "frontendUrl": {
-      "value": ""
+      "value": "https://evtrip.dev"
     },
     "apiUrl": {
-      "value": ""
+      "value": "https://api.evtrip.dev"
     },
     "siteUrl": {
-      "value": ""
+      "value": "https://evtrip.dev"
     },
     "corsOrigins": {
-      "value": ""
+      "value": "https://evtrip.dev"
     }
   }
 }

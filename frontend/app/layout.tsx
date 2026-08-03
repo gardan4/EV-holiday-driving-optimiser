@@ -15,7 +15,7 @@ const display = Bricolage_Grotesque({
 // workflow; this is what you get if that ever goes missing again. It has to be
 // a host we actually serve — the previous placeholder was a domain registered
 // to somebody else, so every og:image and canonical URL pointed at a stranger.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://evtrip-web-dev.azurewebsites.net";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://evtrip.dev";
 
 const TITLE = "EV Trip Optimizer — find your fastest cruise speed";
 const DESCRIPTION =

@@ -28,7 +28,7 @@ const isDev = process.env.NODE_ENV === "development"
 // someone else.
 const connectExtra = isDev
   ? "http://localhost:* ws://localhost:*"
-  : "https://evtrip-api-dev.azurewebsites.net"
+  : "https://api.evtrip.dev https://evtrip-api-dev.azurewebsites.net"
 
 const csp = [
   "default-src 'self'",
