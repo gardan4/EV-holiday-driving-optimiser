@@ -235,17 +235,52 @@ class TestOneDriveAtATime:
         assert resp.status_code == 409
         assert "already being driven" in resp.text
 
-    async def test_superseding_replaces_the_old_drive(self, client):
+    async def test_superseding_a_drive_that_is_still_reporting_is_refused(self, client):
+        """`supersede` is for a driver who lost their token — not for anyone the
+        share link reached. Superseding ends the real driver's run and points
+        every watcher at the newcomer's position, so a drive that is actively
+        sending pings is not available to take."""
+        trip = await make_trip(client)
+        await start_run(client, trip)
+        resp = await client.post(
+            f"/api/trips/{trip['id']}/runs",
+            json={
+                "planned_speed_kph": trip["result"]["optimum_speed"],
+                "depart_soc": 80.0, "lat": ORIGIN[0], "lon": ORIGIN[1],
+                "supersede": True,
+            },
+        )
+        assert resp.status_code == 409
+        assert "still sending its position" in resp.text
+
+    async def _go_quiet(self, db_session, minutes: float):
+        from datetime import datetime, timedelta
+
+        from sqlalchemy import select
+
+        from app.models import TripRun
+
+        run = (await db_session.execute(select(TripRun))).scalars().first()
+        run.last_seen_at = datetime.utcnow() - timedelta(minutes=minutes)
+        await db_session.commit()
+
+    async def test_superseding_a_quiet_drive_replaces_it(self, client, db_session):
+        from app.api.runs import TAKEOVER_QUIET_MIN
+
         trip = await make_trip(client)
         first = await start_run(client, trip)
+        await self._go_quiet(db_session, TAKEOVER_QUIET_MIN + 1)
         second = await start_run(client, trip, supersede=True)
         assert second["run_id"] != first["run_id"]
         live = (await client.get(f"/api/trips/{trip['id']}/live")).json()
         assert live["run_ref"] == second["run_ref"]
 
-    async def test_a_superseded_drive_stops_accepting_pings(self, client):
+    async def test_a_superseded_drive_stops_accepting_pings(self, client, db_session):
+        from app.api.runs import TAKEOVER_QUIET_MIN
+
         trip = await make_trip(client)
         first = await start_run(client, trip)
+        await self._go_quiet(db_session, TAKEOVER_QUIET_MIN + 1)
         await start_run(client, trip, supersede=True)
         resp = await client.post(f"/api/runs/{first['run_id']}/ping", json=FIRST_LEG)
         assert resp.status_code == 409

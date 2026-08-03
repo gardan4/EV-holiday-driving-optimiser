@@ -11,6 +11,11 @@ _INSECURE_DEFAULTS = frozenset({
 class Settings(BaseSettings):
     PROJECT_NAME: str = "EV Trip Optimizer"
     ENV: str = "production"  # "development" | "production" — controls docs exposure + prod guards
+    # Serve /docs, /redoc and /openapi.json. Defaults to "whatever ENV implies",
+    # but is settable on its own: the public deployment runs under the `dev`
+    # environment name, which was quietly publishing a full map of every route —
+    # including the live-drive write endpoints — to anyone who asked.
+    EXPOSE_DOCS: bool | None = None
 
     # Process role — which half of the app this process runs (web/worker split).
     #   "web"    → serve the API; start NO background loops
@@ -120,6 +125,11 @@ class Settings(BaseSettings):
     # on restart). Set to a redis://… URI in production so the limit is global
     # across App Service instances and survives restarts.
     RATE_LIMIT_STORAGE_URI: str = ""
+    # Trust CF-Connecting-IP / the left-most X-Forwarded-For hop for rate-limit
+    # bucketing. ONLY turn this on when a proxy that overwrites those headers is
+    # the sole route to the app — otherwise any caller can spoof a fresh bucket
+    # per request and every IP-keyed limit below becomes decorative.
+    TRUSTED_PROXY_HEADERS: bool = False
 
     # ----- CORS / URLs -----
     # Comma-separated allowed origins (e.g. "https://evtrip.app,https://www.evtrip.app").

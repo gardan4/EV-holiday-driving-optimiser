@@ -88,15 +88,49 @@ async def _run_common_startup():
     logger.info("Schema ensured via create_all")
 
 
+async def _purge_loop() -> None:
+    """Delete expired location traces once a day, forever.
+
+    The privacy page promises drives are deleted after 90 days. `purge_old_runs`
+    implemented that promise correctly and then nothing ever called it outside
+    the tests, which made the promise false — the worst kind of privacy bug,
+    because it reads as a policy. This is what makes it true.
+
+    Deliberately in-process rather than a scheduled workflow: Azure SQL sits
+    behind a firewall that a GitHub runner would have to be let through, and
+    `alwaysOn` is set, so the app is the one thing guaranteed to be running.
+    The delete is idempotent, so a second instance racing it is harmless.
+    """
+    from scripts.purge_old_runs import DEFAULT_RETENTION_DAYS, purge
+
+    # Let the cold start finish first — nothing here is urgent to the second.
+    await asyncio.sleep(300)
+    while True:
+        try:
+            runs, events = await purge(days=DEFAULT_RETENTION_DAYS, apply=True)
+            if runs:
+                logger.info(
+                    "Retention purge deleted %d drive(s) and %d location point(s)",
+                    runs,
+                    events,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # A DB blip must not silently end retention for the process's life.
+            logger.exception("Retention purge failed; retrying in 24h")
+        await asyncio.sleep(24 * 60 * 60)
+
+
 def _start_background_loops() -> list[asyncio.Task]:
-    """Create background loop tasks (worker + all). Empty in the skeleton.
+    """Create background loop tasks (worker + all).
 
     To add a recurring job: write an `async def my_loop()` (typically an
     `while True: ... await asyncio.sleep(N)` guarded by try/except), then return
     `[asyncio.create_task(my_loop())]` here. The lifespan cancels them cleanly
     on shutdown. Run a dedicated worker process with PROCESS_ROLE=worker.
     """
-    return []
+    return [asyncio.create_task(_purge_loop())]
 
 
 @asynccontextmanager
@@ -125,8 +159,13 @@ async def lifespan(app: FastAPI):
 
 
 # Hide Swagger UI + OpenAPI schema in production — the schema is a full map of
-# every route. Keep it for dev; auth still 401s any call.
-_expose_docs = settings.ENV != "production"
+# every route. `EXPOSE_DOCS` overrides, because the publicly-reachable
+# deployment is the one named "dev" and was therefore serving them.
+_expose_docs = (
+    settings.ENV != "production"
+    if settings.EXPOSE_DOCS is None
+    else settings.EXPOSE_DOCS
+)
 
 app = FastAPI(
     title="EV Trip Optimizer API",

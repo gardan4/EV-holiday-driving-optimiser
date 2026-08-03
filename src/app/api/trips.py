@@ -11,7 +11,8 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
@@ -26,7 +27,7 @@ from app.api.schemas import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import Trip, Vehicle
+from app.models import Trip, TripEvent, TripRun, Vehicle
 from app.services import chargers as chargers_svc
 from app.services import routing
 from app.services.geo import polyline_encode
@@ -48,6 +49,12 @@ router = APIRouter()
 
 # Guard against degenerate/abusive sweeps: at most this many simulated speeds.
 MAX_SWEEP_POINTS = 40
+
+# Longest route we will plan. The coordinate bounds alone permit Portugal →
+# Finland, which is nobody's holiday drive but is ~200 upstream charger-tile
+# fetches, a multi-megabyte stored result, and a polyline big enough to make
+# every later operation on it expensive.
+MAX_ROUTE_M = 2_000_000.0
 
 
 def _vehicle_out(v: Vehicle) -> VehicleOut:
@@ -131,6 +138,14 @@ async def plan_trip(
     route = await routing.get_route(
         db, plan.origin.lat, plan.origin.lon, plan.dest.lat, plan.dest.lon
     )
+    if route.total_dist_m > MAX_ROUTE_M:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"That route is {route.total_dist_m / 1000:.0f} km. This plans "
+                f"trips up to {MAX_ROUTE_M / 1000:.0f} km."
+            ),
+        )
     charger_nodes = await chargers_svc.chargers_for_route(db, route)
 
     veh = VehicleParams.from_vehicle(vehicle)
@@ -215,9 +230,13 @@ async def plan_trip(
     await db.commit()
     await db.refresh(trip)
 
+    # Prefix only. The trip id is the capability that opens the trip, and the
+    # trip holds an origin and destination one of which is usually home — a full
+    # id in the log is a replayable link to somebody's address for anyone with
+    # log access. `runs.py` already logs this way.
     logger.info(
-        "planned trip %s: %.0f km, optimum %.0f kph, %d speeds",
-        trip.id, route.total_dist_m / 1000, best.speed_kph, len(speeds),
+        "planned trip %s…: %.0f km, optimum %.0f kph, %d speeds",
+        str(trip.id)[:8], route.total_dist_m / 1000, best.speed_kph, len(speeds),
     )
     return TripOut(
         id=str(trip.id),
@@ -245,3 +264,43 @@ async def get_trip(
         result=PlanResult.model_validate(trip.result),
         created_at=trip.created_at,
     )
+
+
+@router.delete("/{trip_id}", status_code=204)
+@limiter.limit(settings.RATE_LIMIT_DEFAULT)
+async def delete_trip(
+    request: Request, trip_id: str, db: AsyncSession = Depends(get_db)
+) -> Response:
+    """Erase a trip and everything recorded against it.
+
+    With no accounts there is nobody to look up, so for a long time the only
+    honest answer to "please delete my data" was to ask someone to do it by
+    hand. The link is the only key this app has, so the link is what authorises
+    the deletion — the same capability that lets you read the trip lets you
+    destroy it, which is the right trade for data nobody else can identify.
+
+    Deliberately deletes the location trail too: a trip's drives are the most
+    sensitive thing here, and leaving them behind after the trip is gone would
+    orphan a GPS trace with no way left to reach it.
+    """
+    try:
+        tid = uuid.UUID(trip_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    trip = await db.get(Trip, tid)
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found.")
+
+    run_ids = (
+        (await db.execute(select(TripRun.id).where(TripRun.trip_id == tid)))
+        .scalars()
+        .all()
+    )
+    if run_ids:
+        # Events first: the FK has no cascade, by design.
+        await db.execute(delete(TripEvent).where(TripEvent.run_id.in_(run_ids)))
+        await db.execute(delete(TripRun).where(TripRun.id.in_(run_ids)))
+    await db.delete(trip)
+    await db.commit()
+    logger.info("deleted trip %s… and %d drive(s)", str(tid)[:8], len(run_ids))
+    return Response(status_code=204)

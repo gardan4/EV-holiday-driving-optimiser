@@ -10,21 +10,41 @@ from app.core.config import settings
 def _client_ip(request: Request) -> str:
     """Resolve the real client IP for rate-limit bucketing.
 
-    In production the path is client -> Cloudflare -> Azure App Service -> app,
-    so ``request.client.host`` (what slowapi's get_remote_address returns) is the
-    PROXY's IP — collapsing every user into one shared bucket. We instead trust
-    Cloudflare's ``CF-Connecting-IP`` (the single most reliable value), then the
-    first hop of ``X-Forwarded-For``. These headers are only trustworthy because
-    the app is reachable solely through the proxy in production; locally they're
-    absent and we fall back to the socket peer.
+    Getting this wrong in the trusting direction voids every IP-keyed limit in
+    the app, so the rule is: only believe a header a trusted proxy is known to
+    overwrite.
+
+    ``request.client.host`` is the App Service front-end, not the user, so it
+    would collapse everyone into one bucket. Azure App Service *appends* the
+    real peer to ``X-Forwarded-For``, which makes the RIGHT-most entry the one
+    the platform wrote and the left-most entries whatever the caller invented.
+    So we read from the right, and a spoofed `X-Forwarded-For: 1.2.3.4` buys
+    the caller nothing.
+
+    ``CF-Connecting-IP`` and the left-most XFF hop are only meaningful with
+    Cloudflare actually in front — and nothing is, today, since the App Service
+    is directly reachable on its azurewebsites.net name. Behind a proxy that
+    strips and rewrites these headers, set TRUSTED_PROXY_HEADERS=true; until
+    then trusting them means anyone can mint a fresh rate-limit bucket per
+    request just by varying a header.
     """
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip:
-        return cf_ip.strip()
+    if settings.TRUSTED_PROXY_HEADERS:
+        cf_ip = request.headers.get("cf-connecting-ip")
+        if cf_ip:
+            return cf_ip.strip()
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # Left-most entry is the original client (proxies append on the right).
+            return xff.split(",")[0].strip()
+        return get_remote_address(request)
+
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        # Left-most entry is the original client (proxies append on the right).
-        return xff.split(",")[0].strip()
+        hops = [h.strip() for h in xff.split(",") if h.strip()]
+        if hops:
+            # App Service writes "ip:port"; the port would split one user into
+            # a new bucket per connection.
+            return hops[-1].rsplit(":", 1)[0] if hops[-1].count(":") == 1 else hops[-1]
     return get_remote_address(request)
 
 

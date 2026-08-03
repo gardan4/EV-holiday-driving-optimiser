@@ -44,7 +44,7 @@ from app.api.schemas import (
     StartRunRequest,
     TimelinePoint,
 )
-from app.api.trips import _result_out
+from app.api.trips import MAX_SWEEP_POINTS, _result_out
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter, run_key
@@ -72,6 +72,12 @@ BREADCRUMB_MIN = 5.0
 # over, so the trip can be driven again. Generous on purpose: a long lunch, a
 # tunnel, or a phone charging in a bag are all normal.
 ABANDON_AFTER_MIN = 90.0
+
+# How quiet an active drive has to be before someone else may replace it.
+# Pings land every ~25 s, so a few minutes of silence means that phone is no
+# longer reporting — while a drive that IS reporting belongs to whoever is in
+# the car, not to whoever the share link reached.
+TAKEOVER_QUIET_MIN = 5.0
 
 
 def run_ref_for(run_id: uuid.UUID) -> str:
@@ -354,6 +360,21 @@ async def start_run(
                     "or start again to replace it."
                 ),
             )
+        # `supersede` exists so a driver whose phone lost its token can get back
+        # in — not so a passenger, or anyone the share link was forwarded to,
+        # can end a drive that is happening right now. Superseding kills the
+        # real driver's token (their pings 409 from here on) and hands every
+        # watcher the newcomer's position as if it were the car's, so it has to
+        # be limited to runs that have visibly stopped reporting.
+        quiet_min = (datetime.utcnow() - existing.last_seen_at).total_seconds() / 60.0
+        if quiet_min < TAKEOVER_QUIET_MIN:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "That drive is still sending its position. If it's yours, "
+                    "close the other tab and try again in a few minutes."
+                ),
+            )
         existing.status = "superseded"
         existing.finished_at = datetime.utcnow()
 
@@ -584,6 +605,14 @@ async def replan(
     lo = max(60.0, lo)
     hi = min(hi, veh.top_speed_kph)
     n = max(1, int((hi - lo) / body.speed_step) + 1)
+    # `POST /api/trips` caps its sweep; this path did not, so `full_range` with
+    # the minimum step ran ~4x the work per request — on a token the caller
+    # mints for themselves.
+    if n > MAX_SWEEP_POINTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many speeds to simulate (max {MAX_SWEEP_POINTS}).",
+        )
     speeds = [s for s in (lo + i * body.speed_step for i in range(n)) if s <= hi]
     if not speeds:
         speeds = [min(centre, veh.top_speed_kph)]

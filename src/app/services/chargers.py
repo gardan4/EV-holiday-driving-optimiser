@@ -9,7 +9,9 @@ external calls until the TTL expires.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 from datetime import datetime, timedelta
 
 import httpx
@@ -36,6 +38,16 @@ MIN_OFFSET_M = 50_000.0       # no stops in the first 50 km (battery still full)
 END_MARGIN_M = 10_000.0
 DEDUP_RADIUS_M = 500.0
 MAX_NODES = 60                # DP stays fast; prefer high power when trimming
+
+# Upstream tile fetches allowed in one request. Each is sequential with a 20 s
+# timeout, so this bounds both worst-case latency and how much of the day's
+# free-tier OCM quota a single long route can spend.
+MAX_TILE_FETCHES = 20
+
+# How long a tile that FAILED upstream is left alone before retrying. Without
+# this, an OCM outage or a 429 makes every subsequent plan on that corridor
+# re-attempt every tile — the quota breach becomes self-sustaining.
+FAILED_TILE_BACKOFF_MIN = 30.0
 
 _client: httpx.AsyncClient | None = None
 
@@ -94,8 +106,21 @@ async def _fetch_tile(db: AsyncSession, tile_key: str) -> None:
         pois = resp.json()
     except httpx.HTTPError as exc:
         # Degrade gracefully: stale/absent tile data just means fewer candidate
-        # chargers this run; the tile stays unstamped and is retried next plan.
+        # chargers this run. Stamp the tile far enough in the past that it is
+        # retried in FAILED_TILE_BACKOFF_MIN rather than on the very next plan —
+        # otherwise the first 429 turns every later request into another one.
         logger.warning("OCM fetch failed for tile %s: %s", tile_key, exc)
+        backdated = (
+            datetime.utcnow()
+            - timedelta(hours=settings.CHARGER_CACHE_TTL_HOURS)
+            + timedelta(minutes=FAILED_TILE_BACKOFF_MIN)
+        )
+        tile = await db.get(OcmTile, tile_key)
+        if tile is None:
+            db.add(OcmTile(tile_key=tile_key, fetched_at=backdated))
+        else:
+            tile.fetched_at = backdated
+        await db.commit()
         return
 
     n_new = 0
@@ -146,6 +171,17 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
     }
     stale = [t for t in tiles if t not in fresh]
     logger.info("corridor: %d tiles (%d fresh, %d to fetch)", len(tiles), len(fresh), len(stale))
+    # Cap the upstream burst. Each tile is a sequential 20 s-timeout call, so an
+    # uncapped first-time long route could sit here for minutes and spend a
+    # large slice of the day's OCM quota on one request. Skipped tiles stay
+    # stale and get picked up by the next plan on this corridor.
+    if len(stale) > MAX_TILE_FETCHES:
+        logger.warning(
+            "corridor has %d stale tiles; fetching %d this request",
+            len(stale),
+            MAX_TILE_FETCHES,
+        )
+        stale = stale[:MAX_TILE_FETCHES]
     for tile_key in stale:
         await _fetch_tile(db, tile_key)
 
@@ -170,26 +206,60 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         .all()
     )
 
-    candidates: list[ChargerNode] = []
-    for c in rows:
-        offset_m, perp_m = geom.project(c.lat, c.lon)
-        if perp_m > MAX_PERP_M:
-            continue
-        if offset_m < MIN_OFFSET_M or offset_m > geom.total_m - END_MARGIN_M:
-            continue
-        candidates.append(
-            ChargerNode(
-                charger_id=str(c.id),
-                name=c.name,
-                operator=c.operator,
-                lat=c.lat,
-                lon=c.lon,
-                offset_m=offset_m,
-                power_kw=c.max_power_kw,
-                # Round trip off/on the motorway at ~40 kph average.
-                detour_min=2.0 * (perp_m / 1000.0) / 40.0 * 60.0,
+    # `project` is a linear scan over every polyline vertex, so running it on
+    # every row in the bbox is O(rows x vertices) — for a NL->AT route that is a
+    # rectangle covering much of central Europe against a 20k-vertex polyline,
+    # tens of millions of interpreted operations. It ran on the event loop and
+    # on cache hits too, which is why a warm repeat plan measured slower than a
+    # cold one and why nothing else was served while it ran.
+    #
+    # Two changes: reject obviously-distant chargers with cheap arithmetic
+    # against the corridor samples we already computed, and do the survivors'
+    # real projection off the event loop.
+    corridor = [(la, lo) for la, lo in geom.sample_every(SAMPLE_SPACING_M)]
+
+    def _project_corridor() -> list[ChargerNode]:
+        # Conservative: half a sample spacing (worst case distance to the
+        # nearest sample) plus the perpendicular limit we'd accept anyway.
+        reach_m = SAMPLE_SPACING_M / 2.0 + MAX_PERP_M
+        reach_deg_lat = reach_m / 111_320.0
+        out: list[ChargerNode] = []
+        for c in rows:
+            # Longitude degrees shrink with latitude; use the charger's own.
+            lon_scale = max(0.2, math.cos(math.radians(c.lat)))
+            near = False
+            for sla, slo in corridor:
+                dlat = c.lat - sla
+                if dlat > reach_deg_lat or dlat < -reach_deg_lat:
+                    continue
+                dlon = (c.lon - slo) * lon_scale
+                if dlat * dlat + dlon * dlon <= reach_deg_lat * reach_deg_lat:
+                    near = True
+                    break
+            if not near:
+                continue
+
+            offset_m, perp_m = geom.project(c.lat, c.lon)
+            if perp_m > MAX_PERP_M:
+                continue
+            if offset_m < MIN_OFFSET_M or offset_m > geom.total_m - END_MARGIN_M:
+                continue
+            out.append(
+                ChargerNode(
+                    charger_id=str(c.id),
+                    name=c.name,
+                    operator=c.operator,
+                    lat=c.lat,
+                    lon=c.lon,
+                    offset_m=offset_m,
+                    power_kw=c.max_power_kw,
+                    # Round trip off/on the motorway at ~40 kph average.
+                    detour_min=2.0 * (perp_m / 1000.0) / 40.0 * 60.0,
+                )
             )
-        )
+        return out
+
+    candidates = await asyncio.to_thread(_project_corridor)
 
     # 4. Dedup near-identical locations (keep the most powerful site).
     candidates.sort(key=lambda n: (n.offset_m, -n.power_kw))

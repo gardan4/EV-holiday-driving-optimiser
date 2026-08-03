@@ -145,6 +145,14 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
       name: 'PerGB2018'
     }
     retentionInDays: 30
+    // Everything else here is a fixed-price SKU, so ingestion is the only line
+    // on the bill that can follow traffic. Both apps ship HTTP *and* console
+    // logs, which is ~2 records per request — a flood, or a few tabs left open
+    // polling the live view, is the one way this gets expensive. Capping means
+    // logs stop for the day rather than the spend continuing.
+    workspaceCapping: {
+      dailyQuotaGb: 1
+    }
   }
 }
 
@@ -251,8 +259,12 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           value: webPublicUrl
         }
         {
+          // Any deployment of this template is reachable from the open
+          // internet, so it runs under production rules whatever it is called.
+          // Keying this on the environment name meant the one real deployment —
+          // named "dev" — served Swagger and skipped the hardened response CSP.
           name: 'ENV'
-          value: environmentName == 'prod' ? 'production' : 'development'
+          value: 'production'
         }
         // No separate worker tier ships in this skeleton — run everything in
         // one process. (The code honours PROCESS_ROLE if you split later.)

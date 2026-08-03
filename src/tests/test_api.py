@@ -228,3 +228,64 @@ class TestFactorsThroughTheApi:
         await db_session.commit()
         resp = await client.post("/api/trips", json=plan_body(str(legacy.id)))
         assert resp.status_code == 200, resp.text
+
+
+class TestPublicSafetyLimits:
+    """Guards that only matter once the URL is somewhere public."""
+
+    async def test_an_absurdly_long_route_is_refused(self, client, monkeypatch):
+        """The coordinate bounds alone permit Portugal→Finland: ~200 upstream
+        charger-tile fetches and a multi-megabyte result row, from one request."""
+        from app.api import trips as trips_api
+
+        monkeypatch.setattr(trips_api, "MAX_ROUTE_M", 1000.0)  # 1 km
+        vehicles = (await client.get("/api/vehicles")).json()
+        resp = await client.post("/api/trips", json=_plan_body(vehicles[0]["id"]))
+        assert resp.status_code == 422
+        assert "km" in resp.text
+
+    async def test_a_trip_can_be_deleted_by_anyone_holding_its_link(self, client):
+        """With no accounts the link is the only key there is, so it has to be
+        what authorises erasure — otherwise 'ask and we'll delete it' is the
+        only answer available to someone who wants their trip gone."""
+        vehicles = (await client.get("/api/vehicles")).json()
+        trip = (await client.post("/api/trips", json=_plan_body(vehicles[0]["id"]))).json()
+
+        assert (await client.delete(f"/api/trips/{trip['id']}")).status_code == 204
+        assert (await client.get(f"/api/trips/{trip['id']}")).status_code == 404
+        # Idempotent-ish: a second delete is a clean 404, not a 500.
+        assert (await client.delete(f"/api/trips/{trip['id']}")).status_code == 404
+
+    async def test_deleting_a_trip_takes_its_location_trail_with_it(
+        self, client, db_session
+    ):
+        """A drive's GPS breadcrumbs outliving the trip would orphan a location
+        trace with no link left that could ever reach it."""
+        from sqlalchemy import func, select
+
+        from app.models import TripEvent, TripRun
+
+        vehicles = (await client.get("/api/vehicles")).json()
+        trip = (await client.post("/api/trips", json=_plan_body(vehicles[0]["id"]))).json()
+        started = await client.post(
+            f"/api/trips/{trip['id']}/runs",
+            json={
+                "planned_speed_kph": trip["result"]["optimum_speed"],
+                "depart_soc": 90.0, "lat": 52.09, "lon": 5.12,
+            },
+        )
+        assert started.status_code == 200
+
+        await client.delete(f"/api/trips/{trip['id']}")
+        runs = (await db_session.execute(select(func.count()).select_from(TripRun))).scalar_one()
+        events = (await db_session.execute(select(func.count()).select_from(TripEvent))).scalar_one()
+        assert (runs, events) == (0, 0)
+
+
+def _plan_body(vehicle_id: str) -> dict:
+    return {
+        "origin": {"label": "Utrecht", "lat": 52.09, "lon": 5.12},
+        "dest": {"label": "Innsbruck", "lat": 47.26, "lon": 11.39},
+        "vehicle_id": vehicle_id,
+        "departure_iso": "2026-08-10T07:00:00",
+    }

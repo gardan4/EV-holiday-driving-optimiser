@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -106,14 +107,34 @@ def _lerp_axis(xs: list[float], ys: list[float], x: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+# Autocomplete was the one upstream call with no cache in front of it, which
+# made it the first thing to exhaust the free ORS quota: directions are cached
+# per O/D pair, but every keystroke burst in the search box spent a request.
+# Prefixes repeat enormously across users ("ut", "utr", "amst"), so even a short
+# TTL collapses most of the volume — and a dead autocomplete is what a visitor
+# from a link would hit first, before anything else in the app.
+_GEOCODE_TTL_S = 900.0
+_GEOCODE_MAX = 2000
+_geocode_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+
+
 async def geocode(q: str, size: int = 5) -> list[dict]:
-    """ORS autocomplete → [{label, lat, lon, country}]."""
+    """ORS autocomplete → [{label, lat, lon, country}]. Cached in-process."""
     key = _require_key()
+    ck = (q.strip().lower(), size)
+    hit = _geocode_cache.get(ck)
+    now = time.monotonic()
+    if hit is not None and now - hit[0] < _GEOCODE_TTL_S:
+        return hit[1]
+
     try:
         resp = await _http().get(
             f"{ORS_BASE}/geocode/autocomplete",
+            # Header, not a query param: an httpx error message embeds the full
+            # URL, and `logger.warning` below would then write the live API key
+            # into the application log on every upstream failure.
+            headers={"Authorization": key},
             params={
-                "api_key": key,
                 "text": q,
                 "size": size,
                 "layers": "locality,localadmin,borough,address,venue",
@@ -135,6 +156,16 @@ async def geocode(q: str, size: int = 5) -> list[dict]:
                 "country": (props.get("country_a") or "")[:2] or None,
             }
         )
+
+    if len(_geocode_cache) >= _GEOCODE_MAX:
+        # Unbounded growth would be a memory leak keyed on attacker-chosen
+        # strings. Drop the expired entries; if that frees nothing, start over.
+        for k, (t, _) in list(_geocode_cache.items()):
+            if now - t >= _GEOCODE_TTL_S:
+                _geocode_cache.pop(k, None)
+        if len(_geocode_cache) >= _GEOCODE_MAX:
+            _geocode_cache.clear()
+    _geocode_cache[ck] = (now, hits)
     return hits
 
 
