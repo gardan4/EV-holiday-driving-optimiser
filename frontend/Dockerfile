@@ -21,12 +21,17 @@ RUN npm ci
 
 COPY . .
 
-# Build arguments for environment variables
+# Next.js inlines NEXT_PUBLIC_* at build time, so every one of them must be
+# declared here as an ARG — not just set as a runtime App Service setting.
+# Docker silently ignores a --build-arg with no matching ARG, which is how
+# NEXT_PUBLIC_SITE_URL went missing: the workflow passed it, the build never
+# saw it, and `layout.tsx` fell back to the placeholder domain. Every og:image
+# and og:url then pointed at a host with no DNS, so link previews had no image.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
-# Clerk publishable key — Next.js inlines NEXT_PUBLIC_* at build time, so it
-# must be present here (not just as a runtime App Service setting).
+ARG NEXT_PUBLIC_SITE_URL
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 
 # Build the application
 RUN npm run build
