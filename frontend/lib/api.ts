@@ -15,17 +15,10 @@ function getApiUrl(): string {
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname
 
-    // Production: go through the custom domain (api.evtrip.app) so any
-    // WAF / rate-limit / access restrictions in front of the App Service are
-    // enforced. Hitting the *.azurewebsites.net host directly bypasses them.
-    if (
-      hostname === "evtrip.app" ||
-      hostname === "www.evtrip.app" ||
-      hostname === "evtrip-web-prod.azurewebsites.net"
-    ) {
-      return "https://api.evtrip.app"
-    }
-    // Dev / staging Azure Web Apps domains — no custom domain in front.
+    // Derive the API host from the web host. This branch is a safety net —
+    // NEXT_PUBLIC_API_URL is set at build time by the deploy workflow — and it
+    // used to hardcode a custom domain that was never registered to us, which
+    // would have sent every API call to a stranger's server had it ever run.
     if (hostname.endsWith(".azurewebsites.net")) {
       const apiHostname = hostname.replace("evtrip-web", "evtrip-api")
       return `https://${apiHostname}`

@@ -23,10 +23,12 @@ const isDev = process.env.NODE_ENV === "development"
 //
 // `*.azurewebsites.net` used to be in here, which is a hostname anyone can
 // register for free — i.e. a ready-made exfiltration target for any XSS that
-// ever lands. Name the two hosts we actually call instead.
+// ever lands. Name the one host we actually call instead. Add a custom domain
+// here when there is one; the placeholder that used to sit here belonged to
+// someone else.
 const connectExtra = isDev
   ? "http://localhost:* ws://localhost:*"
-  : "https://evtrip-api-dev.azurewebsites.net https://api.evtrip.app"
+  : "https://evtrip-api-dev.azurewebsites.net"
 
 const csp = [
   "default-src 'self'",

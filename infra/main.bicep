@@ -52,6 +52,38 @@ param sqlAdminLogin string = 'evtripadmin'
 @secure()
 param sqlAdminPassword string
 
+// ── App Service Plan sizing ─────────────────────────────────────────────────
+// P0v3 is the cheapest tier that can autoscale, and it is cheaper than the
+// Standard tier it replaced while carrying more than twice the memory
+// (West Europe, Aug 2026, Azure retail prices API):
+//
+//   B1    1 core  / 1.75 GB   ~EUR 11.53/mo   manual scale-out only, no autoscale
+//   S1    1 core  / 1.75 GB   ~EUR 60.88/mo   legacy generation
+//   P0v3  1 vCPU  / 4 GB      ~EUR 57.01/mo   <- cheapest with autoscale
+//   P1v3  2 vCPU  / 8 GB      ~EUR 114.03/mo
+//
+// Memory is what gives out first here: a Node SSR process serving an R3F
+// bundle and a Python API share this plan, and 1.75 GB is not enough headroom
+// for both under load. Set these back to B1/Basic to return to the cheap PoC
+// shape — the autoscale resource below drops out on its own.
+@description('App Service Plan SKU name (P0v3 = cheapest tier that autoscales; B1 = cheapest overall).')
+param appSkuName string = 'P0v3'
+
+@description('App Service Plan tier. Must match appSkuName. Basic cannot autoscale.')
+@allowed(['Basic', 'Standard', 'PremiumV3'])
+param appSkuTier string = 'PremiumV3'
+
+// Two things in the app are per-process, so they get looser as this grows:
+// the rate limiter (RATE_LIMIT_STORAGE_URI is empty ⇒ in-memory, so the real
+// limit becomes N x the configured one) and the in-process geocode cache
+// (N cold caches ⇒ up to N x the ORS calls). Point RATE_LIMIT_STORAGE_URI at
+// Redis before raising this much above 3. The retention purge is safe: it runs
+// on every instance but the delete is idempotent.
+@description('Ceiling for autoscale. Cost is per instance, so this is the monthly bill multiplier.')
+@minValue(1)
+@maxValue(10)
+param autoscaleMaxInstances int = 3
+
 @description('SQL Database SKU name (e.g. Basic, S0, S1).')
 param sqlSkuName string = 'S0'
 
@@ -203,11 +235,99 @@ resource appServicePlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   location: location
   kind: 'linux'
   sku: {
-    name: 'B1'
-    tier: 'Basic'
+    name: appSkuName
+    tier: appSkuTier
   }
   properties: {
     reserved: true // required for Linux plans
+  }
+}
+
+// ============================================================================
+// Autoscale
+// ============================================================================
+// Basic cannot autoscale at all — it allows manual scale-out and nothing else —
+// so this only exists on Standard and above, and the condition keeps a B1
+// deployment valid rather than failing at deploy time.
+//
+// Both containers share this plan, so the two things that give out first are
+// memory (a Node SSR process and a Python API on the same box) and CPU. Memory
+// is the one that actually kills B1, which is why it gets a rule of its own
+// rather than being left to correlate with CPU.
+resource autoscale 'Microsoft.Insights/autoscalesettings@2022-10-01' = if (appSkuTier != 'Basic') {
+  name: '${planName}-autoscale'
+  location: location
+  properties: {
+    enabled: true
+    targetResourceUri: appServicePlan.id
+    profiles: [
+      {
+        name: 'default'
+        capacity: {
+          minimum: '1'
+          maximum: string(autoscaleMaxInstances)
+          default: '1'
+        }
+        rules: [
+          {
+            metricTrigger: {
+              metricName: 'CpuPercentage'
+              metricResourceUri: appServicePlan.id
+              timeGrain: 'PT1M'
+              statistic: 'Average'
+              timeWindow: 'PT5M'
+              timeAggregation: 'Average'
+              operator: 'GreaterThan'
+              threshold: 70
+            }
+            scaleAction: {
+              direction: 'Increase'
+              type: 'ChangeCount'
+              value: '1'
+              cooldown: 'PT5M'
+            }
+          }
+          {
+            metricTrigger: {
+              metricName: 'MemoryPercentage'
+              metricResourceUri: appServicePlan.id
+              timeGrain: 'PT1M'
+              statistic: 'Average'
+              timeWindow: 'PT5M'
+              timeAggregation: 'Average'
+              operator: 'GreaterThan'
+              threshold: 80
+            }
+            scaleAction: {
+              direction: 'Increase'
+              type: 'ChangeCount'
+              value: '1'
+              cooldown: 'PT5M'
+            }
+          }
+          {
+            // Slower and gentler than scaling out: a spike that has just ended
+            // is often a spike that is about to resume.
+            metricTrigger: {
+              metricName: 'CpuPercentage'
+              metricResourceUri: appServicePlan.id
+              timeGrain: 'PT1M'
+              statistic: 'Average'
+              timeWindow: 'PT20M'
+              timeAggregation: 'Average'
+              operator: 'LessThan'
+              threshold: 30
+            }
+            scaleAction: {
+              direction: 'Decrease'
+              type: 'ChangeCount'
+              value: '1'
+              cooldown: 'PT15M'
+            }
+          }
+        ]
+      }
+    ]
   }
 }
 

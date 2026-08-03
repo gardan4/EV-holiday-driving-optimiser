@@ -23,6 +23,15 @@
     "sqlAdminPassword": {
       "value": ""
     },
+    "appSkuName": {
+      "value": "P0v3"
+    },
+    "appSkuTier": {
+      "value": "PremiumV3"
+    },
+    "autoscaleMaxInstances": {
+      "value": 3
+    },
     "sqlSkuName": {
       "value": "S0"
     },
