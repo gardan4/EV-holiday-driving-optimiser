@@ -143,6 +143,22 @@ docker compose -f docker-compose.local-db.yml up -d
   empty. This deployed empty ORS/OCM keys to Azure once. Read values with
   `grep -E '^KEY=' .env | cut -d= -f2-` instead.
 - **Before `git add`-ing a file, `git diff` it** — stage only what you touched.
+- **Never gate a security control on `ENV`.** The one publicly reachable
+  deployment is the environment named `dev`, so `if ENV == "production"` is
+  false exactly where it matters — that is how Swagger ended up published.
+  Use an explicit default-deny setting (`EXPOSE_DOCS`) instead.
+- **The rate-limit key must not be caller-chosen.** `_client_ip` reads the
+  RIGHT-most `X-Forwarded-For` hop, because App Service appends the real peer
+  and anything to the left is whatever the caller invented. `CF-Connecting-IP`
+  and the left-most hop are only honoured behind `TRUSTED_PROXY_HEADERS`, which
+  is only true once something that overwrites those headers is genuinely in
+  front. Getting this wrong voids every IP limit and the ORS/OCM quota with it.
+- **`frontend/app/privacy/page.tsx` is a promise, not prose.** Every claim on it
+  has to be true of the code — "deleted after 90 days" was false for as long as
+  nothing called the purge. Change the page and the behaviour together.
+- **Every `NEXT_PUBLIC_*` needs an `ARG` in `frontend/Dockerfile`.** Docker
+  silently ignores a `--build-arg` with no matching `ARG`, and Next inlines
+  these at build time, so the variable just quietly becomes its fallback.
 - **Commits**: lowercase `<type>(<scope>): <imperative summary>` — `feat`, `fix`,
   `chore`, `docs`, `style`, `test`. Bodies explain the *why*.
 - `main` is the only branch; pushing to it runs CI and (once Azure secrets
