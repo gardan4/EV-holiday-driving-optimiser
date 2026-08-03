@@ -89,6 +89,9 @@ param appSkuTier string = 'PremiumV3'
 @maxValue(10)
 param autoscaleMaxInstances int = 3
 
+@description('Only accept traffic from Cloudflare. Set false to expose the App Services directly (e.g. before a custom domain is proxied).')
+param restrictToCloudflare bool = true
+
 @description('SQL Database SKU name (e.g. Basic, S0, S1).')
 param sqlSkuName string = 'S0'
 
@@ -232,6 +235,71 @@ resource sqlFirewallAzure 'Microsoft.Sql/servers/firewallRules@2023-05-01-previe
   }
 }
 
+
+// ============================================================================
+// Cloudflare origin lock
+// ============================================================================
+// With the sites proxied, anything that can reach the *.azurewebsites.net host
+// directly bypasses Cloudflare entirely — every WAF rule, cache rule and rate
+// limit with it. That matters more than usual here: the API trusts
+// CF-Connecting-IP for rate-limit bucketing once TRUSTED_PROXY_HEADERS is on,
+// and a caller who can reach the origin directly could then spoof that header and
+// mint a fresh bucket per request. So the lock is a precondition for the flag,
+// not an extra.
+//
+// Health check is unaffected: App Service pings the path internally, which is
+// why the docs recommend IP restrictions as the way to secure that endpoint.
+// SCM/Kudu is deliberately left open (scmIpSecurityRestrictionsUseMain: false)
+// so a bad rule here cannot lock the deployment surface out too.
+//
+// From https://www.cloudflare.com/ips-v4 and /ips-v6.
+var cloudflareRanges = [
+  '173.245.48.0/20'
+  '103.21.244.0/22'
+  '103.22.200.0/22'
+  '103.31.4.0/22'
+  '141.101.64.0/18'
+  '108.162.192.0/18'
+  '190.93.240.0/20'
+  '188.114.96.0/20'
+  '197.234.240.0/22'
+  '198.41.128.0/17'
+  '162.158.0.0/15'
+  '104.16.0.0/13'
+  '104.24.0.0/14'
+  '172.64.0.0/13'
+  '131.0.72.0/22'
+  '2400:cb00::/32'
+  '2606:4700::/32'
+  '2803:f800::/32'
+  '2405:b500::/32'
+  '2405:8100::/32'
+  '2a06:98c0::/29'
+  '2c0f:f248::/32'
+]
+
+var cloudflareRestrictions = [
+  for (cidr, i) in cloudflareRanges: {
+    ipAddress: cidr
+    action: 'Allow'
+    priority: 100 + i
+    name: 'cloudflare-${i}'
+  }
+]
+
+// Explicit rather than relying on the implicit deny that appears once any Allow
+// rule exists — the implicit one is easy to lose by accident.
+var denyAll = [
+  {
+    ipAddress: 'Any'
+    action: 'Deny'
+    priority: 2147483647
+    name: 'deny-all'
+  }
+]
+
+var siteRestrictions = restrictToCloudflare ? concat(cloudflareRestrictions, denyAll) : []
+
 // ============================================================================
 // App Service Plan (Linux, shared by both containers)
 // ============================================================================
@@ -352,6 +420,8 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
       ftpsState: 'Disabled'
       http20Enabled: true
       healthCheckPath: '/health'
+      ipSecurityRestrictions: siteRestrictions
+      scmIpSecurityRestrictionsUseMain: false
       appSettings: concat(registrySettings, [
         // Sensitive config (App Service encrypts app settings at rest).
         {
@@ -391,6 +461,17 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           name: 'ENV'
           value: 'production'
         }
+        {
+          // Derived from the origin lock ON PURPOSE, never set independently.
+          // This flag tells the app to believe CF-Connecting-IP for rate-limit
+          // bucketing. That is correct behind Cloudflare and a hole without it:
+          // if the origin is reachable directly, anyone can send that header
+          // and mint a fresh bucket per request, which voids every IP limit in
+          // the app. Tying the two together means the dangerous combination
+          // cannot be produced by editing one value.
+          name: 'TRUSTED_PROXY_HEADERS'
+          value: restrictToCloudflare ? 'true' : 'false'
+        }
         // No separate worker tier ships in this skeleton — run everything in
         // one process. (The code honours PROCESS_ROLE if you split later.)
         {
@@ -421,6 +502,8 @@ resource webApp 'Microsoft.Web/sites@2023-01-01' = {
       alwaysOn: true
       ftpsState: 'Disabled'
       http20Enabled: true
+      ipSecurityRestrictions: siteRestrictions
+      scmIpSecurityRestrictionsUseMain: false
       appSettings: concat(registrySettings, [
         // NEXT_PUBLIC_* are baked in at build time (build-args in CI); they are
         // repeated here so server-side rendering / middleware also see them.
