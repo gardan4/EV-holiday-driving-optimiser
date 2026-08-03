@@ -35,6 +35,23 @@ export function tokenKey(tripId: string) {
   return `evtrip:run:${tripId}`
 }
 
+/** Where "I stopped sharing my location" is remembered. It used to be plain
+ *  component state, so a tab reload, a back-navigation, or iOS evicting the tab
+ *  silently resumed broadcasting — a withdrawal of consent that undoes itself
+ *  is not a withdrawal. Keyed per trip, next to the driver token. */
+export function sharingKey(tripId: string) {
+  return `evtrip:sharing:${tripId}`
+}
+
+function readSharing(tripId: string): boolean {
+  if (typeof window === "undefined") return true
+  try {
+    return window.localStorage.getItem(sharingKey(tripId)) !== "off"
+  } catch {
+    return true
+  }
+}
+
 export function readToken(tripId: string): string | null {
   if (typeof window === "undefined") return null
   try {
@@ -91,6 +108,10 @@ export function useLiveRun(
   const [busy, setBusy] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
   const [sharing, setSharing] = useState(true)
+  // Read on mount rather than as the initial value: localStorage is not
+  // available during the server render, and disagreeing with it would hydrate
+  // the wrong toggle state.
+  useEffect(() => setSharing(readSharing(tripId)), [tripId])
 
   // Kinematics accumulated between posts. Kept in a ref: these update on every
   // GPS fix and must not re-render anything.
@@ -286,7 +307,17 @@ export function useLiveRun(
     }
   }, [runId, tripId])
 
-  const toggleSharing = useCallback(() => setSharing((s) => !s), [])
+  const toggleSharing = useCallback(() => {
+    setSharing((s) => {
+      const next = !s
+      try {
+        window.localStorage.setItem(sharingKey(tripId), next ? "on" : "off")
+      } catch {
+        /* private mode — the toggle still works for this session */
+      }
+      return next
+    })
+  }, [tripId])
 
   return {
     run,

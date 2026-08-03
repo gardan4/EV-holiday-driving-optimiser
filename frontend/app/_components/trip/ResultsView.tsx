@@ -14,6 +14,7 @@ import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
 import JourneyHero from "./JourneyHero"
 import SpeedChart from "./SpeedChart"
+import DeleteTrip from "./DeleteTrip"
 import { DriveThisButton, SendToPhonePanel } from "./live/SendToPhone"
 import DriveBanner from "./live/DriveBanner"
 
@@ -150,6 +151,7 @@ export default function ResultsView({
               <RotateCcw className="h-4 w-4" />
               New trip
             </Link>
+            <DeleteTrip tripId={trip.id} />
           </div>
         </div>
 

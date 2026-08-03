@@ -1,3 +1,4 @@
+import SiteFooter from "./_components/SiteFooter"
 import TripForm from "./_components/trip/TripForm"
 
 /** Public landing page — hero + the planner form. */
@@ -38,6 +39,10 @@ export default function Home() {
           the route, and your car&apos;s measured charging curve. Night-owl approved.
         </p>
       </section>
+
+      <div className="relative z-10">
+        <SiteFooter />
+      </div>
     </main>
   )
 }

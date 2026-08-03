@@ -24,9 +24,10 @@ export default function PrivacyPage() {
         </p>
 
         <Section title="There is no sign-in">
-          This app has no accounts, no user table and no email addresses. We
-          have no identifier for you, so nothing here is tied to a person — only
-          to a trip.
+          This app has no accounts, no user table and no email addresses.
+          Nothing stored here is tied to a name. The one identifier that does
+          exist is your IP address: it is used to rate-limit abuse and it
+          appears in server logs, which are kept for 30 days.
         </Section>
 
         <Section title="Trips are unlisted, not private">
@@ -53,22 +54,41 @@ export default function PrivacyPage() {
 
         <Section title="How long it's kept">
           Drives and their location trails are deleted 90 days after they
-          finish. Planned trips have no location trail and are kept so old links
-          keep working.
+          started — the app runs that deletion itself, once a day. Planned trips
+          are kept indefinitely so old links keep working. A planned trip has no
+          location trail, but it does hold the start and destination you typed,
+          their coordinates, and the route between them.
         </Section>
 
         <Section title="Who else sees it">
           Your start and destination are sent to OpenRouteService to get a route
-          and to OpenChargeMap to find chargers along it, both of which are
-          third-party services with their own terms. Nothing else leaves the
-          app: no analytics, no advertising, no trackers, and the page loads no
-          third-party scripts at all.
+          and to OpenChargeMap to find chargers along it, both third-party
+          services with their own terms. The app is hosted on Microsoft Azure,
+          so Azure necessarily handles the traffic. There is no analytics, no
+          advertising, no trackers, and the page loads no third-party scripts.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            One thing to know about sharing: pasting a trip link into WhatsApp,
+            Slack or LinkedIn makes that platform fetch the page to build a
+            preview, and the preview names your start and destination.
+          </strong>
+          Per-stop navigation links point at Google Maps, and only open if you
+          tap one.
         </Section>
 
         <Section title="Getting something removed">
-          Because there are no accounts, we can&apos;t look a person up. If you
-          want a specific trip or drive deleted, send the link and we&apos;ll
-          delete it.
+          Every trip page has a delete button. It removes the trip, any drives
+          on it and their location trails, immediately and for good — that is
+          the whole record, because a trip is all we have. It works for anyone
+          holding the link, since the link is the only key that exists, so treat
+          it the same way you would treat the trip itself.
+        </Section>
+
+        <Section title="Who runs this">
+          A personal project, run by an individual in the Netherlands, not a
+          company. If something here looks wrong, the source is public and
+          issues are welcome. If you are in the EU you also have the right to
+          complain to your data protection authority — in the Netherlands that
+          is the Autoriteit Persoonsgegevens.
         </Section>
 
         <Link

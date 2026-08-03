@@ -152,6 +152,17 @@ export async function getTrip(id: string): Promise<Trip> {
   return unwrap<Trip>(await apiFetch(`/api/trips/${id}`))
 }
 
+/** Erase a trip, every drive recorded on it, and their location trails.
+ *  The link is the only key this app has, so holding the link is the
+ *  authorisation — the same capability that reads the trip destroys it. */
+export async function deleteTrip(id: string): Promise<void> {
+  const resp = await apiFetch(`/api/trips/${id}`, { method: "DELETE" })
+  if (!resp.ok && resp.status !== 404) {
+    const data = await resp.json().catch(() => ({}))
+    throw new Error(getErrorMessage(data.detail, "Could not delete this trip"))
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Live runs
 //
