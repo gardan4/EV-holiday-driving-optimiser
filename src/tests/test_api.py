@@ -151,6 +151,18 @@ class TestPlanTrip:
         resp = await client.post("/api/trips", json=body)
         assert resp.status_code == 422
 
+    async def test_out_of_coverage_says_so_in_words(self, client):
+        """A place outside Europe used to come back as three copies of "Input
+        should be greater than or equal to -11", which told the user nothing."""
+        vid = await vehicle_id(client)
+        body = plan_body(vid)
+        body["origin"] |= {"label": "Los Angeles", "lat": 34.05, "lon": -118.24}
+        resp = await client.post("/api/trips", json=body)
+        assert resp.status_code == 422
+        msgs = " ".join(d["msg"] for d in resp.json()["detail"])
+        assert "Los Angeles" in msgs and "outside the area" in msgs
+        assert "greater than or equal" not in msgs
+
     async def test_depart_below_target_422(self, client):
         vid = await vehicle_id(client)
         resp = await client.post(

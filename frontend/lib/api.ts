@@ -45,17 +45,19 @@ export const API_URL = getApiUrl()
 export function getErrorMessage(detail: unknown, fallback = "Something went wrong"): string {
   if (typeof detail === "string") return detail
   if (Array.isArray(detail)) {
-    const msgs = detail
-      .map((d) =>
-        d && typeof d === "object" && "msg" in d ? String((d as { msg: unknown }).msg) : null
-      )
-      .filter(Boolean) as string[]
+    const msgs = [...new Set(detail.map(msgOf).filter(Boolean) as string[])]
     if (msgs.length) return msgs.join("; ")
   }
-  if (detail && typeof detail === "object" && "msg" in detail) {
-    return String((detail as { msg: unknown }).msg)
-  }
+  const single = msgOf(detail)
+  if (single) return single
   return fallback
+}
+
+/** Pydantic prefixes a custom validator's message with "Value error, " — the
+ *  message behind it is the one written for a human, so show only that. */
+function msgOf(d: unknown): string | null {
+  if (!d || typeof d !== "object" || !("msg" in d)) return null
+  return String((d as { msg: unknown }).msg).replace(/^Value error,\s*/, "")
 }
 
 /** Make an API request against the FastAPI backend. */

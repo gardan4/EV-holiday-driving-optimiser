@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.services.geo import within_coverage
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +49,19 @@ class GeocodeHit(BaseModel):
 
 class PlacePoint(BaseModel):
     label: str = Field(max_length=200)
-    # EU corridor bounds — this is a European road-trip planner.
-    lat: float = Field(ge=35.0, le=62.0)
-    lon: float = Field(ge=-11.0, le=25.0)
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+
+    # The corridor check lives here rather than on the fields: as `ge`/`le`
+    # bounds it surfaced to the user as "Input should be greater than or equal
+    # to -11" — three times over, once per offending coordinate — which says
+    # nothing about what went wrong or what to do about it.
+    @model_validator(mode="after")
+    def _within_coverage(self) -> "PlacePoint":
+        if not within_coverage(self.lat, self.lon):
+            where = self.label or "That place"
+            raise ValueError(f"{where} is outside the area this planner covers (mainland Europe).")
+        return self
 
 
 class PlanRequest(BaseModel):

@@ -192,6 +192,18 @@ class RouteGeometry:
 # Coarse country lookup (EU corridor) — good enough for speed-cap decisions
 # ---------------------------------------------------------------------------
 
+# The corridor the planner covers, as (lat_lo, lat_hi, lon_lo, lon_hi). One
+# source for two users: the request schema rejects a place outside it, and the
+# geocoder is confined to it — so the search box can't offer somewhere the plan
+# would then refuse.
+COVERAGE_BOX = (35.0, 62.0, -11.0, 25.0)
+
+
+def within_coverage(lat: float, lon: float) -> bool:
+    la0, la1, lo0, lo1 = COVERAGE_BOX
+    return la0 <= lat <= la1 and lo0 <= lon <= lo1
+
+
 # (iso2, lat_lo, lat_hi, lon_lo, lon_hi) — checked in order; first hit wins.
 # Deliberately coarse but tuned so the big corridors resolve correctly
 # (Ruhr/Bavaria stay DE, Tyrol/Salzburg stay AT). Caps only differ by
