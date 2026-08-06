@@ -14,6 +14,12 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+
+  // Dev-only badge, moved out of the bottom-left corner where it sat directly
+  // on top of the floating feedback button.
+  devIndicators: {
+    position: "bottom-right",
+  },
 };
 
 export default nextConfig;

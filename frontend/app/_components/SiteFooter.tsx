@@ -12,7 +12,10 @@ import FeedbackLink from "./FeedbackLink"
 export default function SiteFooter() {
   return (
     <footer className="border-t border-ink-100 bg-white/60">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-6 text-sm text-ink-500">
+      {/* Extra room at the bottom on a phone: the floating feedback button is
+          pinned to the viewport's bottom-left, which is exactly where this row
+          ends up once you've scrolled to the end of the page. */}
+      <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-5 gap-y-2 px-4 pb-24 pt-6 text-sm text-ink-500 sm:pb-6">
         <span className="font-display font-semibold text-ink-700">
           EV Trip Optimizer
         </span>
