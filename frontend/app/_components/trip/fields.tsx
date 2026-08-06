@@ -1,5 +1,7 @@
 "use client"
 
+import { useCallback, useEffect, useRef, useState } from "react"
+
 /**
  * Shared form controls. Used by the planner form and by the editable
  * assumptions panel on a trip, so the two can never drift apart.
@@ -38,12 +40,37 @@ interface NumberFieldProps {
   explain?: string
   /** Optional line showing what the entered number actually does. */
   readout?: string
+  /** Told whenever this field starts or stops holding a usable number. */
+  onValidity?: (id: string, valid: boolean) => void
+}
+
+/**
+ * Collects the "this box is empty / out of range" flags from a set of
+ * NumberFields so the surrounding form can refuse to submit. Pass `onValidity`
+ * down to every field; read `allValid` next to the submit button.
+ */
+export function useNumberFieldValidity() {
+  const [bad, setBad] = useState<string[]>([])
+  const onValidity = useCallback((id: string, valid: boolean) => {
+    setBad((prev) => {
+      const has = prev.includes(id)
+      if (valid === !has) return prev
+      return valid ? prev.filter((x) => x !== id) : [...prev, id]
+    })
+  }, [])
+  return { allValid: bad.length === 0, onValidity }
 }
 
 /**
  * A plain number with its unit. Preferred over preset chips wherever the reader
  * plausibly knows the real figure — "12 °C" or "10 min" says what it means,
  * where "Cold" or "typical" hides a multiplier they can't see or argue with.
+ *
+ * The text you type is held as a string, not as the clamped number: a field
+ * bound straight to `value` re-writes itself on every keystroke, so clearing it
+ * snaps back to 0 (or to `min`) and "0.59" is unreachable because "0." parses
+ * to 0 mid-word. Here an empty or out-of-range box simply stays what you typed
+ * and turns red, and only a usable number is handed upwards.
  */
 export function NumberField({
   id,
@@ -56,7 +83,52 @@ export function NumberField({
   onChange,
   explain,
   readout,
+  onValidity,
 }: NumberFieldProps) {
+  const [draft, setDraft] = useState(() => String(value))
+
+  // What we last handed up. Lets us tell an outside change (a reset, a preset)
+  // — which should overwrite the box — from our own echo, which must not.
+  const emitted = useRef(value)
+  useEffect(() => {
+    if (value !== emitted.current) {
+      emitted.current = value
+      setDraft(String(value))
+    }
+  }, [value])
+
+  const trimmed = draft.trim()
+  const parsed = trimmed === "" ? NaN : Number(trimmed)
+  const problem = Number.isNaN(parsed)
+    ? "Enter a number"
+    : parsed < min || parsed > max
+      ? `Must be between ${min} and ${max}`
+      : null
+
+  useEffect(() => {
+    onValidity?.(id, problem === null)
+    return () => onValidity?.(id, true)
+  }, [id, problem, onValidity])
+
+  function commit(next: string) {
+    setDraft(next)
+    const n = next.trim() === "" ? NaN : Number(next)
+    if (!Number.isNaN(n) && n >= min && n <= max) {
+      emitted.current = n
+      onChange(n)
+    }
+  }
+
+  // Arrow keys still step the value — type="text" is what keeps the typing sane
+  // (no browser sanitising "0." or "-" away mid-word), but it drops the native
+  // spinner behaviour along with the spinner arrows.
+  function nudge(dir: 1 | -1) {
+    const base = Number.isNaN(parsed) ? value : parsed
+    const decimals = (String(step).split(".")[1] ?? "").length
+    const next = Number((base + dir * step).toFixed(decimals))
+    commit(String(Math.min(max, Math.max(min, next))))
+  }
+
   return (
     <div>
       <label
@@ -69,18 +141,35 @@ export function NumberField({
       {/* The unit sits beside the input, not over it: absolutely positioning it
           put it on top of the native spinner arrows, which clipped "min" and
           wrapped "€/kWh" out of the box. */}
-      <div className="flex items-center rounded-xl border border-ink-200 bg-white focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200">
+      <div
+        className={`flex items-center rounded-xl border bg-white ${
+          problem
+            ? "border-red-400 focus-within:border-red-500 focus-within:ring-2 focus-within:ring-red-200"
+            : "border-ink-200 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200"
+        }`}
+      >
         <input
           id={id}
-          type="number"
-          inputMode="numeric"
-          value={value}
-          min={min}
-          max={max}
-          step={step}
-          onChange={(e) => {
-            const n = Number(e.target.value)
-            if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)))
+          type="text"
+          // A decimal pad has no minus key, so anything that can go negative
+          // gets the full keyboard instead.
+          inputMode={min < 0 ? "text" : Number.isInteger(step) ? "numeric" : "decimal"}
+          autoComplete="off"
+          value={draft}
+          aria-invalid={problem !== null}
+          aria-describedby={problem ? `${id}-error` : undefined}
+          onChange={(e) => commit(e.target.value)}
+          // Tidy "040" back to "40" once you've stopped typing — never during,
+          // where rewriting the box under the cursor is what made this
+          // infuriating in the first place.
+          onBlur={() => {
+            if (problem === null && String(parsed) !== trimmed) setDraft(String(parsed))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault()
+              nudge(e.key === "ArrowUp" ? 1 : -1)
+            }
           }}
           className="min-w-0 flex-1 rounded-xl bg-transparent py-2.5 pl-3 pr-1 text-sm text-ink-900 outline-none"
         />
@@ -88,7 +177,13 @@ export function NumberField({
           {unit}
         </span>
       </div>
-      {readout && <p className="mt-1 text-xs leading-relaxed text-ink-500">{readout}</p>}
+      {problem ? (
+        <p id={`${id}-error`} className="mt-1 text-xs leading-relaxed text-red-600">
+          {problem}
+        </p>
+      ) : (
+        readout && <p className="mt-1 text-xs leading-relaxed text-ink-500">{readout}</p>
+      )}
     </div>
   )
 }

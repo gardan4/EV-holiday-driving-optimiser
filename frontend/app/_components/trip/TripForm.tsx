@@ -9,7 +9,7 @@ import { defaultDepartureIso } from "@/lib/format"
 import { describeTemp } from "@/lib/weather"
 import { freeflowFactorFor } from "@/lib/driving"
 import { describePayload } from "@/lib/payload"
-import { InfoTip, NumberField } from "./fields"
+import { InfoTip, NumberField, useNumberFieldValidity } from "./fields"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
 
@@ -36,6 +36,9 @@ export default function TripForm() {
   const [occupants, setOccupants] = useState(2)
   const [luggageKg, setLuggageKg] = useState(30)
   const [submitting, setSubmitting] = useState(false)
+  // A half-typed or emptied box must not be silently replaced by a default —
+  // it blocks the submit and shows red until it holds a real number.
+  const { allValid, onValidity } = useNumberFieldValidity()
 
   useEffect(() => {
     getVehicles()
@@ -46,7 +49,7 @@ export default function TripForm() {
       .catch(() => toast.error("Could not load the car list — is the API running?"))
   }, [])
 
-  const ready = origin && dest && vehicleId && !submitting
+  const ready = origin && dest && vehicleId && allValid && !submitting
 
   // Priced against this car at a typical 130 km/h cruise, so the figure moves
   // when you switch cars — a 58 kWh Born loses more range per kilo than a big
@@ -125,6 +128,7 @@ export default function TripForm() {
         </div>
         <NumberField
           id="temp"
+          onValidity={onValidity}
           label="Temperature"
           unit="°C"
           value={tempC}
@@ -140,6 +144,7 @@ export default function TripForm() {
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <NumberField
           id="occupants"
+          onValidity={onValidity}
           label="People aboard"
           unit="people"
           value={occupants}
@@ -151,6 +156,7 @@ export default function TripForm() {
         />
         <NumberField
           id="luggage"
+          onValidity={onValidity}
           label="Luggage"
           unit="kg"
           value={luggageKg}
@@ -225,6 +231,7 @@ export default function TripForm() {
 
           <NumberField
             id="over-cap"
+            onValidity={onValidity}
             label="Over the limit"
             unit="km/h"
             value={overCap}
@@ -243,6 +250,7 @@ export default function TripForm() {
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
               id="stop-overhead"
+              onValidity={onValidity}
               label="Time per stop"
               unit="min"
               value={stopOverhead}
@@ -253,6 +261,7 @@ export default function TripForm() {
             />
             <NumberField
               id="site-power"
+              onValidity={onValidity}
               label="Charger power you get"
               unit="%"
               value={sitePower}
@@ -269,6 +278,7 @@ export default function TripForm() {
             />
             <NumberField
               id="queue"
+              onValidity={onValidity}
               label="Queue for a charger"
               unit="min"
               value={queue}
@@ -283,6 +293,7 @@ export default function TripForm() {
             <div className="grid grid-cols-2 gap-3">
               <NumberField
                 id="rest-every"
+                onValidity={onValidity}
                 label="Break every"
                 unit="h"
                 value={restEveryH}
@@ -294,6 +305,7 @@ export default function TripForm() {
               />
               <NumberField
                 id="rest-min"
+                onValidity={onValidity}
                 label="Break length"
                 unit="min"
                 value={restMin}
@@ -306,6 +318,7 @@ export default function TripForm() {
             </div>
             <NumberField
               id="price"
+              onValidity={onValidity}
               label="Charging price"
               unit="€/kWh"
               value={price}
@@ -336,6 +349,11 @@ export default function TripForm() {
           </>
         )}
       </button>
+      {!allValid && (
+        <p className="mt-2 text-center text-xs text-red-600">
+          One of the numbers is empty or out of range — the field is marked in red.
+        </p>
+      )}
     </form>
   )
 }

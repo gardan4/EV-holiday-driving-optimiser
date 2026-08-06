@@ -129,6 +129,12 @@ docker compose -f docker-compose.local-db.yml up -d
   — a T-SQL **syntax error**. Use `Column == True  # noqa: E712`.
 - **Keep new columns MSSQL+SQLite portable** (tests run on aiosqlite): plain
   `JSON`, `GUID`, no filtered indexes.
+- **Number inputs hold a string, not the clamped number** (`trip/fields.tsx`).
+  Binding the box straight to a clamped `value` rewrites it on every keystroke:
+  clearing it snaps back to `min` (hence the "040" people kept typing) and
+  "0.59" is unreachable because "0." parses to 0 mid-word. An empty or
+  out-of-range box stays what you typed, turns red, and blocks submit via
+  `useNumberFieldValidity`.
 - **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless

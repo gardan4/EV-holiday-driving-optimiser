@@ -8,7 +8,7 @@ import { PlanRequest, Trip, Vehicle, planTrip } from "@/lib/client"
 import { freeflowFactorFor } from "@/lib/driving"
 import { auxKwForTemp, consumptionFactorForTemp, describeTemp } from "@/lib/weather"
 import { describePayload, extraWhPerKm, payloadExtraKg } from "@/lib/payload"
-import { NumberField } from "./fields"
+import { NumberField, useNumberFieldValidity } from "./fields"
 
 /**
  * Everything the answer rests on, in one place: what we assume about the car,
@@ -25,6 +25,9 @@ export default function Assumptions({ trip }: { trip: Trip }) {
   // question can't overwrite the old answer someone may already have been sent.
   const [draft, setDraft] = useState<PlanRequest>(trip.request)
   const [replanning, setReplanning] = useState(false)
+  // An emptied box keeps whatever it typed and blocks the re-plan, rather than
+  // quietly snapping back to a number nobody chose.
+  const { allValid, onValidity } = useNumberFieldValidity()
   const r = draft
   const tempC = r.temperature_c ?? null
 
@@ -123,21 +126,25 @@ export default function Assumptions({ trip }: { trip: Trip }) {
           <div className="grid grid-cols-2 gap-x-3 gap-y-3">
             <NumberField
               id="a-depart-soc" label="Battery at departure" unit="%"
+              onValidity={onValidity}
               value={r.depart_soc ?? 100} min={10} max={100} step={5}
               onChange={(x) => set("depart_soc", x)}
             />
             <NumberField
               id="a-target-soc" label="Arrive with at least" unit="%"
+              onValidity={onValidity}
               value={r.target_soc ?? 10} min={5} max={80} step={5}
               onChange={(x) => set("target_soc", x)}
             />
             <NumberField
               id="a-occupants" label="People aboard" unit="people"
+              onValidity={onValidity}
               value={occupants} min={1} max={9} step={1}
               onChange={(x) => set("occupants", x)}
             />
             <NumberField
               id="a-luggage" label="Luggage" unit="kg"
+              onValidity={onValidity}
               value={luggageKg} min={0} max={400} step={5}
               onChange={(x) => set("luggage_kg", x)}
             />
@@ -149,6 +156,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <div className="col-span-2">
               <NumberField
                 id="a-temp" label="Temperature" unit="°C"
+                onValidity={onValidity}
                 value={Math.round(tempC ?? 20)} min={-30} max={45}
                 onChange={(x) => set("temperature_c", x)}
                 readout={describeTemp(tempC ?? 20)}
@@ -157,6 +165,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <div className="col-span-2">
               <NumberField
                 id="a-autobahn" label="Autobahn actually open" unit="%"
+                onValidity={onValidity}
                 value={Math.round((r.autobahn_open_share ?? 0.3) * 100)} min={0} max={100} step={5}
                 onChange={(x) => set("autobahn_open_share", x / 100)}
                 readout="the rest is roadworks, traffic and posted limits"
@@ -165,6 +174,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <div className="col-span-2">
               <NumberField
                 id="a-over-cap" label="Over the posted limit" unit="km/h"
+                onValidity={onValidity}
                 value={Math.round(r.over_cap_kph ?? 0)} min={0} max={30}
                 onChange={(x) => {
                   set("over_cap_kph", x)
@@ -179,17 +189,20 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             </div>
             <NumberField
               id="a-stop" label="Time per stop" unit="min"
+              onValidity={onValidity}
               value={Math.round(r.stop_overhead_min ?? 5)} min={0} max={30}
               onChange={(x) => set("stop_overhead_min", x)}
             />
             <NumberField
               id="a-queue" label="Queue for a charger" unit="min"
+              onValidity={onValidity}
               value={Math.round(r.queue_min ?? 0)} min={0} max={30}
               onChange={(x) => set("queue_min", x)}
             />
             <div className="col-span-2">
               <NumberField
                 id="a-site-power" label="Charger power you get" unit="%"
+                onValidity={onValidity}
                 value={Math.round((r.site_power_factor ?? 1) * 100)} min={30} max={100} step={5}
                 onChange={(x) => set("site_power_factor", x / 100)}
                 readout={
@@ -201,17 +214,20 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             </div>
             <NumberField
               id="a-rest-every" label="Break every" unit="h"
+              onValidity={onValidity}
               value={Math.round((r.rest_interval_min ?? 0) / 60)} min={0} max={8}
               onChange={(x) => set("rest_interval_min", x * 60)}
             />
             <NumberField
               id="a-rest-min" label="Break length" unit="min"
+              onValidity={onValidity}
               value={Math.round(r.rest_min ?? 20)} min={0} max={120} step={5}
               onChange={(x) => set("rest_min", x)}
             />
             <div className="col-span-2">
               <NumberField
                 id="a-price" label="Charging price" unit="€/kWh"
+                onValidity={onValidity}
                 value={r.price_per_kwh ?? 0.59} min={0} max={3} step={0.01}
                 onChange={(x) => set("price_per_kwh", x)}
                 readout={
@@ -226,7 +242,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
           <button
             type="button"
             onClick={replan}
-            disabled={!dirty || replanning}
+            disabled={!dirty || !allValid || replanning}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-ink-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-ink-700 disabled:cursor-not-allowed disabled:bg-ink-100 disabled:text-ink-400"
           >
             {replanning ? (
