@@ -50,11 +50,13 @@ router = APIRouter()
 # Guard against degenerate/abusive sweeps: at most this many simulated speeds.
 MAX_SWEEP_POINTS = 40
 
-# Longest route we will plan. The coordinate bounds alone permit Portugal →
-# Finland, which is nobody's holiday drive but is ~200 upstream charger-tile
-# fetches, a multi-megabyte stored result, and a polyline big enough to make
-# every later operation on it expensive.
-MAX_ROUTE_M = 2_000_000.0
+# Longest route we will plan. Measured on Lisbon → Helsinki (4,379 km), which
+# is what the old 2000 km cap was drawn to exclude: the sweep itself costs
+# nothing (the DP is bounded by MAX_NODES, not by distance), the stored result
+# is ~0.9 MB rather than the several MB feared, and the corridor needs ~172 OCM
+# tiles — which one request now covers, because they are fetched concurrently.
+# 5000 km is about the longest drive any single landmass offers.
+MAX_ROUTE_M = 5_000_000.0
 
 
 def _vehicle_out(v: Vehicle) -> VehicleOut:

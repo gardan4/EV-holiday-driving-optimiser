@@ -60,12 +60,23 @@ MAX_PERP_M = 3_000.0          # ≤ 3 km off-route
 MIN_OFFSET_M = 50_000.0       # no stops in the first 50 km (battery still full)
 END_MARGIN_M = 10_000.0
 DEDUP_RADIUS_M = 500.0
-MAX_NODES = 60                # DP stays fast; prefer high power when trimming
+# Candidate chargers handed to the DP. A flat 60 is generous over 500 km and
+# starvation over 4000, so it scales with the route — the DP is bounded by this
+# number, not by distance, and 17 speeds over 4400 km measured at well under a
+# second with ~110 nodes.
+MIN_NODES = 60
+MAX_NODES = 160
+NODE_SPACING_M = 40_000.0
 
 # Upstream tile fetches allowed in one request. Each is sequential with a 20 s
 # timeout, so this bounds both worst-case latency and how much of the day's
 # free-tier OCM quota a single long route can spend.
-MAX_TILE_FETCHES = 20
+# One request now covers a corridor of any length we allow: 5000 km needs
+# ~200 tiles, and they are fetched concurrently rather than one at a time.
+MAX_TILE_FETCHES = 220
+# Modest on purpose — the point is to stop waiting serially, not to hammer a
+# free API into rate-limiting us.
+TILE_FETCH_CONCURRENCY = 6
 
 # Set when the cap above stopped us fetching the whole corridor, so the caller
 # can tell "there are no chargers here" apart from "we haven't looked yet".
@@ -123,7 +134,12 @@ def _tile_key(geohash: str) -> str:
     return f"{geohash}:{OCM_QUERY_VERSION}"
 
 
-async def _fetch_tile(db: AsyncSession, tile_key: str) -> None:
+async def _fetch_tile_http(tile_key: str) -> list[dict] | None:
+    """The upstream half of a tile fetch: no database, so these can run
+    concurrently. None means the call failed and the tile should be backed off.
+
+    Split from the persistence half deliberately — an AsyncSession is not
+    concurrency-safe, so the writes stay sequential while the waiting doesn't."""
     lat_lo, lon_lo, lat_hi, lon_hi = geohash_bbox(tile_key.split(":")[0])
     params = {
         "output": "json",
@@ -139,13 +155,19 @@ async def _fetch_tile(db: AsyncSession, tile_key: str) -> None:
     try:
         resp = await _http().get(OCM_BASE, params=params, headers=headers)
         resp.raise_for_status()
-        pois = resp.json()
+        return resp.json()
     except httpx.HTTPError as exc:
+        logger.warning("OCM fetch failed for tile %s: %s", tile_key, exc)
+        return None
+
+
+async def _persist_tile(db: AsyncSession, tile_key: str, pois: list[dict] | None) -> None:
+    """The database half. Sequential by construction."""
+    if pois is None:
         # Degrade gracefully: stale/absent tile data just means fewer candidate
         # chargers this run. Stamp the tile far enough in the past that it is
         # retried in FAILED_TILE_BACKOFF_MIN rather than on the very next plan —
         # otherwise the first 429 turns every later request into another one.
-        logger.warning("OCM fetch failed for tile %s: %s", tile_key, exc)
         backdated = (
             datetime.utcnow()
             - timedelta(hours=settings.CHARGER_CACHE_TTL_HOURS)
@@ -184,6 +206,43 @@ async def _fetch_tile(db: AsyncSession, tile_key: str) -> None:
     logger.info("OCM tile %s: %d POIs (%d new)", tile_key, len(pois), n_new)
 
 
+def _trim_nodes(nodes: list[ChargerNode], total_m: float) -> list[ChargerNode]:
+    """Cap the candidate list, keeping the strongest chargers WITHOUT leaving a
+    hole in the route.
+
+    The obvious `sorted(by -power)[:N]` is wrong on a long route: the most
+    powerful sites cluster (the German 350 kW belt), so a Lisbon → Helsinki
+    corridor kept its 60 best and left Scandinavia with nothing, which reads
+    back as "no feasible plan at any speed". Bucketing by distance first
+    guarantees the route stays covered; power decides who wins each bucket, and
+    any spare slots then go to the strongest of whoever is left.
+    """
+    budget = int(min(MAX_NODES, max(MIN_NODES, total_m / NODE_SPACING_M)))
+    if len(nodes) <= budget:
+        return nodes
+
+    buckets: dict[int, list[ChargerNode]] = {}
+    for n in nodes:
+        i = min(budget - 1, int(n.offset_m / total_m * budget)) if total_m > 0 else 0
+        buckets.setdefault(i, []).append(n)
+
+    kept, spare = [], []
+    for i in sorted(buckets):
+        best, *rest = sorted(buckets[i], key=lambda n: -n.power_kw)
+        kept.append(best)
+        spare.extend(rest)
+
+    room = budget - len(kept)
+    if room > 0:
+        kept.extend(sorted(spare, key=lambda n: -n.power_kw)[:room])
+    kept.sort(key=lambda n: n.offset_m)
+    logger.info(
+        "trimming charger nodes %d → %d over %.0f km (%d distance buckets)",
+        len(nodes), len(kept), total_m / 1000, len(buckets),
+    )
+    return kept
+
+
 async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[ChargerNode]:
     geom = route.geometry
 
@@ -219,8 +278,18 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
             MAX_TILE_FETCHES,
         )
         stale = stale[:MAX_TILE_FETCHES]
-    for tile_key in stale:
-        await _fetch_tile(db, tile_key)
+    # Fetch upstream concurrently, then write sequentially. Sequentially all
+    # the way through, a cold 4000 km corridor is ~170 tiles of pure waiting —
+    # which is what made a long route need eight or nine "try again" attempts
+    # before it could be planned at all.
+    sem = asyncio.Semaphore(TILE_FETCH_CONCURRENCY)
+
+    async def fetch(tile_key: str) -> tuple[str, list[dict] | None]:
+        async with sem:
+            return tile_key, await _fetch_tile_http(tile_key)
+
+    for tile_key, pois in await asyncio.gather(*(fetch(t) for t in stale)):
+        await _persist_tile(db, tile_key, pois)
 
     # 3. Pull cached chargers in the corridor bbox (coarse), then project.
     lats = [la for la, _ in geom.coords]
@@ -308,11 +377,8 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
             continue
         deduped.append(n)
 
-    # 5. Cap the node count, preferring high power, keep route order.
-    if len(deduped) > MAX_NODES:
-        logger.info("trimming charger nodes %d → %d (keeping highest power)", len(deduped), MAX_NODES)
-        deduped = sorted(deduped, key=lambda n: -n.power_kw)[:MAX_NODES]
-        deduped.sort(key=lambda n: n.offset_m)
+    # 5. Cap the node count — by power, but never at the cost of coverage.
+    deduped = _trim_nodes(deduped, geom.total_m)
 
     logger.info("corridor chargers: %d candidates → %d nodes", len(candidates), len(deduped))
     return deduped

@@ -227,3 +227,48 @@ class TestGoldenBornAustria:
         sweep(segs, chargers, BORN_58, speeds, SimParams())
         elapsed = time.perf_counter() - t0
         assert elapsed < 1.0, f"sweep took {elapsed:.2f}s (budget 1s)"
+
+
+class TestChargerNodeTrimming:
+    """Capping the candidate list must never open a hole in the route."""
+
+    def _nodes(self):
+        from app.services.simulator import ChargerNode
+
+        # A 4000 km route: a dense belt of 350 kW sites in the first 800 km
+        # (Germany, in effect) and sparse 150 kW ones all the way to the end.
+        strong = [
+            ChargerNode(charger_id=f"s{i}", name=f"strong {i}",
+                        offset_m=float(i * 5_000), power_kw=350.0)
+            for i in range(160)
+        ]
+        weak = [
+            ChargerNode(charger_id=f"w{i}", name=f"weak {i}",
+                        offset_m=float(800_000 + i * 40_000), power_kw=150.0)
+            for i in range(80)
+        ]
+        return sorted(strong + weak, key=lambda n: n.offset_m)
+
+    def test_keeps_coverage_past_the_powerful_cluster(self):
+        """`sorted(by -power)[:60]` kept only the 350 kW belt and left the rest
+        of the route empty, which surfaced as "no feasible plan at any speed"
+        on every long trip."""
+        from app.services.chargers import _trim_nodes
+
+        total_m = 4_000_000.0
+        kept = _trim_nodes(self._nodes(), total_m)
+
+        assert kept == sorted(kept, key=lambda n: n.offset_m), "route order preserved"
+        # The half of the route beyond the cluster must still be reachable.
+        far = [n for n in kept if n.offset_m > 2_000_000.0]
+        assert len(far) >= 20, f"only {len(far)} nodes in the far half of the route"
+        # No gap wide enough to strand a car with any usable range.
+        offsets = [0.0] + [n.offset_m for n in kept] + [total_m]
+        widest = max(b - a for a, b in zip(offsets, offsets[1:]))
+        assert widest < 200_000, f"{widest / 1000:.0f} km gap between candidates"
+
+    def test_short_route_is_left_alone(self):
+        from app.services.chargers import _trim_nodes
+
+        nodes = self._nodes()[:30]
+        assert _trim_nodes(nodes, 500_000.0) == nodes
