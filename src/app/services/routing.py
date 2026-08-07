@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import RouteCache
-from app.services.geo import COVERAGE_BOX, RouteGeometry, country_at, geohash_encode
+from app.services.geo import RouteGeometry, country_at, geohash_encode
 from app.services.simulator import RouteSegment
 
 logger = logging.getLogger(__name__)
@@ -138,13 +138,6 @@ async def geocode(q: str, size: int = 5) -> list[dict]:
                 "text": q,
                 "size": size,
                 "layers": "locality,localadmin,borough,address,venue",
-                # Confine the suggestions to the corridor `PlacePoint` accepts.
-                # Unbounded, the box happily offered Los Angeles or Tenerife and
-                # the plan then died on a coordinate-range error.
-                "boundary.rect.min_lat": COVERAGE_BOX[0],
-                "boundary.rect.max_lat": COVERAGE_BOX[1],
-                "boundary.rect.min_lon": COVERAGE_BOX[2],
-                "boundary.rect.max_lon": COVERAGE_BOX[3],
             },
         )
         resp.raise_for_status()

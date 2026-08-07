@@ -3,9 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from app.services.geo import within_coverage
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -48,20 +46,16 @@ class GeocodeHit(BaseModel):
 
 
 class PlacePoint(BaseModel):
+    """Anywhere on Earth. The planner used to refuse everything outside a
+    European corridor; now the only geographic limit is whether ORS can find a
+    drivable route, which it answers with a clear message of its own. Note the
+    per-country speed caps only cover the European countries in
+    `simulator._default_country_caps` — elsewhere the generic default applies,
+    which the assumptions panel says out loud."""
+
     label: str = Field(max_length=200)
     lat: float = Field(ge=-90.0, le=90.0)
     lon: float = Field(ge=-180.0, le=180.0)
-
-    # The corridor check lives here rather than on the fields: as `ge`/`le`
-    # bounds it surfaced to the user as "Input should be greater than or equal
-    # to -11" — three times over, once per offending coordinate — which says
-    # nothing about what went wrong or what to do about it.
-    @model_validator(mode="after")
-    def _within_coverage(self) -> "PlacePoint":
-        if not within_coverage(self.lat, self.lon):
-            where = self.label or "That place"
-            raise ValueError(f"{where} is outside the area this planner covers (mainland Europe).")
-        return self
 
 
 class PlanRequest(BaseModel):
@@ -179,8 +173,8 @@ class StartRunRequest(BaseModel):
     # plan was made with. `ge=0` on purpose — unlike `PlanRequest`, a live
     # driver can genuinely be at 6%.
     depart_soc: float = Field(ge=0.0, le=100.0)
-    lat: float = Field(ge=35.0, le=62.0)
-    lon: float = Field(ge=-11.0, le=25.0)
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
     # Abandon a drive that's already under way and start a fresh one. Requires
     # the caller to have been told one exists (409), so nobody replaces a live
     # drive by accident — including their own, from another device.
@@ -188,8 +182,10 @@ class StartRunRequest(BaseModel):
 
 
 class PingRequest(BaseModel):
-    lat: float = Field(ge=35.0, le=62.0)
-    lon: float = Field(ge=-11.0, le=25.0)
+    # Worldwide, like the trip itself: a drive that could be planned must be
+    # drivable, and a ping rejected mid-route strands the driver.
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
     # Kinematics since the previous ping. Splitting moving from stationary is
     # what keeps the v² drag term honest: energy is convex in speed, so a plain
     # average over a traffic jam under-bills the motorway either side of it.
