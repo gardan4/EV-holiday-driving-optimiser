@@ -49,6 +49,19 @@ _CHINA_CAVEAT = (
     "here, so treat the curve — especially above 70% SoC — as indicative."
 )
 
+_US_NOTE = (
+    "Approximated from published EPA figures and fast-charge tests. American "
+    "cars are rated on the EPA cycle rather than WLTP, and the consumption fit "
+    "here is a motorway fit, so it will not reproduce an EPA range figure — "
+    "that is the point, since EPA combined understates a 120 km/h cruise badly."
+)
+
+_TRUCK_NOTE = (
+    "A 2.7-tonne brick: the quadratic term is roughly double a saloon's, so "
+    "speed costs it far more than it costs anything European in this list. "
+    + _US_NOTE
+)
+
 _BYD_BLADE_NOTE = (
     "BYD Blade LFP pack: a modest peak held broadly flat rather than a tall "
     "spike, and a long slow tail, so these cars want to be unplugged early. "
@@ -201,6 +214,130 @@ VEHICLES: list[dict] = [
         "source_note": "Model 3 Long Range pack and curve in a taller body — same "
         "charging, noticeably more drag. Curated from Fastned/InsideEVs tests.",
         "sort_order": 32,
+    },
+    {
+        "slug": "tesla-model3-performance",
+        "make": "Tesla",
+        "model": "Model 3",
+        "variant": "Performance 79 kWh",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0099},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 1980.0,
+        "top_speed_kph": 262.0,
+        "source_note": "Long Range pack, stickier tyres and more mass — the same "
+        "charging with a consumption penalty that grows with speed. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 33,
+    },
+    {
+        "slug": "tesla-modely-rwd",
+        "make": "Tesla",
+        "model": "Model Y",
+        "variant": "RWD (LFP 57.5 kWh)",
+        "usable_kwh": 57.5,
+        "consumption": {"model": "quadratic", "a_wh_km": 53.0, "b_wh_km_per_kph2": 0.0096},
+        "charge_curve": [
+            [0, 80], [10, 170], [20, 170], [30, 150], [40, 130], [50, 110],
+            [60, 85], [70, 65], [80, 45], [90, 30], [100, 15],
+        ],
+        "max_dc_kw": 170.0,
+        "mass_kg": 1910.0,
+        "top_speed_kph": 217.0,
+        "source_note": "The volume Model Y: LFP pack, flat mid-SoC curve, and the "
+        "smallest battery of any Tesla here — it stops often. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 34,
+    },
+    {
+        "slug": "tesla-modely-performance",
+        "make": "Tesla",
+        "model": "Model Y",
+        "variant": "Performance 79 kWh",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0107},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2140.0,
+        "top_speed_kph": 250.0,
+        "source_note": "Curated from Fastned/InsideEVs tests.",
+        "sort_order": 35,
+    },
+    {
+        "slug": "tesla-models-lr",
+        "make": "Tesla",
+        "model": "Model S",
+        "variant": "Long Range 95 kWh",
+        "usable_kwh": 95.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 52.0, "b_wh_km_per_kph2": 0.0089},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2110.0,
+        "top_speed_kph": 250.0,
+        "source_note": "Big pack, low drag: one of the few cars here that can hold a "
+        "high cruise without the stops multiplying. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 36,
+    },
+    {
+        "slug": "tesla-models-plaid",
+        "make": "Tesla",
+        "model": "Model S",
+        "variant": "Plaid 95 kWh",
+        "usable_kwh": 95.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0097},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2190.0,
+        "top_speed_kph": 262.0,
+        "source_note": "Fast enough to run off the top of the sweep — the answer is "
+        "usually still a long way below what it will do. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 37,
+    },
+    {
+        "slug": "tesla-modelx-lr",
+        "make": "Tesla",
+        "model": "Model X",
+        "variant": "Long Range 95 kWh",
+        "usable_kwh": 95.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 68.0, "b_wh_km_per_kph2": 0.0122},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2455.0,
+        "top_speed_kph": 250.0,
+        "source_note": "Model S pack in a much bigger body — the drag difference is "
+        "the whole story between the two. Curated from Fastned/InsideEVs tests.",
+        "sort_order": 38,
+    },
+    {
+        "slug": "tesla-modelx-plaid",
+        "make": "Tesla",
+        "model": "Model X",
+        "variant": "Plaid 95 kWh",
+        "usable_kwh": 95.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 72.0, "b_wh_km_per_kph2": 0.0129},
+        "charge_curve": [
+            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
+            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 2535.0,
+        "top_speed_kph": 262.0,
+        "source_note": "Curated from Fastned/InsideEVs tests.",
+        "sort_order": 39,
     },
     {
         "slug": "skoda-enyaq-77",
@@ -618,6 +755,154 @@ VEHICLES: list[dict] = [
         + " The slowest charger here by some margin: a 70 kWh SUV that only takes "
         "~84 kW, so every stop is long and the optimum speed drops accordingly.",
         "sort_order": 115,
+    },
+    {
+        "slug": "ford-f150-lightning-er",
+        "make": "Ford",
+        "model": "F-150 Lightning",
+        "variant": "Extended Range 131 kWh",
+        "usable_kwh": 131.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 118.0, "b_wh_km_per_kph2": 0.0205},
+        "charge_curve": [
+            [0, 90], [5, 150], [10, 155], [20, 150], [30, 135], [40, 120],
+            [50, 100], [60, 82], [70, 62], [80, 45], [90, 25], [100, 10],
+        ],
+        "max_dc_kw": 155.0,
+        "mass_kg": 2950.0,
+        "top_speed_kph": 180.0,
+        "source_note": _TRUCK_NOTE
+        + " America's best-selling vehicle in electric form, and the clearest "
+        "case in the catalog for slowing down: a huge pack that charges no "
+        "faster than a VW ID.4.",
+        "sort_order": 120,
+    },
+    {
+        "slug": "ford-mustang-mach-e-er",
+        "make": "Ford",
+        "model": "Mustang Mach-E",
+        "variant": "Extended Range RWD 91 kWh",
+        "usable_kwh": 91.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 72.0, "b_wh_km_per_kph2": 0.0128},
+        "charge_curve": [
+            [0, 100], [5, 145], [10, 150], [20, 145], [30, 130], [40, 112],
+            [50, 92], [60, 74], [70, 56], [80, 40], [90, 22], [100, 9],
+        ],
+        "max_dc_kw": 150.0,
+        "mass_kg": 2200.0,
+        "top_speed_kph": 180.0,
+        "source_note": _US_NOTE,
+        "sort_order": 121,
+    },
+    {
+        "slug": "chevrolet-bolt-euv",
+        "make": "Chevrolet",
+        "model": "Bolt EUV",
+        "variant": "65 kWh",
+        "usable_kwh": 65.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 63.0, "b_wh_km_per_kph2": 0.0121},
+        "charge_curve": [
+            [0, 40], [5, 54], [10, 55], [20, 55], [30, 55], [40, 55],
+            [50, 50], [60, 44], [70, 36], [80, 27], [90, 16], [100, 7],
+        ],
+        "max_dc_kw": 55.0,
+        "mass_kg": 1680.0,
+        "top_speed_kph": 145.0,
+        "source_note": _US_NOTE
+        + " The slowest DC charging in this catalog by a wide margin — 55 kW flat. "
+        "On a long route it is the extreme case of the whole thesis: driving "
+        "faster buys stops it can never win back.",
+        "sort_order": 122,
+    },
+    {
+        "slug": "chevrolet-equinox-ev",
+        "make": "Chevrolet",
+        "model": "Equinox EV",
+        "variant": "LT FWD 85 kWh",
+        "usable_kwh": 85.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 70.0, "b_wh_km_per_kph2": 0.0126},
+        "charge_curve": [
+            [0, 100], [5, 150], [10, 150], [20, 145], [30, 130], [40, 112],
+            [50, 92], [60, 74], [70, 56], [80, 40], [90, 22], [100, 9],
+        ],
+        "max_dc_kw": 150.0,
+        "mass_kg": 2200.0,
+        "top_speed_kph": 160.0,
+        "source_note": _US_NOTE + " GM's Ultium platform at the volume end.",
+        "sort_order": 123,
+    },
+    {
+        "slug": "rivian-r1t-large",
+        "make": "Rivian",
+        "model": "R1T",
+        "variant": "Large Pack AWD 135 kWh",
+        "usable_kwh": 135.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 108.0, "b_wh_km_per_kph2": 0.0186},
+        "charge_curve": [
+            [0, 120], [5, 200], [10, 215], [20, 210], [30, 190], [40, 165],
+            [50, 138], [60, 112], [70, 85], [80, 60], [90, 33], [100, 13],
+        ],
+        "max_dc_kw": 215.0,
+        "mass_kg": 3130.0,
+        "top_speed_kph": 180.0,
+        "source_note": _TRUCK_NOTE
+        + " Charges far harder than the Lightning, which is what makes the pair "
+        "worth comparing on the same route.",
+        "sort_order": 124,
+    },
+    {
+        "slug": "lucid-air-grand-touring",
+        "make": "Lucid",
+        "model": "Air",
+        "variant": "Grand Touring 112 kWh",
+        "usable_kwh": 112.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 52.0, "b_wh_km_per_kph2": 0.0092},
+        "charge_curve": [
+            [0, 130], [5, 250], [10, 300], [20, 290], [30, 260], [40, 225],
+            [50, 185], [60, 148], [70, 112], [80, 78], [90, 42], [100, 16],
+        ],
+        "max_dc_kw": 300.0,
+        "mass_kg": 2360.0,
+        "top_speed_kph": 270.0,
+        "source_note": _US_NOTE
+        + " A 900 V pack and the most efficient car here: the combination that "
+        "pushes the optimum cruise speed to the top of the sweep.",
+        "sort_order": 125,
+    },
+    {
+        "slug": "cadillac-lyriq",
+        "make": "Cadillac",
+        "model": "Lyriq",
+        "variant": "RWD 102 kWh",
+        "usable_kwh": 102.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 78.0, "b_wh_km_per_kph2": 0.0138},
+        "charge_curve": [
+            [0, 120], [5, 185], [10, 190], [20, 185], [30, 165], [40, 142],
+            [50, 118], [60, 95], [70, 72], [80, 50], [90, 28], [100, 11],
+        ],
+        "max_dc_kw": 190.0,
+        "mass_kg": 2650.0,
+        "top_speed_kph": 210.0,
+        "source_note": _US_NOTE,
+        "sort_order": 126,
+    },
+    {
+        "slug": "tesla-cybertruck-awd",
+        "make": "Tesla",
+        "model": "Cybertruck",
+        "variant": "AWD 123 kWh",
+        "usable_kwh": 123.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 100.0, "b_wh_km_per_kph2": 0.0172},
+        "charge_curve": [
+            [0, 130], [5, 230], [10, 250], [20, 245], [30, 220], [40, 190],
+            [50, 158], [60, 128], [70, 97], [80, 68], [90, 37], [100, 15],
+        ],
+        "max_dc_kw": 250.0,
+        "mass_kg": 3100.0,
+        "top_speed_kph": 180.0,
+        "source_note": _TRUCK_NOTE
+        + " An 800 V pack on a truck-shaped brick — fast charging fighting bad "
+        "aerodynamics.",
+        "sort_order": 127,
     },
 ]
 
