@@ -90,6 +90,17 @@ the pipeline is green before infra exists. Infra deploy is manual
   Google Maps deep links cover navigation. Keeps CSP self-hosted.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,
   charge to ~60-80%", not hardcode it (tests assert this emerges).
+- **The planner is worldwide, the speed caps are not.** Any place ORS can route
+  between is plannable; `simulator._default_country_caps` only knows eight
+  western-European countries and everywhere else falls back to
+  `default_country_cap_kph` (130), which is too high for most of the world.
+  The assumptions panel says so — keep it saying so until real caps exist.
+- **OCM connector ids are regional** (`chargers.DC_CONNECTION_TYPES`). CCS Type 2
+  alone is Europe; North America is CCS Type 1 + NACS, Japan CHAdeMO, China
+  GB/T. Filtering to one plug is why a US route once found zero chargers.
+  Changing that query means bumping `OCM_QUERY_VERSION` — it is part of the
+  tile cache key, and without the bump every tile keeps serving its old answer
+  for the full 14-day TTL.
 - **ORS free-flow under-caps fast roads**, so motorway-like segments
   (free-flow ≥ 105) use country legal caps instead; disclosed in the UI's
   assumptions accordion. The naive clamp survives behind

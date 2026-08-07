@@ -194,6 +194,17 @@ async def plan_trip(
     )
     best = optimum(results)
     if best is None:
+        # A corridor nobody has planned before needs more charger tiles than one
+        # request is allowed to fetch, so the first attempt can see only part of
+        # it. Saying "no chargers exist" there is simply false — and it became
+        # the common case the moment routes stopped being confined to Europe,
+        # where the tiles were already warm.
+        if chargers_svc.corridor_incomplete.get():
+            raise HTTPException(
+                status_code=503,
+                detail="Still gathering charger data for this route — "
+                "give it a moment and try again.",
+            )
         raise HTTPException(
             status_code=422,
             detail="No feasible plan at any speed — no fast chargers found along "

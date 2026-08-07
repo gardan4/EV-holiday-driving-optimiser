@@ -280,6 +280,17 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               the road&apos;s own driving speed governs.
             </li>
             <li>
+              {/* The planner routes worldwide, but only these eight countries have
+                  their real limits modelled. Saying so matters most exactly where
+                  it's wrong: a US interstate is 105-120, so an unflagged 130 would
+                  quietly recommend a cruise speed that isn't legal there. */}
+              <b className="font-semibold text-ink-700">Outside western Europe.</b> Real
+              legal limits are modelled for DE, NL, BE, LU, FR, CH, AT and IT. Anywhere
+              else the motorway cap falls back to a generic 130 km/h, which is too high
+              in a lot of the world — check your local limit before trusting the speed
+              this recommends.
+            </li>
+            <li>
               <b className="font-semibold text-ink-700">Elevation.</b>{" "}
               {(trip.result.climb_m / 1000).toFixed(1)} km of cumulative climb on this
               route, costing energy on the way up and giving about two-thirds of it back

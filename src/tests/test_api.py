@@ -144,24 +144,49 @@ class TestPlanTrip:
         )
         assert resp.status_code == 422
 
-    async def test_out_of_bounds_coords_422(self, client):
+    async def test_impossible_coords_422(self, client):
         vid = await vehicle_id(client)
         body = plan_body(vid)
-        body["origin"]["lat"] = 10.0  # outside the EU corridor bounds
+        body["origin"]["lat"] = 200.0  # not a latitude at all
         resp = await client.post("/api/trips", json=body)
         assert resp.status_code == 422
 
-    async def test_out_of_coverage_says_so_in_words(self, client):
-        """A place outside Europe used to come back as three copies of "Input
-        should be greater than or equal to -11", which told the user nothing."""
+    async def test_plans_outside_europe(self, client):
+        """The planner was boxed into a European corridor and refused
+        everything else outright. Geography is now ORS's call — if it can find
+        a drivable route, we plan it."""
         vid = await vehicle_id(client)
         body = plan_body(vid)
-        body["origin"] |= {"label": "Los Angeles", "lat": 34.05, "lon": -118.24}
+        body["origin"] |= {"label": "Los Angeles, CA", "lat": 34.05, "lon": -118.24}
+        body["dest"] |= {"label": "Las Vegas, NV", "lat": 36.17, "lon": -115.14}
         resp = await client.post("/api/trips", json=body)
-        assert resp.status_code == 422
-        msgs = " ".join(d["msg"] for d in resp.json()["detail"])
-        assert "Los Angeles" in msgs and "outside the area" in msgs
-        assert "greater than or equal" not in msgs
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["result"]["optimum_speed"] is not None
+
+    async def test_cold_corridor_says_try_again_not_no_chargers(self, client, monkeypatch):
+        """A corridor nobody has planned before is fetched in capped batches, so
+        the first attempt can see only part of it. Reporting that as "no fast
+        chargers found" is false, and it is the normal first experience of any
+        route outside the warm European tiles."""
+        from app.api import trips as trips_mod
+        from app.services import chargers as chargers_mod
+
+        async def no_chargers(db, r):
+            chargers_mod.corridor_incomplete.set(True)
+            return []
+
+        monkeypatch.setattr(trips_mod.chargers_svc, "chargers_for_route", no_chargers)
+        vid = await vehicle_id(client)
+        resp = await client.post("/api/trips", json=plan_body(vid))
+        assert resp.status_code == 503
+        assert "try again" in resp.json()["detail"]
+
+    async def test_live_run_accepts_non_european_gps(self, client):
+        """A drive that can be planned must be drivable: the ping bounds used
+        to reject any fix outside the corridor, stranding the driver."""
+        from app.api.schemas import PingRequest
+
+        PingRequest(lat=34.05, lon=-118.24)  # no ValidationError
 
     async def test_depart_below_target_422(self, client):
         vid = await vehicle_id(client)

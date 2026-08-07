@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 import httpx
@@ -31,8 +32,30 @@ OCM_BASE = "https://api.openchargemap.io/v3/poi"
 SAMPLE_SPACING_M = 25_000.0
 TILE_PRECISION = 4
 MIN_POWER_KW = 100.0          # DC fast only — below this a stop rarely wins
-CCS_CONNECTION_TYPE = 33      # CCS (Type 2 Combo)
+# DC fast connectors, worldwide. Ids are OCM's own (/v3/referencedata).
+# This was `33` alone — CCS Type 2, the European plug — which is why a US
+# route came back with zero chargers and "no feasible plan at any speed":
+# North America is CCS Type 1 and NACS, Japan CHAdeMO, China GB/T. The extra
+# ids simply do not occur in Europe, so European results are unchanged.
+# `minpowerkw` is what actually enforces "fast"; this list only decides which
+# plug shapes count. Note the planner does NOT model plug compatibility —
+# a NACS stall is offered to any car, adapter or not.
+DC_CONNECTION_TYPES = (
+    33,    # CCS (Type 2)            — Europe
+    32,    # CCS (Type 1)            — North America
+    27,    # NACS / Tesla Supercharger
+    30,    # Tesla (Model S/X)
+    2,     # CHAdeMO
+    1044,  # ChaoJi / CHAdeMO 3.x
+    1040,  # GB-T DC                 — China
+)
 OPERATIONAL_STATUS = 50
+# Bump whenever the OCM query above changes what a tile would return. The tile
+# key carries it, so widening the connector list retires every tile fetched
+# under the old one instead of serving its cached answer for another 14 days —
+# which is exactly what made a US route keep reporting "no chargers" after the
+# filter was already fixed.
+OCM_QUERY_VERSION = 2
 MAX_PERP_M = 3_000.0          # ≤ 3 km off-route
 MIN_OFFSET_M = 50_000.0       # no stops in the first 50 km (battery still full)
 END_MARGIN_M = 10_000.0
@@ -43,6 +66,13 @@ MAX_NODES = 60                # DP stays fast; prefer high power when trimming
 # timeout, so this bounds both worst-case latency and how much of the day's
 # free-tier OCM quota a single long route can spend.
 MAX_TILE_FETCHES = 20
+
+# Set when the cap above stopped us fetching the whole corridor, so the caller
+# can tell "there are no chargers here" apart from "we haven't looked yet".
+# A ContextVar rather than a return value: it keeps `chargers_for_route`'s
+# signature (and its stub in the tests) unchanged, and is per-task, so
+# concurrent requests can't read each other's flag.
+corridor_incomplete: ContextVar[bool] = ContextVar("corridor_incomplete", default=False)
 
 # How long a tile that FAILED upstream is left alone before retrying. Without
 # this, an OCM outage or a 429 makes every subsequent plan on that corridor
@@ -87,12 +117,18 @@ def _parse_poi(poi: dict) -> dict | None:
     }
 
 
+def _tile_key(geohash: str) -> str:
+    """Cache key for a tile: the geohash plus the query version behind it.
+    ':' is not in the geohash alphabet, so the split is unambiguous."""
+    return f"{geohash}:{OCM_QUERY_VERSION}"
+
+
 async def _fetch_tile(db: AsyncSession, tile_key: str) -> None:
-    lat_lo, lon_lo, lat_hi, lon_hi = geohash_bbox(tile_key)
+    lat_lo, lon_lo, lat_hi, lon_hi = geohash_bbox(tile_key.split(":")[0])
     params = {
         "output": "json",
         "boundingbox": f"({lat_lo},{lon_lo}),({lat_hi},{lon_hi})",
-        "connectiontypeid": str(CCS_CONNECTION_TYPE),
+        "connectiontypeid": ",".join(str(i) for i in DC_CONNECTION_TYPES),
         "minpowerkw": str(int(MIN_POWER_KW)),
         "statustypeid": str(OPERATIONAL_STATUS),
         "maxresults": "200",
@@ -155,7 +191,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
     tiles: list[str] = []
     seen: set[str] = set()
     for lat, lon in geom.sample_every(SAMPLE_SPACING_M):
-        key = geohash_encode(lat, lon, TILE_PRECISION)
+        key = _tile_key(geohash_encode(lat, lon, TILE_PRECISION))
         if key not in seen:
             seen.add(key)
             tiles.append(key)
@@ -170,6 +206,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         if t.fetched_at > cutoff
     }
     stale = [t for t in tiles if t not in fresh]
+    corridor_incomplete.set(len(stale) > MAX_TILE_FETCHES)
     logger.info("corridor: %d tiles (%d fresh, %d to fetch)", len(tiles), len(fresh), len(stale))
     # Cap the upstream burst. Each tile is a sequential 20 s-timeout call, so an
     # uncapped first-time long route could sit here for minutes and spend a
