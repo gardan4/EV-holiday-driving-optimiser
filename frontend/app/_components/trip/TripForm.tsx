@@ -114,7 +114,8 @@ export default function TripForm() {
         <VehiclePicker vehicles={vehicles} value={vehicleId} onChange={setVehicleId} />
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <FieldGroup title="When you leave" hint="weather moves the best speed more than anything else here">
+        <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label
             htmlFor="departure"
@@ -143,9 +144,11 @@ export default function TripForm() {
           explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one — it can move the best cruise speed down by 30 km/h."
           readout={describeTemp(tempC)}
         />
-      </div>
+        </div>
+      </FieldGroup>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <FieldGroup title="What you’re carrying" hint="weight costs energy on every climb">
+        <div className="grid gap-4 sm:grid-cols-2">
         <NumberField
           id="occupants"
           onValidity={onValidity}
@@ -171,9 +174,11 @@ export default function TripForm() {
           explain="Suitcases, ski gear, the roof box's contents. Note the model prices the WEIGHT only: a roof box or bike rack also wrecks the aerodynamics, which at motorway speed usually costs far more than whatever is inside it."
           readout={payloadReadout}
         />
-      </div>
+        </div>
+      </FieldGroup>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <FieldGroup title="Battery" hint="how full you set off, and what you want left on arrival">
+        <div className="grid gap-4 sm:grid-cols-2">
         <SocSlider
           id="depart-soc"
           label="Battery at departure"
@@ -192,108 +197,121 @@ export default function TripForm() {
           max={80}
           onChange={setTargetSoc}
         />
-      </div>
+        </div>
+      </FieldGroup>
+
+      {/* Promoted out of the accordion. These decide what speed is even
+          legal, so the answer is built on them — and outside western
+          Europe the default is a guess the reader has to correct. Behind a
+          closed "fine-tune" panel, nobody corrected it. */}
+      <FieldGroup
+        title="How you drive"
+        hint="the answer is built on these"
+      >
+        <div className="space-y-4">
+        {/* The whole point of the tool is that fast driving isn't free, so
+            the honest way to argue with a speed limit is to let people see
+            what removing it actually buys — usually another charging stop. */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 bg-white px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={noLimits}
+            onChange={(e) => setNoLimits(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+          />
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-ink-900">
+              Ignore speed limits entirely
+            </span>
+            <span className="block text-xs leading-relaxed text-ink-500">
+              Every motorway treated as derestricted, so your cruise speed is the
+              only limit — what the drive would look like if the law weren&apos;t
+              there. Ordinary roads still go at their own pace.
+            </span>
+          </span>
+        </label>
+
+        <div className={`grid gap-4 sm:grid-cols-2 ${noLimits ? "sm:grid-cols-1" : ""}`}>
+        <div className={noLimits ? "hidden" : undefined}>
+        <NumberField
+          id="motorway-cap"
+          onValidity={onValidity}
+          label="Motorway limit"
+          unit="km/h"
+          value={motorwayCap}
+          min={80}
+          max={200}
+          step={5}
+          onChange={setMotorwayCap}
+          explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this — everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
+          readout={
+            motorwayCap === 130
+              ? "130 is a western-European motorway — lower it elsewhere"
+              : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
+          }
+        />
+        </div>
+
+        <NumberField
+          id="over-cap"
+          onValidity={onValidity}
+          label="Over the limit"
+          unit="km/h"
+          value={overCap}
+          min={0}
+          max={30}
+          step={1}
+          onChange={setOverCap}
+          explain="How far above the posted limit you actually sit. Saves driving time but burns more energy, so past a point it simply buys you another charging stop. Ordinary roads lift more gently than the autobahn does."
+          readout={
+            overCap === 0
+              ? "sitting on the limit"
+              : `+${overCap} on limited roads, about +${Math.round((freeflowFactorFor(overCap) - 1) * 100)}% elsewhere`
+          }
+        />
+        </div>
+        <div className={noLimits ? "hidden" : undefined}>
+          <label
+            htmlFor="autobahn"
+            className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
+          >
+            <span className="flex items-center gap-1.5">
+              German autobahn actually open
+              <InfoTip>
+                Germany only — it does nothing on a route that never enters it. How much
+                of the derestricted-looking autobahn you&apos;ll really get to use — the
+                rest is roadworks, traffic and signposted limits. About 30% is realistic.
+                Set it to 100% and fast driving looks free, which is the assumption that
+                flatters high speeds most.
+              </InfoTip>
+            </span>
+            <span className="rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-xs font-bold text-brand-700">
+              {autobahnShare}%
+            </span>
+          </label>
+          <input
+            id="autobahn"
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={autobahnShare}
+            onChange={(e) => setAutobahnShare(Number(e.target.value))}
+            className="w-full accent-brand-500"
+          />
+        </div>
+        </div>
+      </FieldGroup>
 
       <details className="group mt-4 rounded-xl border border-ink-200 bg-white px-4 py-3">
         <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
-          Fine-tune the assumptions
+          Charging, breaks and the fine print
           <span className="ml-2 font-normal normal-case tracking-normal text-ink-400">
-            these change the answer more than you&apos;d think
+            sensible defaults — open it if yours differ
           </span>
         </summary>
 
         <div className="mt-4 space-y-4">
-          <div className={noLimits ? "hidden" : undefined}>
-            <label
-              htmlFor="autobahn"
-              className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
-            >
-              <span className="flex items-center gap-1.5">
-                German autobahn actually open
-                <InfoTip>
-                  Germany only — it does nothing on a route that never enters it. How much
-                  of the derestricted-looking autobahn you&apos;ll really get to use — the
-                  rest is roadworks, traffic and signposted limits. About 30% is realistic.
-                  Set it to 100% and fast driving looks free, which is the assumption that
-                  flatters high speeds most.
-                </InfoTip>
-              </span>
-              <span className="rounded-md bg-brand-50 px-1.5 py-0.5 font-mono text-xs font-bold text-brand-700">
-                {autobahnShare}%
-              </span>
-            </label>
-            <input
-              id="autobahn"
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={autobahnShare}
-              onChange={(e) => setAutobahnShare(Number(e.target.value))}
-              className="w-full accent-brand-500"
-            />
-          </div>
-
-          {/* The whole point of the tool is that fast driving isn't free, so
-              the honest way to argue with a speed limit is to let people see
-              what removing it actually buys — usually another charging stop. */}
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 bg-white px-3 py-2.5">
-            <input
-              type="checkbox"
-              checked={noLimits}
-              onChange={(e) => setNoLimits(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
-            />
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-ink-900">
-                Ignore speed limits entirely
-              </span>
-              <span className="block text-xs leading-relaxed text-ink-500">
-                Every motorway treated as derestricted, so your cruise speed is the
-                only limit — what the drive would look like if the law weren&apos;t
-                there. Ordinary roads still go at their own pace.
-              </span>
-            </span>
-          </label>
-
-          <div className={noLimits ? "hidden" : undefined}>
-          <NumberField
-            id="motorway-cap"
-            onValidity={onValidity}
-            label="Motorway limit"
-            unit="km/h"
-            value={motorwayCap}
-            min={80}
-            max={200}
-            step={5}
-            onChange={setMotorwayCap}
-            explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this — everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
-            readout={
-              motorwayCap === 130
-                ? "130 is a western-European motorway — lower it elsewhere"
-                : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
-            }
-          />
-          </div>
-
-          <NumberField
-            id="over-cap"
-            onValidity={onValidity}
-            label="Over the limit"
-            unit="km/h"
-            value={overCap}
-            min={0}
-            max={30}
-            step={1}
-            onChange={setOverCap}
-            explain="How far above the posted limit you actually sit. Saves driving time but burns more energy, so past a point it simply buys you another charging stop. Ordinary roads lift more gently than the autobahn does."
-            readout={
-              overCap === 0
-                ? "sitting on the limit"
-                : `+${overCap} on limited roads, about +${Math.round((freeflowFactorFor(overCap) - 1) * 100)}% elsewhere`
-            }
-          />
-
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
               id="stop-overhead"
@@ -402,6 +420,29 @@ export default function TripForm() {
         </p>
       )}
     </form>
+  )
+}
+
+/** A titled group of fields. The form was a flat run of nine uppercase labels
+ *  with no hierarchy, which is what pushed everything interesting into an
+ *  accordion in the first place — headings buy back the room to leave it out. */
+function FieldGroup({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="mt-5 border-t border-ink-100 pt-4">
+      <h3 className="mb-2.5 flex flex-wrap items-baseline gap-x-2 font-display text-sm font-semibold text-ink-900">
+        {title}
+        {hint && <span className="text-xs font-normal text-ink-400">{hint}</span>}
+      </h3>
+      {children}
+    </section>
   )
 }
 

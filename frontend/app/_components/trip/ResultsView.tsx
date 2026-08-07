@@ -284,8 +284,15 @@ export default function ResultsView({
             )}
           </div>
           <aside aria-label="Itinerary">
-            <h2 className="mb-2 px-1 font-display text-base font-semibold text-ink-900">
-              Itinerary at {selected.speed_kph} km/h
+            <h2 className="mb-2 flex items-baseline justify-between gap-2 px-1 font-display text-base font-semibold text-ink-900">
+              <span>Itinerary at {selected.speed_kph} km/h</span>
+              {/* On a long route the list scrolls, so the count is the only
+                  place the size of the plan is still visible at a glance. */}
+              {selected.stops.length > 0 && (
+                <span className="shrink-0 font-sans text-xs font-medium text-ink-400">
+                  {selected.stops.length} {selected.stops.length === 1 ? "stop" : "stops"}
+                </span>
+              )}
             </h2>
             <Itinerary
               trip={trip}

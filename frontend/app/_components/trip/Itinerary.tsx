@@ -101,8 +101,38 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
     </LegCard>
   )
 
-  return <div className="space-y-2">{legs}</div>
+  // A 900 km European trip is 4 stops and reads fine as one column. A US
+  // interstate run is 24, and an unbounded column pushes everything below the
+  // itinerary — the charts, the assumptions — thousands of pixels down the
+  // page. Past a handful of stops it gets its own scroll box instead.
+  if (stops.length <= SCROLL_AFTER_STOPS) {
+    return <div className="space-y-2">{legs}</div>
+  }
+
+  return (
+    <div className="relative">
+      <div
+        // `overscroll-contain` so reaching the end of the list doesn't hand the
+        // scroll back to the page mid-flick, which on a phone reads as the
+        // itinerary "jumping".
+        className="max-h-[34rem] space-y-2 overflow-y-auto overscroll-contain rounded-2xl pr-1"
+        tabIndex={0}
+        role="group"
+        aria-label={`${stops.length} charging stops, scrollable`}
+      >
+        {legs}
+      </div>
+      {/* Says "there is more below" without spending a row on saying it. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-2xl bg-gradient-to-t from-background to-transparent"
+      />
+    </div>
+  )
 }
+
+/** Above this many charging stops the itinerary becomes its own scroll area. */
+const SCROLL_AFTER_STOPS = 6
 
 function minutesAtStop(stop: { charge_min: number }): number {
   // Matches the simulator: charge + 5 min plug-in overhead (+ detour, folded
