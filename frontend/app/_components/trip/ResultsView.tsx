@@ -283,10 +283,16 @@ export default function ResultsView({
               </button>
             )}
           </div>
-          {/* Stretches to the row height, which the charts column sets —
-              so the itinerary ends level with them instead of stopping
-              short and leaving a column of dead space beside them. */}
-          <aside aria-label="Itinerary" className="flex min-h-0 flex-col">
+          {/* `h-0 min-h-full` is load-bearing, not decoration. A grid row is as
+              tall as its tallest item, so an uncapped itinerary sets the row
+              height and drags the charts column down to match — 24 stops made
+              a 4,300 px row with the charts floating in dead space at the top.
+              Height 0 keeps the aside out of the row calculation; min-h-full
+              then fills whatever height the charts settled on. */}
+          <aside
+            aria-label="Itinerary"
+            className="flex min-h-0 flex-col lg:h-0 lg:min-h-full"
+          >
             <h2 className="mb-2 flex items-baseline justify-between gap-2 px-1 font-display text-base font-semibold text-ink-900">
               <span>Itinerary at {selected.speed_kph} km/h</span>
               {/* On a long route the list scrolls, so the count is the only
