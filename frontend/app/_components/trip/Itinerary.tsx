@@ -110,12 +110,16 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
   }
 
   return (
-    <div className="relative">
+    <div className="relative min-h-0 flex-1">
       <div
+        // Two different jobs. On a phone the column is all there is, so a fixed
+        // cap keeps the charts below it reachable. From `lg` the aside is a
+        // flex column filling the grid row, so `h-full` takes the height the
+        // charts beside it already set and the cap has to get out of the way.
         // `overscroll-contain` so reaching the end of the list doesn't hand the
         // scroll back to the page mid-flick, which on a phone reads as the
         // itinerary "jumping".
-        className="max-h-[34rem] space-y-2 overflow-y-auto overscroll-contain rounded-2xl pr-1"
+        className="h-full max-h-[34rem] space-y-2 overflow-y-auto overscroll-contain rounded-2xl pr-1 lg:max-h-none"
         tabIndex={0}
         role="group"
         aria-label={`${stops.length} charging stops, scrollable`}

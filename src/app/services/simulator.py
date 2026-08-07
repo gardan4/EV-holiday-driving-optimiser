@@ -203,7 +203,20 @@ class SimParams:
     price_per_kwh: float = 0.59
     # Free-flow ≥ this → "motorway-like": ORS/OSM under-caps there, so the
     # cruise speed applies up to the country's legal cap instead of free-flow.
+    #
     motorway_freeflow_kph: float = 105.0
+    # The same threshold where we don't know the country. 105 was drawn around
+    # European motorways and quietly excluded American ones: ORS rates a 70 mph
+    # interstate at ~98, so a third of a Las Vegas → Washington route was
+    # modelled as back roads and driven at 105 while the driver had asked for
+    # 170. By distance the 95-105 band is 34% of that route and 1.8% of
+    # Utrecht → Innsbruck.
+    #
+    # Applied only OFF the modelled countries, because inside them a free-flow
+    # of 95 on a motorway is real information — roadworks, a signposted zone —
+    # and promoting those is how a German roadworks stretch ends up being
+    # driven at 130.
+    motorway_freeflow_unmodelled_kph: float = 95.0
     # DE only: free-flow ≥ this → genuinely derestricted (no cap). Between the
     # two thresholds a German segment is a signposted zone → default cap.
     derestrict_freeflow_kph: float = 118.0
@@ -289,7 +302,10 @@ def effective_kph(
     `index` selects which derestriction-eligible stretches are open; pass the
     segment's position along the route.
     """
-    if p.freeflow_cap_only or seg.freeflow_kph < p.motorway_freeflow_kph:
+    motorway_from = (
+        p.motorway_freeflow_kph if seg.country else p.motorway_freeflow_unmodelled_kph
+    )
+    if p.freeflow_cap_only or seg.freeflow_kph < motorway_from:
         # Ordinary road: its own flow speed governs, but an assertive driver
         # still presses a little above it.
         eff = min(v_kph, seg.freeflow_kph * p.over_freeflow_factor)

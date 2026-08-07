@@ -283,7 +283,10 @@ export default function ResultsView({
               </button>
             )}
           </div>
-          <aside aria-label="Itinerary">
+          {/* Stretches to the row height, which the charts column sets —
+              so the itinerary ends level with them instead of stopping
+              short and leaving a column of dead space beside them. */}
+          <aside aria-label="Itinerary" className="flex min-h-0 flex-col">
             <h2 className="mb-2 flex items-baseline justify-between gap-2 px-1 font-display text-base font-semibold text-ink-900">
               <span>Itinerary at {selected.speed_kph} km/h</span>
               {/* On a long route the list scrolls, so the count is the only

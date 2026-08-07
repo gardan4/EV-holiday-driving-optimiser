@@ -519,3 +519,29 @@ class TestIgnoreSpeedLimits:
         lane = RouteSegment(dist_m=10_000.0, freeflow_kph=60.0, country="NL")
         v = effective_kph(180.0, lane, SimParams(ignore_speed_limits=True))
         assert v <= 60.0
+
+
+class TestMotorwayThresholdOffTheModelledCountries:
+    """ORS rates a 70 mph interstate at ~98 km/h. At a flat 105 threshold that
+    is "an ordinary road", so a third of a US route was driven at ~105 while
+    the driver had asked for 170 — and neither the cap nor `ignore_speed_limits`
+    could reach it, because both live on the motorway branch."""
+
+    def _kph(self, freeflow, country, **over):
+        from app.services.simulator import RouteSegment, SimParams, effective_kph
+
+        seg = RouteSegment(dist_m=10_000.0, freeflow_kph=freeflow, country=country)
+        return effective_kph(170.0, seg, SimParams(**over))
+
+    def test_us_interstate_is_a_motorway(self):
+        # country="" — outside the boxes we model, i.e. anywhere but the eight.
+        assert self._kph(98.0, "", ignore_speed_limits=True) == 170.0
+
+    def test_german_roadworks_at_the_same_speed_is_not(self):
+        """Inside a modelled country a free-flow of 95 is real information:
+        roadworks or a signposted zone. Promoting it would drive roadworks at
+        130 — which is exactly what the replan fixture caught."""
+        assert self._kph(95.0, "DE", ignore_speed_limits=True) < 110.0
+
+    def test_a_genuinely_slow_road_stays_slow_everywhere(self):
+        assert self._kph(70.0, "", ignore_speed_limits=True) <= 80.0
