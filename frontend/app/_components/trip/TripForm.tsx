@@ -26,6 +26,7 @@ export default function TripForm() {
   const [targetSoc, setTargetSoc] = useState(10)
   const [tempC, setTempC] = useState(20)
   const [overCap, setOverCap] = useState(15)
+  const [motorwayCap, setMotorwayCap] = useState(130)
   const [autobahnShare, setAutobahnShare] = useState(50)
   const [stopOverhead, setStopOverhead] = useState(5)
   const [sitePower, setSitePower] = useState(80)
@@ -78,6 +79,7 @@ export default function TripForm() {
         target_soc: targetSoc,
         temperature_c: tempC,
         autobahn_open_share: autobahnShare / 100,
+        motorway_cap_kph: motorwayCap,
         over_cap_kph: overCap,
         over_freeflow_factor: freeflowFactorFor(overCap),
         stop_overhead_min: stopOverhead,
@@ -205,10 +207,11 @@ export default function TripForm() {
               className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
             >
               <span className="flex items-center gap-1.5">
-                Autobahn actually open
+                German autobahn actually open
                 <InfoTip>
-                  How much of the derestricted-looking autobahn you&apos;ll really get to use —
-                  the rest is roadworks, traffic and signposted limits. About 30% is realistic.
+                  Germany only — it does nothing on a route that never enters it. How much
+                  of the derestricted-looking autobahn you&apos;ll really get to use — the
+                  rest is roadworks, traffic and signposted limits. About 30% is realistic.
                   Set it to 100% and fast driving looks free, which is the assumption that
                   flatters high speeds most.
                 </InfoTip>
@@ -228,6 +231,24 @@ export default function TripForm() {
               className="w-full accent-brand-500"
             />
           </div>
+
+          <NumberField
+            id="motorway-cap"
+            onValidity={onValidity}
+            label="Motorway limit"
+            unit="km/h"
+            value={motorwayCap}
+            min={80}
+            max={200}
+            step={5}
+            onChange={setMotorwayCap}
+            explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this — everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
+            readout={
+              motorwayCap === 130
+                ? "130 is a western-European motorway — lower it elsewhere"
+                : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
+            }
+          />
 
           <NumberField
             id="over-cap"

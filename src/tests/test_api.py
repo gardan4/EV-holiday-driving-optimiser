@@ -163,6 +163,35 @@ class TestPlanTrip:
         assert resp.status_code == 200, resp.text
         assert resp.json()["result"]["optimum_speed"] is not None
 
+    async def test_motorway_cap_is_honoured_and_countries_reported(self, client):
+        """The cap used to be hardcoded at 130, which is a western-European
+        motorway and too fast for most of the world. Setting it lower must
+        actually bind, or the answer is optimised against a limit that isn't
+        there."""
+        vid = await vehicle_id(client)
+        fast = await client.post("/api/trips", json=plan_body(vid, motorway_cap_kph=130.0))
+        slow = await client.post("/api/trips", json=plan_body(vid, motorway_cap_kph=100.0))
+        assert fast.status_code == 200 and slow.status_code == 200
+
+        def drive_min(resp):
+            r = resp.json()["result"]
+            top = max(s["speed_kph"] for s in r["speeds"] if s["feasible"])
+            return next(s["drive_min"] for s in r["speeds"] if s["speed_kph"] == top)
+
+        assert drive_min(slow) > drive_min(fast), "a lower cap must cost driving time"
+        # The fixture route is built with country codes, so the UI can tell
+        # which limits were real rather than assumed.
+        assert fast.json()["result"]["countries"]
+
+    async def test_default_cap_unchanged_for_old_permalinks(self, client):
+        """A request that predates the field must plan exactly as it used to."""
+        vid = await vehicle_id(client)
+        body = plan_body(vid)
+        assert "motorway_cap_kph" not in body
+        resp = await client.post("/api/trips", json=body)
+        assert resp.status_code == 200
+        assert resp.json()["request"]["motorway_cap_kph"] == 130.0
+
     async def test_cold_corridor_says_try_again_not_no_chargers(self, client, monkeypatch):
         """A corridor nobody has planned before is fetched in capped batches, so
         the first attempt can see only part of it. Reporting that as "no fast

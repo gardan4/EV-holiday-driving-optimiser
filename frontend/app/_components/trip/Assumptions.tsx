@@ -50,6 +50,13 @@ export default function Assumptions({ trip }: { trip: Trip }) {
       setReplanning(false)
     }
   }
+  // Which of the route's countries have their real limits modelled, and
+  // whether the derestriction rules can apply at all.
+  const routeCountries = trip.result.countries ?? []
+  const MODELLED = ["DE", "NL", "BE", "LU", "FR", "CH", "AT", "IT"]
+  const modelled = routeCountries.filter((c) => MODELLED.includes(c))
+  const crossesGermany = routeCountries.includes("DE")
+
   const occupants = r.occupants ?? 2
   const luggageKg = r.luggage_kg ?? 30
 
@@ -164,13 +171,31 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             </div>
             <div className="col-span-2">
               <NumberField
-                id="a-autobahn" label="Autobahn actually open" unit="%"
+                id="a-motorway-cap" label="Motorway limit" unit="km/h"
                 onValidity={onValidity}
-                value={Math.round((r.autobahn_open_share ?? 0.3) * 100)} min={0} max={100} step={5}
-                onChange={(x) => set("autobahn_open_share", x / 100)}
-                readout="the rest is roadworks, traffic and posted limits"
+                value={Math.round(r.motorway_cap_kph ?? 130)} min={80} max={200} step={5}
+                onChange={(x) => set("motorway_cap_kph", x)}
+                readout={
+                  modelled.length > 0
+                    ? `used outside ${modelled.join("/")}, whose own limits are real`
+                    : `${Math.round((r.motorway_cap_kph ?? 130) / 1.609)} mph`
+                }
               />
             </div>
+            {/* Germany is the only country with derestricted stretches, so on a
+                route that never enters it this control does nothing at all —
+                and a dead control reads as a broken one. */}
+            {crossesGermany && (
+              <div className="col-span-2">
+                <NumberField
+                  id="a-autobahn" label="German autobahn actually open" unit="%"
+                  onValidity={onValidity}
+                  value={Math.round((r.autobahn_open_share ?? 0.3) * 100)} min={0} max={100} step={5}
+                  onChange={(x) => set("autobahn_open_share", x / 100)}
+                  readout="the rest is roadworks, traffic and posted limits"
+                />
+              </div>
+            )}
             <div className="col-span-2">
               <NumberField
                 id="a-over-cap" label="Over the posted limit" unit="km/h"
@@ -284,11 +309,22 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                   their real limits modelled. Saying so matters most exactly where
                   it's wrong: a US interstate is 105-120, so an unflagged 130 would
                   quietly recommend a cruise speed that isn't legal there. */}
-              <b className="font-semibold text-ink-700">Outside western Europe.</b> Real
-              legal limits are modelled for DE, NL, BE, LU, FR, CH, AT and IT. Anywhere
-              else the motorway cap falls back to a generic 130 km/h, which is too high
-              in a lot of the world — check your local limit before trusting the speed
-              this recommends.
+              <b className="font-semibold text-ink-700">Which limits are real.</b>{" "}
+              {modelled.length > 0 ? (
+                <>
+                  Legal motorway limits are modelled for{" "}
+                  <b className="font-semibold text-ink-700">{modelled.join(", ")}</b> on
+                  this route.{" "}
+                </>
+              ) : (
+                <>None of the countries on this route have their own limits modelled. </>
+              )}
+              {/* One expression, not prose interleaved with {…}: JSX trims the
+                  whitespace at each line's edges, which silently glued "113" to
+                  "km/h" and then "above" to the dash. */}
+              {`Everywhere else uses the ${Math.round(r.motorway_cap_kph ?? 130)} km/h ` +
+                `you set above — check it against the local limit, because it's the ` +
+                `number the recommended speed is built on.`}
             </li>
             <li>
               <b className="font-semibold text-ink-700">Elevation.</b>{" "}

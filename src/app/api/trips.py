@@ -169,6 +169,7 @@ async def plan_trip(
         ),
         extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
         autobahn_open_share=plan.autobahn_open_share,
+        default_country_cap_kph=plan.motorway_cap_kph,
         over_cap_kph=plan.over_cap_kph,
         over_freeflow_factor=plan.over_freeflow_factor,
         site_power_factor=plan.site_power_factor,
@@ -228,6 +229,10 @@ async def plan_trip(
         vehicle=_vehicle_out(vehicle),
         climb_m=round(sum(s.climb_m for s in route.segments)),
         optimum_at_top_speed=at_top,
+        # Distinct, in the order you drive through them. Unidentified stretches
+        # ("") are dropped: the list is used to say which countries' real limits
+        # applied, and "" is precisely the case where none did.
+        countries=list(dict.fromkeys(s.country for s in route.segments if s.country)),
     )
 
     trip = Trip(

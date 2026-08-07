@@ -77,7 +77,13 @@ class PlanRequest(BaseModel):
     # from consumption. 1.0 mild / 0.8 cold / 0.55 freezing.
     charge_power_factor: float = Field(default=1.0, ge=0.3, le=1.0)
     # How much of the derestriction-eligible German autobahn is really open.
+    # Germany only — no effect on a route that never enters it.
     autobahn_open_share: float = Field(default=0.3, ge=0.0, le=1.0)
+    # Motorway legal limit where we don't model the country's own. The eight
+    # western-European countries in `simulator._default_country_caps` keep
+    # their real limits; everywhere else uses this. Defaults to the 130 that
+    # used to be hardcoded, so an old permalink replans to the same answer.
+    motorway_cap_kph: float = Field(default=130.0, ge=80.0, le=200.0)
     # Driving style: km/h above the legal cap, and the multiplier applied to an
     # ordinary road's own flow speed.
     over_cap_kph: float = Field(default=0.0, ge=0.0, le=30.0)
@@ -147,6 +153,12 @@ class PlanResult(BaseModel):
     # True when the sweep stopped at the car's top speed and the curve was
     # still falling — i.e. the theoretical optimum is faster than the car goes.
     optimum_at_top_speed: bool = False
+    # ISO-2 codes the route actually crosses, in order of first appearance;
+    # "" for stretches outside the countries we can identify. Lets the UI show
+    # the German autobahn control only on a route that enters Germany, and say
+    # which limits were real rather than assumed. Empty on trips planned
+    # before this existed.
+    countries: list[str] = []
 
 
 class TripOut(BaseModel):

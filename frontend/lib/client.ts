@@ -55,6 +55,8 @@ export interface PlanRequest {
   charge_power_factor?: number
   /** Share of derestriction-eligible autobahn that is really open. */
   autobahn_open_share?: number
+  /** Motorway limit where the country's own isn't modelled. */
+  motorway_cap_kph?: number
   over_cap_kph?: number
   over_freeflow_factor?: number
   /** Fraction of a charger's rated power you actually get (0.3–1). */
@@ -114,6 +116,8 @@ export interface PlanResult {
   climb_m: number
   /** The curve was still falling at the car's top speed. */
   optimum_at_top_speed: boolean
+  /** ISO-2 codes the route crosses, in driving order. Empty on older trips. */
+  countries?: string[]
 }
 
 export interface Trip {
