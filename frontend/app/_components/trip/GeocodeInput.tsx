@@ -101,7 +101,7 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
           role="combobox"
           aria-expanded={open}
           aria-label={label}
-          className={`w-full rounded-xl border bg-white py-2.5 pl-9 pr-3 text-sm text-ink-900 outline-none transition-colors placeholder:text-ink-300 focus:border-brand-400 focus:ring-2 focus:ring-brand-200 ${
+          className={`w-full rounded-xl border bg-white py-2.5 pl-9 pr-3 text-base text-ink-900 outline-none transition-colors placeholder:text-ink-300 focus:border-brand-400 focus:ring-2 focus:ring-brand-200 sm:text-sm ${
             value ? "border-brand-300" : "border-ink-200"
           } ${loading ? "animate-pulse-soft" : ""}`}
         />

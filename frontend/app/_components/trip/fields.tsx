@@ -171,7 +171,10 @@ export function NumberField({
               nudge(e.key === "ArrowUp" ? 1 : -1)
             }
           }}
-          className="min-w-0 flex-1 rounded-xl bg-transparent py-2.5 pl-3 pr-1 text-sm text-ink-900 outline-none"
+          // 16px on a phone: WebKit zooms the page when a field under 16px
+          // takes focus, which on this form meant every tap on a number
+          // jolted the layout.
+          className="min-w-0 flex-1 rounded-xl bg-transparent py-2.5 pl-3 pr-1 text-base text-ink-900 outline-none sm:text-sm"
         />
         <span className="shrink-0 whitespace-nowrap pl-1 pr-3 font-mono text-xs text-ink-400">
           {unit}

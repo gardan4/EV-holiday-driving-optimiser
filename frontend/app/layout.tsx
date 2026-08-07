@@ -40,7 +40,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0C6291", // brand-500
+  // Was #0C6291 and labelled brand-500 — a blue left over from an earlier
+  // palette, which tinted the phone browser's chrome a colour appearing
+  // nowhere else on the page. brand-500 is mint.
+  themeColor: "#17a56b",
+  // Shrink the layout viewport when the on-screen keyboard opens, so a sheet
+  // pinned to the bottom stays above it rather than behind it.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

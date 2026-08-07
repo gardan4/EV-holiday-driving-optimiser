@@ -72,6 +72,15 @@ export default function FeedbackLink() {
     }
   }, [open])
 
+  // Focusing the box on open is right on a desktop: the panel is small, and
+  // the pointer is already there. On a phone it throws the keyboard up over
+  // the starter chips before you have read them — and the chips are the part
+  // that gets people writing — so there the box waits to be tapped.
+  useEffect(() => {
+    if (!open) return
+    if (window.matchMedia("(min-width: 640px)").matches) textareaRef.current?.focus()
+  }, [open])
+
   function start(text: string) {
     setMessage(`${text}: `)
     const el = textareaRef.current
@@ -164,7 +173,10 @@ export default function FeedbackLink() {
             role="dialog"
             aria-modal="false"
             aria-labelledby="feedback-title"
-            className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border border-ink-200 bg-white p-4 text-left shadow-2xl shadow-ink-900/20 sm:inset-x-auto sm:bottom-4 sm:left-4 sm:w-[24rem] sm:rounded-2xl"
+            // `max-h` + scroll so the sheet can never grow past the screen
+            // once the keyboard has taken the bottom half, and the extra
+            // bottom padding clears the home indicator on a notched phone.
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-ink-200 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-left shadow-2xl shadow-ink-900/20 sm:inset-x-auto sm:bottom-4 sm:left-4 sm:w-[24rem] sm:rounded-2xl sm:pb-4"
           >
             {state === "sent" ? (
               <div className="py-2 text-center">
@@ -225,15 +237,18 @@ export default function FeedbackLink() {
                   </div>
                 )}
 
+                {/* 16px on a phone, 14 from `sm` up. Under 16, WebKit zooms
+                    the page the instant the field takes focus — which, with a
+                    panel that focuses on open, meant tapping Feedback zoomed
+                    you in and left the sheet sitting off-centre. */}
                 <textarea
                   id="feedback-message"
                   ref={textareaRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value.slice(0, MAX))}
                   rows={4}
-                  autoFocus
                   aria-label="Your feedback"
-                  className="mt-3 w-full resize-y rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+                  className="mt-3 w-full resize-y rounded-lg border border-ink-200 px-3 py-2 text-base text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200 sm:text-sm"
                   placeholder="The charging curve for my car looks off…"
                 />
                 {remaining < 200 && (
@@ -248,7 +263,7 @@ export default function FeedbackLink() {
                   onChange={(e) => setContact(e.target.value.slice(0, 200))}
                   autoComplete="email"
                   aria-label="Your email, only if you want a reply"
-                  className="mt-2 w-full rounded-lg border border-ink-200 px-3 py-2 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
+                  className="mt-2 w-full rounded-lg border border-ink-200 px-3 py-2 text-base text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200 sm:text-sm"
                   placeholder="Email — only if you want a reply (optional)"
                 />
 
