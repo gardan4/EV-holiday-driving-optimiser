@@ -170,6 +170,25 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               />
             </div>
             <div className="col-span-2">
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 bg-white px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={r.ignore_speed_limits ?? false}
+                  onChange={(e) => set("ignore_speed_limits", e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-ink-900">
+                    Ignore speed limits entirely
+                  </span>
+                  <span className="block text-xs leading-relaxed text-ink-500">
+                    Every motorway derestricted — what the drive costs if the law
+                    isn&apos;t the constraint. Ordinary roads still go at their own pace.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className={r.ignore_speed_limits ? "hidden" : "col-span-2"}>
               <NumberField
                 id="a-motorway-cap" label="Motorway limit" unit="km/h"
                 onValidity={onValidity}
@@ -185,7 +204,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             {/* Germany is the only country with derestricted stretches, so on a
                 route that never enters it this control does nothing at all —
                 and a dead control reads as a broken one. */}
-            {crossesGermany && (
+            {crossesGermany && !r.ignore_speed_limits && (
               <div className="col-span-2">
                 <NumberField
                   id="a-autobahn" label="German autobahn actually open" unit="%"
@@ -310,7 +329,11 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                   it's wrong: a US interstate is 105-120, so an unflagged 130 would
                   quietly recommend a cruise speed that isn't legal there. */}
               <b className="font-semibold text-ink-700">Which limits are real.</b>{" "}
-              {modelled.length > 0 ? (
+              {r.ignore_speed_limits ? (
+                `None — you asked for every motorway derestricted, so the cruise speed ` +
+                `itself is the only limit. This is a what-if, not a plan you can legally ` +
+                `drive outside the open stretches of German autobahn.`
+              ) : modelled.length > 0 ? (
                 <>
                   Legal motorway limits are modelled for{" "}
                   <b className="font-semibold text-ink-700">{modelled.join(", ")}</b> on

@@ -208,6 +208,11 @@ class SimParams:
     # two thresholds a German segment is a signposted zone → default cap.
     derestrict_freeflow_kph: float = 118.0
     freeflow_cap_only: bool = False  # True → naive min(v, freeflow) everywhere
+    # Treat EVERY motorway as derestricted, the way German autobahn already is:
+    # a what-if for "how much would ignoring the limits actually save me?".
+    # Ordinary roads are untouched — their own flow speed still governs, because
+    # a back road can't be driven at 180 whatever the law says.
+    ignore_speed_limits: bool = False
     default_country_cap_kph: float = 130.0
     country_caps: dict[str, float] = field(default_factory=_default_country_caps)
 
@@ -289,10 +294,17 @@ def effective_kph(
         # still presses a little above it.
         eff = min(v_kph, seg.freeflow_kph * p.over_freeflow_factor)
     else:
-        cap = p.country_caps.get(seg.country, p.default_country_cap_kph)
+        cap = _INF if p.ignore_speed_limits else p.country_caps.get(
+            seg.country, p.default_country_cap_kph
+        )
         if math.isinf(cap):
-            if seg.freeflow_kph < p.derestrict_freeflow_kph or not _open_stretch(
-                index, p.autobahn_open_share
+            # `ignore_speed_limits` is the deliberate what-if, so it skips the
+            # realism gate below — that gate exists to model signposting and
+            # traffic on a real autobahn, which is exactly what this asks to
+            # set aside.
+            if not p.ignore_speed_limits and (
+                seg.freeflow_kph < p.derestrict_freeflow_kph
+                or not _open_stretch(index, p.autobahn_open_share)
             ):
                 # Signposted zone, roadworks or traffic — the cap binds after all.
                 cap = p.default_country_cap_kph + p.over_cap_kph

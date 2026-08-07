@@ -57,6 +57,8 @@ export interface PlanRequest {
   autobahn_open_share?: number
   /** Motorway limit where the country's own isn't modelled. */
   motorway_cap_kph?: number
+  /** What-if: treat every motorway as derestricted, limits ignored. */
+  ignore_speed_limits?: boolean
   over_cap_kph?: number
   over_freeflow_factor?: number
   /** Fraction of a charger's rated power you actually get (0.3–1). */

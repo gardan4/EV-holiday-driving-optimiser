@@ -183,6 +183,27 @@ class TestPlanTrip:
         # which limits were real rather than assumed.
         assert fast.json()["result"]["countries"]
 
+    async def test_ignore_speed_limits_round_trips_and_is_faster(self, client):
+        """The what-if people asked for: what does ignoring the limits buy?
+        It must reach the simulator, not just be stored on the request."""
+        vid = await vehicle_id(client)
+        capped = await client.post(
+            "/api/trips", json=plan_body(vid, motorway_cap_kph=100.0)
+        )
+        free = await client.post(
+            "/api/trips", json=plan_body(vid, motorway_cap_kph=100.0,
+                                         ignore_speed_limits=True)
+        )
+        assert capped.status_code == 200 and free.status_code == 200
+        assert free.json()["request"]["ignore_speed_limits"] is True
+
+        def drive_min(resp):
+            r = resp.json()["result"]
+            top = max(s["speed_kph"] for s in r["speeds"] if s["feasible"])
+            return next(s["drive_min"] for s in r["speeds"] if s["speed_kph"] == top)
+
+        assert drive_min(free) < drive_min(capped)
+
     async def test_default_cap_unchanged_for_old_permalinks(self, client):
         """A request that predates the field must plan exactly as it used to."""
         vid = await vehicle_id(client)

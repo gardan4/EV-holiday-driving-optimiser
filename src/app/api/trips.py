@@ -172,6 +172,7 @@ async def plan_trip(
         extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
         autobahn_open_share=plan.autobahn_open_share,
         default_country_cap_kph=plan.motorway_cap_kph,
+        ignore_speed_limits=plan.ignore_speed_limits,
         over_cap_kph=plan.over_cap_kph,
         over_freeflow_factor=plan.over_freeflow_factor,
         site_power_factor=plan.site_power_factor,

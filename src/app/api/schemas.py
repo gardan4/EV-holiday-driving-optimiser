@@ -84,6 +84,11 @@ class PlanRequest(BaseModel):
     # their real limits; everywhere else uses this. Defaults to the 130 that
     # used to be hardcoded, so an old permalink replans to the same answer.
     motorway_cap_kph: float = Field(default=130.0, ge=80.0, le=200.0)
+    # What-if: treat every motorway as derestricted, so the cruise speed itself
+    # is the only limit. Answers "what would ignoring the limits actually buy
+    # me?" — which is a question about charging, not about driving: past a
+    # point the extra speed just buys another stop.
+    ignore_speed_limits: bool = False
     # Driving style: km/h above the legal cap, and the multiplier applied to an
     # ordinary road's own flow speed.
     over_cap_kph: float = Field(default=0.0, ge=0.0, le=30.0)

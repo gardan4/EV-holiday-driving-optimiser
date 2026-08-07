@@ -477,3 +477,45 @@ def test_site_power_factor_slows_charging_and_calms_the_optimum() -> None:
     assert shared.speed_kph <= full.speed_kph
     # The reported per-stop power reflects what was assumed, not the rating.
     assert all(s.power_kw == pytest.approx(0.5 * 150.0) for s in shared.stops)
+
+
+class TestIgnoreSpeedLimits:
+    """The what-if: every motorway derestricted, everywhere."""
+
+    def _sim(self, **over):
+        from app.services.simulator import SimParams, simulate
+        from tests.fixtures import nl_to_austria_route
+        from app.services.simulator import VehicleParams
+
+        segments, chargers = nl_to_austria_route()
+        veh = VehicleParams(
+            usable_kwh=77.0, a_wh_km=55.0, b_wh_km_per_kph2=0.0105,
+            charge_curve=((0, 50), (10, 120), (30, 120), (45, 85), (55, 68), (75, 42), (100, 10)),
+            top_speed_kph=200.0,
+        )
+        return simulate(segments, chargers, veh, 180.0, SimParams(**over))
+
+    def test_uncapped_drives_faster_than_capped(self):
+        capped = self._sim()
+        free = self._sim(ignore_speed_limits=True)
+        assert free.feasible and capped.feasible
+        assert free.drive_min < capped.drive_min, (
+            "with no limit at all, a 180 km/h cruise must cover the motorway "
+            "stretches faster than one held to 130"
+        )
+
+    def test_it_ignores_the_autobahn_realism_gate(self):
+        """The open-stretch pattern models signposting and roadworks, which is
+        precisely what this what-if asks to set aside — so closing the autobahn
+        entirely must not slow the uncapped run."""
+        shut = self._sim(ignore_speed_limits=True, autobahn_open_share=0.0)
+        open_ = self._sim(ignore_speed_limits=True, autobahn_open_share=1.0)
+        assert shut.drive_min == open_.drive_min
+
+    def test_ordinary_roads_are_still_governed_by_the_road(self):
+        """A back road can't be driven at 180 whatever the law says."""
+        from app.services.simulator import RouteSegment, SimParams, effective_kph
+
+        lane = RouteSegment(dist_m=10_000.0, freeflow_kph=60.0, country="NL")
+        v = effective_kph(180.0, lane, SimParams(ignore_speed_limits=True))
+        assert v <= 60.0

@@ -27,6 +27,7 @@ export default function TripForm() {
   const [tempC, setTempC] = useState(20)
   const [overCap, setOverCap] = useState(15)
   const [motorwayCap, setMotorwayCap] = useState(130)
+  const [noLimits, setNoLimits] = useState(false)
   const [autobahnShare, setAutobahnShare] = useState(50)
   const [stopOverhead, setStopOverhead] = useState(5)
   const [sitePower, setSitePower] = useState(80)
@@ -80,6 +81,7 @@ export default function TripForm() {
         temperature_c: tempC,
         autobahn_open_share: autobahnShare / 100,
         motorway_cap_kph: motorwayCap,
+        ignore_speed_limits: noLimits,
         over_cap_kph: overCap,
         over_freeflow_factor: freeflowFactorFor(overCap),
         stop_overhead_min: stopOverhead,
@@ -201,7 +203,7 @@ export default function TripForm() {
         </summary>
 
         <div className="mt-4 space-y-4">
-          <div>
+          <div className={noLimits ? "hidden" : undefined}>
             <label
               htmlFor="autobahn"
               className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
@@ -232,6 +234,29 @@ export default function TripForm() {
             />
           </div>
 
+          {/* The whole point of the tool is that fast driving isn't free, so
+              the honest way to argue with a speed limit is to let people see
+              what removing it actually buys — usually another charging stop. */}
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 bg-white px-3 py-2.5">
+            <input
+              type="checkbox"
+              checked={noLimits}
+              onChange={(e) => setNoLimits(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-ink-900">
+                Ignore speed limits entirely
+              </span>
+              <span className="block text-xs leading-relaxed text-ink-500">
+                Every motorway treated as derestricted, so your cruise speed is the
+                only limit — what the drive would look like if the law weren&apos;t
+                there. Ordinary roads still go at their own pace.
+              </span>
+            </span>
+          </label>
+
+          <div className={noLimits ? "hidden" : undefined}>
           <NumberField
             id="motorway-cap"
             onValidity={onValidity}
@@ -249,6 +274,7 @@ export default function TripForm() {
                 : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
             }
           />
+          </div>
 
           <NumberField
             id="over-cap"
