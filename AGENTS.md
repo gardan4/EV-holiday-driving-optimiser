@@ -40,10 +40,18 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   codec, point→route projection, coarse EU country boxes.
 - **Routers** `src/app/api/` — `vehicles.py`, `geocode.py`, `trips.py`
   (`POST /api/trips` = plan + persist permalink; sweep runs via
-  `asyncio.to_thread`). Schemas in `api/schemas.py` mirror `frontend/lib/client.ts`.
+  `asyncio.to_thread`), `feedback.py`, `events.py`. Schemas in `api/schemas.py`
+  mirror `frontend/lib/client.ts`.
+- **Usage counting** `src/app/api/events.py` + `src/app/core/visitor.py` +
+  `src/app/services/usage.py` — first-party, no third-party script, no CSP
+  change. `POST /api/events` takes an allowlisted event name; the read side is
+  `GET /api/events/stats` behind `X-Stats-Token` (default-deny) and
+  `uv run python -m scripts.usage_report`. See the design decision below before
+  touching any of it.
 - **Models** `src/app/models/__init__.py` — `Vehicle` (curated catalog with
   consumption/charge-curve JSON), `Charger`/`OcmTile`/`RouteCache` (caches),
-  `Trip` (request+result JSON, id = share token), and the `GUID` type.
+  `Trip` (request+result JSON, id = share token), `TripRun`/`TripEvent` (live
+  drives), `Feedback`, `AppEvent` (usage counts), and the `GUID` type.
 - **Seed data** `src/scripts/seed_vehicles.py` — 9 curated EVs (Born 58/77
   first); idempotent upsert-by-slug, auto-run by `db_bootstrap` when empty.
   Curves are hand-curated from public fast-charge tests — cite sources in
@@ -101,6 +109,18 @@ the pipeline is green before infra exists. Infra deploy is manual
   Changing that query means bumping `OCM_QUERY_VERSION` — it is part of the
   tile cache key, and without the bump every tile keeps serving its old answer
   for the full 14-day TTL.
+- **Usage counting is first-party and deliberately forgetful.** "Is anyone
+  using this?" is answered by our own `app_events` table rather than an
+  analytics script, so the privacy page keeps its "no trackers, no third-party
+  scripts" sentence and no visitor list leaves the app. Three properties are
+  the whole reason that is defensible, and none is optional: the `visitor`
+  pseudonym is salted with `SECRET_KEY` **and the current UTC date**, so it
+  cannot be reversed and cannot be followed past midnight; `path` is reduced to
+  a route pattern against `events.KNOWN_PATHS`, so a trip's share token never
+  lands next to a visitor; and `name` is checked against
+  `usage.ALLOWED_EVENTS`, so a public write endpoint can't become free storage.
+  Rows expire at 90 days via `scripts.purge_old_events`, on the same
+  `main._purge_loop` as the location trails.
 - **ORS free-flow under-caps fast roads**, so motorway-like segments
   (free-flow ≥ 105) use country legal caps instead; disclosed in the UI's
   assumptions accordion. The naive clamp survives behind
@@ -173,6 +193,11 @@ docker compose -f docker-compose.local-db.yml up -d
 - **`frontend/app/privacy/page.tsx` is a promise, not prose.** Every claim on it
   has to be true of the code — "deleted after 90 days" was false for as long as
   nothing called the purge. Change the page and the behaviour together.
+- **A new page route needs a line in `events.KNOWN_PATHS`.** It is an allowlist,
+  so an unlisted route is counted as `/other` — it under-reports, which is the
+  safe direction, and is why it is an allowlist rather than a blocklist. Adding
+  a route whose URL carries an id means checking `normalize_path` collapses it
+  first; the tests in `tests/test_events.py::TestPathScrubbing` are the guard.
 - **Every `NEXT_PUBLIC_*` needs an `ARG` in `frontend/Dockerfile`.** Docker
   silently ignores a `--build-arg` with no matching `ARG`, and Next inlines
   these at build time, so the variable just quietly becomes its fallback.

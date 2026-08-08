@@ -291,3 +291,58 @@ class Feedback(Base):
     # Which page it was sent from — the only context worth having when someone
     # writes "this is broken".
     path: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Usage counting — how many people, not which people
+# ---------------------------------------------------------------------------
+
+
+class AppEvent(Base):
+    """One thing somebody did, with nobody attached to it.
+
+    This exists because "is anyone using this?" had no answer that wasn't a
+    guess. The alternative was a third-party analytics script, which would have
+    cost the privacy page its "no trackers, no third-party scripts" sentence
+    and handed a visitor list to someone else. Counting our own visits in our
+    own database is the smaller thing to be doing.
+
+    What makes it not a tracker is the constraints, so they are load-bearing:
+
+    * `visitor` is a hash whose salt ROTATES DAILY (see `core.visitor`). The
+      same person tomorrow is a different value, and there is no key kept
+      anywhere that turns one back into an IP. It counts a day's uniques and
+      is deliberately useless for anything longer.
+    * `path` is normalised before it is stored — no query string, and every
+      trip id is replaced with `:id`. A row saying someone opened `/trip/:id`
+      cannot be joined to a trip. If the real id were kept here, this table
+      would become a log of who looked at whose journey, which is exactly the
+      correlation the privacy page promises does not exist.
+    * `name` is checked against an allowlist at the route, so a public write
+      endpoint can't be turned into free-form storage.
+    * There is no session id, no user agent, no screen size, no country.
+
+    Rows expire after 90 days (`scripts.purge_old_events`), on the same loop
+    that expires location trails.
+    """
+
+    __tablename__ = "app_events"
+    # Every query is "events in a window", usually narrowed by name. No index
+    # on `visitor`: the unique-count query already scans the window, and an
+    # index on the pseudonym is a lookup path nothing here should have.
+    __table_args__ = (Index("ix_app_events_at_name", "at", "name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow
+    )
+    # Allowlisted in api/events.py — page_view, plan_submitted, trip_planned,
+    # plan_failed, drive_started.
+    name: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Normalised route pattern ("/", "/trip/:id"), never a real URL.
+    path: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    # Daily-salted pseudonym. 32 hex chars = 128 bits.
+    visitor: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Referring HOST only ("news.ycombinator.com"), never the full URL — the
+    # path of the page someone came from can itself be identifying.
+    referrer: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)

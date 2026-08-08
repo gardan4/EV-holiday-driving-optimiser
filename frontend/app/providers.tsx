@@ -1,10 +1,12 @@
 "use client"
 
 import { Toaster } from "sonner"
+import Analytics from "./_components/Analytics"
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <>
+      <Analytics />
       {children}
       <Toaster
         theme="dark"

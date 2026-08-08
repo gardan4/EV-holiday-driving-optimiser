@@ -163,6 +163,7 @@ jobs:
               orsApiKey='${{ secrets.ORS_API_KEY }}' \
               ocmApiKey='${{ secrets.OCM_API_KEY }}' \
               feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
+              statsToken='${{ secrets.STATS_TOKEN }}' \
               discordWebhookUrl='${{ secrets.DISCORD_WEBHOOK_URL }}' \
               ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output table
@@ -186,6 +187,7 @@ jobs:
               orsApiKey='${{ secrets.ORS_API_KEY }}' \
               ocmApiKey='${{ secrets.OCM_API_KEY }}' \
               feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
+              statsToken='${{ secrets.STATS_TOKEN }}' \
               discordWebhookUrl='${{ secrets.DISCORD_WEBHOOK_URL }}' \
               ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output none

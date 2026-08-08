@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { getVehicles, planTrip, PlacePoint, Vehicle } from "@/lib/client"
+import { track } from "@/lib/analytics"
 import { defaultDepartureIso } from "@/lib/format"
 import { describeTemp } from "@/lib/weather"
 import { freeflowFactorFor } from "@/lib/driving"
@@ -70,6 +71,10 @@ export default function TripForm() {
     e.preventDefault()
     if (!origin || !dest || !vehicleId) return
     setSubmitting(true)
+    // Counted before the await, so a plan that never returns still shows up as
+    // an attempt — the gap between submitted and planned is the interesting
+    // number, and only counting successes would hide it.
+    track("plan_submitted")
     try {
       const trip = await planTrip({
         origin,
@@ -93,8 +98,10 @@ export default function TripForm() {
         occupants,
         luggage_kg: luggageKg,
       })
+      track("trip_planned")
       router.push(`/trip/${trip.id}`)
     } catch (err) {
+      track("plan_failed")
       toast.error(err instanceof Error ? err.message : "Planning failed")
       setSubmitting(false)
     }

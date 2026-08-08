@@ -349,3 +349,51 @@ class FeedbackItem(BaseModel):
     message: str
     contact: str | None = None
     path: str | None = None
+
+
+# ── Usage events ────────────────────────────────────────────────────────────
+class EventIn(BaseModel):
+    """What the browser is allowed to tell us it did.
+
+    Everything here is treated as hostile — it arrives on an unauthenticated
+    public endpoint. `name` is checked against an allowlist in the route, and
+    `path`/`referrer` are rewritten there rather than stored as sent; the
+    lengths below are only the first cut so an oversized body is rejected
+    before any of that runs.
+    """
+
+    name: str = Field(min_length=1, max_length=32)
+    path: str | None = Field(default=None, max_length=300)
+    referrer: str | None = Field(default=None, max_length=300)
+
+
+class DayCount(BaseModel):
+    day: str
+    visitors: int
+    page_views: int
+
+
+class LabelCount(BaseModel):
+    label: str
+    count: int
+
+
+class UsageStats(BaseModel):
+    """The answer to "is anyone using this?".
+
+    `since_launch` counts come from the `trips` table, which has been recording
+    `created_at` since the first deploy — so those numbers are real history.
+    Everything derived from `app_events` only starts the day events shipped.
+    """
+
+    days: int
+    generated_at: datetime
+    daily: list[DayCount]
+    visitors: int
+    page_views: int
+    funnel: list[LabelCount]
+    top_paths: list[LabelCount]
+    top_referrers: list[LabelCount]
+    trips_planned: int
+    drives_started: int
+    trips_planned_since_launch: int

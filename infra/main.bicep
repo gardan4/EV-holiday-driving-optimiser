@@ -123,6 +123,10 @@ param ocmApiKey string = ''
 @secure()
 param feedbackToken string = ''
 
+@description('Send as an X-Stats-Token header to read the usage numbers. Empty ⇒ the read route does not exist.')
+@secure()
+param statsToken string = ''
+
 @description('Discord webhook posted to when feedback arrives. Empty ⇒ no notifications.')
 @secure()
 param discordWebhookUrl string = ''
@@ -503,6 +507,10 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'FEEDBACK_TOKEN'
           value: feedbackToken
+        }
+        {
+          name: 'STATS_TOKEN'
+          value: statsToken
         }
         {
           name: 'DISCORD_WEBHOOK_URL'

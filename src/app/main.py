@@ -90,18 +90,25 @@ async def _run_common_startup():
 
 
 async def _purge_loop() -> None:
-    """Delete expired location traces once a day, forever.
+    """Delete expired location traces and usage events once a day, forever.
 
     The privacy page promises drives are deleted after 90 days. `purge_old_runs`
     implemented that promise correctly and then nothing ever called it outside
     the tests, which made the promise false — the worst kind of privacy bug,
     because it reads as a policy. This is what makes it true.
 
+    `purge_old_events` is on the same loop for the same reason: an analytics
+    table nobody expires stops being a count of last week and becomes a
+    permanent record. Its failure is caught separately so a broken query in one
+    purge cannot stop the other from running.
+
     Deliberately in-process rather than a scheduled workflow: Azure SQL sits
     behind a firewall that a GitHub runner would have to be let through, and
     `alwaysOn` is set, so the app is the one thing guaranteed to be running.
     The delete is idempotent, so a second instance racing it is harmless.
     """
+    from scripts.purge_old_events import DEFAULT_RETENTION_DAYS as EVENT_RETENTION_DAYS
+    from scripts.purge_old_events import purge as purge_events
     from scripts.purge_old_runs import DEFAULT_RETENTION_DAYS, purge
 
     # Let the cold start finish first — nothing here is urgent to the second.
@@ -120,6 +127,16 @@ async def _purge_loop() -> None:
         except Exception:
             # A DB blip must not silently end retention for the process's life.
             logger.exception("Retention purge failed; retrying in 24h")
+
+        try:
+            n = await purge_events(days=EVENT_RETENTION_DAYS, apply=True)
+            if n:
+                logger.info("Retention purge deleted %d usage event(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Usage-event purge failed; retrying in 24h")
+
         await asyncio.sleep(24 * 60 * 60)
 
 
@@ -205,12 +222,13 @@ app.add_middleware(
 # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only / and
 # /health below, so health probes pass without exposing the API surface.
 if _serves_api():
-    from app.api import feedback, geocode, runs, trips, vehicles
+    from app.api import events, feedback, geocode, runs, trips, vehicles
 
     app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
     app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
     app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
     app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+    app.include_router(events.router, prefix="/api/events", tags=["events"])
     # Live runs own routes under both /api/trips/{id}/… and /api/runs/{id}/…,
     # so they mount at /api rather than under either one.
     app.include_router(runs.router, prefix="/api", tags=["live"])

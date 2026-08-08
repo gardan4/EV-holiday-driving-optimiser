@@ -60,12 +60,31 @@ export default function PrivacyPage() {
           their coordinates, and the route between them.
         </Section>
 
+        <Section title="What we count">
+          We count how many people use this, because otherwise there is no way
+          to know. It is done here rather than by Google or anyone else: no
+          third-party script, no advertising, no profile, and nothing that
+          follows you to another site. What a visit records is the page you
+          opened — as a pattern like <em>/trip/…</em>, never which trip — and
+          whether you planned a route or started a drive. If you arrived from a
+          link somewhere, we keep the site&apos;s name and not the page.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            Telling two visitors apart without knowing who they are: your IP
+            address and browser are scrambled into a code, using a secret that
+            changes every night. So we can count today&apos;s visitors, and the
+            code you get tomorrow has nothing linking it to today&apos;s.
+          </strong>
+          If your browser sends Global Privacy Control or Do Not Track, none of
+          this is sent at all. These counts are deleted after 90 days.
+        </Section>
+
         <Section title="Who else sees it">
           Your start and destination are sent to OpenRouteService to get a route
           and to OpenChargeMap to find chargers along it, both third-party
           services with their own terms. The app is hosted on Microsoft Azure,
-          so Azure necessarily handles the traffic. There is no analytics, no
-          advertising, no trackers, and the page loads no third-party scripts.
+          so Azure necessarily handles the traffic. Beyond those, nothing:
+          no advertising, no trackers, and the page loads no third-party
+          scripts.
           <strong className="block pt-2 font-semibold text-ink-800">
             One thing to know about sharing: pasting a trip link into WhatsApp,
             Slack or LinkedIn makes that platform fetch the page to build a

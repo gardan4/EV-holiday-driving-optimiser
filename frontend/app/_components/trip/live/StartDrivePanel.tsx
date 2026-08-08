@@ -15,6 +15,7 @@ import Link from "next/link"
 import { AlertTriangle, Loader2, Navigation } from "lucide-react"
 import { toast } from "sonner"
 import { Trip, startRun } from "@/lib/client"
+import { track } from "@/lib/analytics"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
 import { storeToken } from "@/lib/useLiveRun"
 
@@ -46,6 +47,7 @@ export default function StartDrivePanel({
         supersede,
       })
       storeToken(trip.id, run.run_id)
+      track("drive_started")
       router.replace(`/trip/${trip.id}/live`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not start the drive"

@@ -119,6 +119,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_GEOCODE: str = "30/minute"       # geocode autocomplete proxy per IP
     RATE_LIMIT_DEFAULT: str = "60/minute"       # general API per IP
     RATE_LIMIT_FEEDBACK: str = "5/hour"         # per IP: writing free text is rare and abusable
+    # Usage events. Has to cover a real session — a page view per navigation
+    # plus the funnel — without leaving a public write endpoint someone can
+    # pour rows into. A busy visitor sees ~20 in an hour; a script hitting the
+    # ceiling just stops being counted, which costs a statistic, not a user.
+    RATE_LIMIT_EVENTS: str = "120/hour"         # per IP
     # Live runs. The write buckets are keyed on the RUN ID rather than the IP
     # (see rate_limit.run_key) — a carful shares one address and a mobile
     # carrier's CGNAT shares one with thousands of strangers.
@@ -148,6 +153,12 @@ class Settings(BaseSettings):
     # Empty (the default) means the read route does not exist — better than a
     # route guarded by a secret nobody set.
     FEEDBACK_TOKEN: str = ""
+
+    # Read the usage numbers by sending this as an X-Stats-Token header. Same
+    # default-deny as above. Deliberately NOT the same value as FEEDBACK_TOKEN:
+    # they are two different capabilities, and sharing one secret means you
+    # cannot hand out or rotate either without the other.
+    STATS_TOKEN: str = ""
 
     # ----- CORS / URLs -----
     # Comma-separated allowed origins (e.g. "https://evtrip.app,https://www.evtrip.app").
