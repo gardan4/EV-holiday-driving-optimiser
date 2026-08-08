@@ -63,19 +63,37 @@
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
-      "label": "Usage: how's it doing (live)",
-      "detail": "Last 7 days from the deployed API. Needs STATS_TOKEN in src/.env.",
+      "label": "Usage: dashboard",
+      "detail": "Last 30 days from the deployed API, as a page in your browser. Needs STATS_TOKEN in src/.env.",
       "type": "shell",
-      "command": "uv run python -m scripts.usage_report --remote --days 7",
+      "command": "uv run python -m scripts.usage_dashboard --remote --days 30",
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Usage: dashboard, choose a window",
+      "detail": "Same page, over however many days you ask for (1–90).",
+      "type": "shell",
+      "command": "uv run python -m scripts.usage_dashboard --remote --days ${input:usageDays}",
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+    },
+    {
+      "label": "Usage: dashboard, keep it refreshing",
+      "detail": "Opens the page and re-renders it every 60s. Ctrl-C in the terminal stops it.",
+      "type": "shell",
+      "command": "uv run python -m scripts.usage_dashboard --remote --days 30 --watch",
       "options": { "cwd": "${workspaceFolder}/src" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
-      "label": "Usage: live, choose a window",
-      "detail": "Same, over however many days you ask for (1–90).",
+      "label": "Usage: terminal table (live)",
+      "detail": "The same numbers as text, for when a browser is overkill.",
       "type": "shell",
-      "command": "uv run python -m scripts.usage_report --remote --days ${input:usageDays}",
+      "command": "uv run python -m scripts.usage_report --remote --days 7",
       "options": { "cwd": "${workspaceFolder}/src" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
