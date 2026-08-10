@@ -68,6 +68,7 @@ def _vehicle_out(v: Vehicle) -> VehicleOut:
         variant=v.variant,
         usable_kwh=v.usable_kwh,
         consumption=v.consumption,
+        nameplate_slug=v.nameplate_slug,
         charge_curve=v.charge_curve,
         max_dc_kw=v.max_dc_kw,
         mass_kg=v.mass_kg,

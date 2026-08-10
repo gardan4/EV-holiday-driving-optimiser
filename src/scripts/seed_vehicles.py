@@ -99,6 +99,7 @@ _VOLVO_CMA_NOTE = (
 VEHICLES: list[dict] = [
     {
         "slug": "vw-id3-pro-58",
+        "nameplate_slug": "vw-id3",
         "make": "Volkswagen",
         "model": "ID.3",
         "variant": "Pro 58 kWh",
@@ -117,6 +118,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "vw-id4-pro-77",
+        "nameplate_slug": "vw-id4",
         "make": "Volkswagen",
         "model": "ID.4",
         "variant": "Pro 77 kWh",
@@ -133,6 +135,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "vw-id7-pro-77",
+        "nameplate_slug": "vw-id7",
         "make": "Volkswagen",
         "model": "ID.7",
         "variant": "Pro 77 kWh",
@@ -150,6 +153,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "cupra-born-58",
+        "nameplate_slug": "cupra-born",
         "make": "Cupra",
         "model": "Born",
         "variant": "58 kWh",
@@ -168,6 +172,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "cupra-born-77",
+        "nameplate_slug": "cupra-born",
         "make": "Cupra",
         "model": "Born",
         "variant": "77 kWh",
@@ -186,6 +191,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "skoda-enyaq-77",
+        "nameplate_slug": "skoda-enyaq",
         "make": "Škoda",
         "model": "Enyaq",
         # Year-qualified because the 2025 Enyaq 85 sits next to it in the
@@ -208,6 +214,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-model3-rwd",
+        "nameplate_slug": "tesla-model-3",
         "make": "Tesla",
         "model": "Model 3",
         "variant": "RWD (LFP 57.5 kWh)",
@@ -225,6 +232,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-model3-lr",
+        "nameplate_slug": "tesla-model-3",
         "make": "Tesla",
         "model": "Model 3",
         "variant": "Long Range 75 kWh",
@@ -242,6 +250,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-model3-performance",
+        "nameplate_slug": "tesla-model-3",
         "make": "Tesla",
         "model": "Model 3",
         "variant": "Performance 79 kWh",
@@ -259,6 +268,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-modely-rwd",
+        "nameplate_slug": "tesla-model-y",
         "make": "Tesla",
         "model": "Model Y",
         "variant": "RWD (LFP 57.5 kWh)",
@@ -276,6 +286,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-modely-lr",
+        "nameplate_slug": "tesla-model-y",
         "make": "Tesla",
         "model": "Model Y",
         "variant": "Long Range AWD 75 kWh",
@@ -293,6 +304,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-modely-performance",
+        "nameplate_slug": "tesla-model-y",
         "make": "Tesla",
         "model": "Model Y",
         "variant": "Performance 79 kWh",
@@ -311,6 +323,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-models-lr",
+        "nameplate_slug": "tesla-model-s",
         "make": "Tesla",
         "model": "Model S",
         "variant": "Long Range 95 kWh",
@@ -328,6 +341,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-models-plaid",
+        "nameplate_slug": "tesla-model-s",
         "make": "Tesla",
         "model": "Model S",
         "variant": "Plaid 95 kWh",
@@ -345,6 +359,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-modelx-lr",
+        "nameplate_slug": "tesla-model-x",
         "make": "Tesla",
         "model": "Model X",
         "variant": "Long Range 95 kWh",
@@ -362,6 +377,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-modelx-plaid",
+        "nameplate_slug": "tesla-model-x",
         "make": "Tesla",
         "model": "Model X",
         "variant": "Plaid 95 kWh",
@@ -380,6 +396,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "tesla-cybertruck-awd",
+        "nameplate_slug": "tesla-cybertruck",
         "make": "Tesla",
         "model": "Cybertruck",
         "variant": "AWD 123 kWh",
@@ -398,6 +415,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "bmw-i4-edrive40",
+        "nameplate_slug": "bmw-i4",
         "make": "BMW",
         "model": "i4",
         "variant": "eDrive40 84 kWh",
@@ -415,6 +433,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "volvo-ex30-er",
+        "nameplate_slug": "volvo-ex30",
         "make": "Volvo",
         "model": "EX30",
         "variant": "Single Motor Extended Range",
@@ -433,6 +452,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "volvo-ex40-er",
+        "nameplate_slug": "volvo-ex40",
         "make": "Volvo",
         "model": "EX40",
         "variant": "Single Motor Extended Range",
@@ -451,6 +471,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "volvo-ec40-er",
+        "nameplate_slug": "volvo-ec40",
         "make": "Volvo",
         "model": "EC40",
         "variant": "Single Motor Extended Range",
@@ -469,6 +490,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "polestar-2-lr-sm",
+        "nameplate_slug": "polestar-2",
         "make": "Polestar",
         "model": "2",
         "variant": "Long Range Single Motor",
@@ -487,6 +509,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "renault-megane-60",
+        "nameplate_slug": "renault-megane",
         "make": "Renault",
         "model": "Mégane E-Tech",
         "variant": "EV60",
@@ -503,6 +526,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "renault-5-52",
+        "nameplate_slug": "renault-5",
         "make": "Renault",
         "model": "5 E-Tech",
         "variant": "Comfort Range 52 kWh",
@@ -522,6 +546,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "hyundai-ioniq5-73",
+        "nameplate_slug": "hyundai-ioniq-5",
         "make": "Hyundai",
         "model": "Ioniq 5",
         "variant": "73 kWh AWD",
@@ -539,6 +564,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "hyundai-ioniq6-74-rwd",
+        "nameplate_slug": "hyundai-ioniq-6",
         "make": "Hyundai",
         "model": "Ioniq 6",
         "variant": "77 kWh RWD",
@@ -557,6 +583,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "kia-ev6-74-rwd",
+        "nameplate_slug": "kia-ev6",
         "make": "Kia",
         "model": "EV6",
         "variant": "77 kWh RWD",
@@ -573,6 +600,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "byd-atto3-60",
+        "nameplate_slug": "byd-atto-3",
         "make": "BYD",
         "model": "Atto 3",
         "variant": "Comfort 60 kWh",
@@ -591,6 +619,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "byd-dolphin-60",
+        "nameplate_slug": "byd-dolphin",
         "make": "BYD",
         "model": "Dolphin",
         "variant": "Design 60 kWh",
@@ -609,6 +638,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "byd-seal-82-rwd",
+        "nameplate_slug": "byd-seal",
         "make": "BYD",
         "model": "Seal",
         "variant": "Design RWD 82 kWh",
@@ -627,6 +657,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "byd-seal-u-72",
+        "nameplate_slug": "byd-seal-u",
         "make": "BYD",
         "model": "Seal U",
         "variant": "Comfort 72 kWh",
@@ -645,6 +676,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "byd-sealion7-82",
+        "nameplate_slug": "byd-sealion-7",
         "make": "BYD",
         "model": "Sealion 7",
         "variant": "Comfort RWD 82 kWh",
@@ -663,6 +695,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "mg4-74-er",
+        "nameplate_slug": "mg-mg4",
         "make": "MG",
         "model": "MG4",
         "variant": "Extended Range 77 kWh",
@@ -681,6 +714,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "xpeng-g6-88",
+        "nameplate_slug": "xpeng-g6",
         "make": "XPeng",
         "model": "G6",
         "variant": "Long Range 88 kWh",
@@ -700,6 +734,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "nio-et5-75",
+        "nameplate_slug": "nio-et5",
         "make": "NIO",
         "model": "ET5",
         "variant": "Standard Range 75 kWh",
@@ -718,6 +753,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "zeekr-x-64",
+        "nameplate_slug": "zeekr-x",
         "make": "Zeekr",
         "model": "X",
         "variant": "Long Range RWD 66 kWh",
@@ -736,6 +772,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "leapmotor-c10-70",
+        "nameplate_slug": "leapmotor-c10",
         "make": "Leapmotor",
         "model": "C10",
         "variant": "Design 70 kWh",
@@ -754,6 +791,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "dongfeng-box-42",
+        "nameplate_slug": "dongfeng-box",
         "make": "Dongfeng",
         "model": "Box",
         "variant": "42 kWh",
@@ -773,6 +811,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "ford-mustang-mach-e-er",
+        "nameplate_slug": "ford-mustang-mach-e",
         "make": "Ford",
         "model": "Mustang Mach-E",
         "variant": "Extended Range RWD 91 kWh",
@@ -791,6 +830,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "ford-f150-lightning-er",
+        "nameplate_slug": "ford-f150-lightning",
         "make": "Ford",
         "model": "F-150 Lightning",
         "variant": "Extended Range 131 kWh",
@@ -810,6 +850,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "chevrolet-bolt-euv",
+        "nameplate_slug": "chevrolet-bolt-euv",
         "make": "Chevrolet",
         "model": "Bolt EUV",
         "variant": "65 kWh",
@@ -829,6 +870,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "chevrolet-equinox-ev",
+        "nameplate_slug": "chevrolet-equinox-ev",
         "make": "Chevrolet",
         "model": "Equinox EV",
         "variant": "LT FWD 85 kWh",
@@ -845,6 +887,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "rivian-r1t-large",
+        "nameplate_slug": "rivian-r1t",
         "make": "Rivian",
         "model": "R1T",
         "variant": "Large Pack AWD 135 kWh",
@@ -863,6 +906,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "lucid-air-grand-touring",
+        "nameplate_slug": "lucid-air",
         "make": "Lucid",
         "model": "Air",
         "variant": "Grand Touring 112 kWh",
@@ -881,6 +925,7 @@ VEHICLES: list[dict] = [
     },
     {
         "slug": "cadillac-lyriq",
+        "nameplate_slug": "cadillac-lyriq",
         "make": "Cadillac",
         "model": "Lyriq",
         "variant": "RWD 102 kWh",

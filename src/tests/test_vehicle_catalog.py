@@ -34,6 +34,7 @@ EXPECTED_KEYS = frozenset(
         "make",
         "model",
         "variant",
+        "nameplate_slug",
         "usable_kwh",
         "consumption",
         "charge_curve",
@@ -234,6 +235,44 @@ class TestCatalog:
             "the near-duplicate cluster search engines pick one winner from. "
             "Keep the shared platform constant and append a sentence about "
             "this car, naming the model year its curve was fitted to."
+        )
+
+    def test_a_nameplate_never_spans_two_makes(self) -> None:
+        makes: dict[str, set[str]] = {}
+        for car in VEHICLES:
+            makes.setdefault(car["nameplate_slug"] or car["slug"], set()).add(car["make"])
+        mixed = {n: sorted(m) for n, m in makes.items() if len(m) > 1}
+        assert not mixed, (
+            f"nameplates covering more than one make: {mixed}. The nameplate "
+            "page prints one manufacturer in its heading and its JSON-LD, so "
+            "a mixed group publishes a page attributing cars to the wrong brand."
+        )
+
+    def test_a_nameplate_is_one_unbroken_run(self) -> None:
+        runs = []
+        for car in VEHICLES:
+            key = car["nameplate_slug"] or car["slug"]
+            if not runs or runs[-1] != key:
+                runs.append(key)
+        split = [n for n, count in Counter(runs).items() if count > 1]
+        assert not split, (
+            f"{split} appear in more than one run. Variants of one car must sit "
+            "together, or the picker scatters them and the /ev card for the "
+            "nameplate lands in a position that matches none of its variants."
+        )
+
+    def test_nameplate_slugs_do_not_collide_with_variant_slugs(self) -> None:
+        variants = {c["slug"] for c in VEHICLES}
+        nameplates = {c["nameplate_slug"] for c in VEHICLES if c["nameplate_slug"]}
+        collisions = sorted(
+            n
+            for n in nameplates & variants
+            if any(c["slug"] == n and c["nameplate_slug"] != n for c in VEHICLES)
+        )
+        assert not collisions, (
+            f"{collisions} name both a nameplate page and a different car's "
+            "variant slug. /ev/<slug> resolves nameplates first, so the car "
+            "would become unreachable and its legacy URL would stop redirecting."
         )
 
     def test_file_order_is_the_display_order(self) -> None:

@@ -83,6 +83,14 @@ class Vehicle(Base):
     make: Mapped[str] = mapped_column(Unicode(80), nullable=False)
     model: Mapped[str] = mapped_column(Unicode(80), nullable=False)
     variant: Mapped[Optional[str]] = mapped_column(Unicode(80), nullable=True)
+    # Which nameplate's page this variant belongs on, e.g. every ID.4 pack size
+    # under "vw-id4". Grouping is a curation call, not a string operation —
+    # Enyaq 77 and Enyaq 85 are one car to a reader while e-3008 and e-5008 are
+    # two — so it is stated per entry rather than derived from make + model.
+    # Null falls back to the car's own slug, i.e. a page of its own.
+    nameplate_slug: Mapped[Optional[str]] = mapped_column(
+        String(60), index=True, nullable=True
+    )
 
     usable_kwh: Mapped[float] = mapped_column(Float, nullable=False)
     consumption: Mapped[dict] = mapped_column(JSON, nullable=False)

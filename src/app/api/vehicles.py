@@ -30,6 +30,7 @@ async def list_vehicles(
             make=v.make,
             model=v.model,
             variant=v.variant,
+            nameplate_slug=v.nameplate_slug,
             usable_kwh=v.usable_kwh,
             consumption=v.consumption,
             charge_curve=v.charge_curve,

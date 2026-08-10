@@ -21,6 +21,7 @@ BORN_SEED = dict(
     make="Cupra",
     model="Born",
     variant="58 kWh",
+    nameplate_slug="cupra-born",
     usable_kwh=58.0,
     consumption={"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0105},
     charge_curve=[[0, 50], [10, 120], [30, 120], [45, 85], [55, 68], [75, 42], [100, 10]],
@@ -104,6 +105,28 @@ class TestVehicles:
         (v,) = resp.json()
         assert v["slug"] == "cupra-born-58"
         assert v["charge_curve"][0] == [0, 50]
+
+    async def test_every_field_survives_serialisation(self, client):
+        """`VehicleOut` is built field by field, not from the ORM object.
+
+        So a column added to the model and to the schema still arrives as its
+        default until someone also adds it to both construction sites — in
+        `api/vehicles.py` and `api/trips.py`. That failure is silent: the key is
+        present, the value is null, and the page that needed it just renders
+        nothing. `nameplate_slug` did exactly this, hence the test.
+        """
+        resp = await client.get("/api/vehicles")
+        (v,) = resp.json()
+        unset = [
+            field
+            for field in ("slug", "make", "model", "variant", "nameplate_slug")
+            if v.get(field) is None
+        ]
+        assert not unset, (
+            f"{unset} came back null for a car that has them. Check both "
+            "VehicleOut(...) call sites, not just the schema."
+        )
+        assert v["nameplate_slug"] == "cupra-born"
 
 
 class TestPlanTrip:

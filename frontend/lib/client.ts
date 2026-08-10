@@ -16,6 +16,8 @@ export interface Vehicle {
   model: string
   variant: string | null
   usable_kwh: number
+  /** Which `/ev` page this variant belongs on; null means a page of its own. */
+  nameplate_slug: string | null
   consumption: { model: string; a_wh_km: number; b_wh_km_per_kph2: number }
   charge_curve: [number, number][]
   max_dc_kw: number

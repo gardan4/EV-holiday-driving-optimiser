@@ -19,6 +19,8 @@ class VehicleOut(BaseModel):
     make: str
     model: str
     variant: Optional[str] = None
+    # Which `/ev` page this variant belongs on. Null means "a page of its own".
+    nameplate_slug: Optional[str] = None
     usable_kwh: float
     consumption: dict
     charge_curve: list
