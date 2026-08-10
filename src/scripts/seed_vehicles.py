@@ -111,7 +111,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 120.0,
         "mass_kg": 1940.0,
         "top_speed_kph": 160.0,
-        "source_note": _MEB_NOTE,
+        "source_note": _MEB_NOTE
+        + " Fitted to the 2023 Pro. The lightest body on this pack, so it sets"
+        + " the floor the heavier 120 kW MEB cars are measured against.",
     },
     {
         "slug": "vw-id4-pro-77",
@@ -160,7 +162,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 120.0,
         "mass_kg": 1900.0,
         "top_speed_kph": 160.0,
-        "source_note": _MEB_NOTE,
+        "source_note": _MEB_NOTE
+        + " Fitted to the 2022-2024 58 kWh Born, which shares the ID.3's pack"
+        + " and curve; the wider standard tyres cost it a little consumption.",
     },
     {
         "slug": "cupra-born-77",
@@ -176,7 +180,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 135.0,
         "mass_kg": 2080.0,
         "top_speed_kph": 160.0,
-        "source_note": _MEB_NOTE,
+        "source_note": _MEB_NOTE
+        + " Fitted to the 2023 77 kWh Born. The bigger pack lifts the peak to"
+        + " 135 kW and holds it about five points of SoC longer than the 58.",
     },
     {
         "slug": "skoda-enyaq-77",
@@ -195,7 +201,10 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 135.0,
         "mass_kg": 2290.0,
         "top_speed_kph": 180.0,
-        "source_note": _MEB_NOTE,
+        "source_note": _MEB_NOTE
+        + " Fitted to the 2021-2024 Enyaq 80, before the 2025 facelift raised"
+        + " the peak to 175 kW. Tall SUV body, so the speed penalty is steeper"
+        + " than the ID.3's on the same platform.",
     },
     {
         "slug": "tesla-model3-rwd",
@@ -296,7 +305,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 2140.0,
         "top_speed_kph": 250.0,
-        "source_note": "Curated from Fastned/InsideEVs tests.",
+        "source_note": "Curated from Fastned/InsideEVs tests of the 2023 Model Y"
+        " Performance. Same 250 kW peak as the Long Range, but the wider"
+        " tyres and lowered ride cost it noticeably more per km at 130.",
     },
     {
         "slug": "tesla-models-lr",
@@ -363,7 +374,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 2535.0,
         "top_speed_kph": 262.0,
-        "source_note": "Curated from Fastned/InsideEVs tests.",
+        "source_note": "Curated from Fastned/InsideEVs tests of the 2023 Model X"
+        " Plaid. Two and a half tonnes behind the largest frontal area in the"
+        " Tesla range, which is what the quadratic term here is really saying.",
     },
     {
         "slug": "tesla-cybertruck-awd",
@@ -772,7 +785,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 150.0,
         "mass_kg": 2200.0,
         "top_speed_kph": 180.0,
-        "source_note": _US_NOTE,
+        "source_note": _US_NOTE
+        + " Fitted to the 2023 Extended Range RWD. A modest 150 kW peak that"
+        + " holds unusually flat, so it rewards longer stops than its rivals.",
     },
     {
         "slug": "ford-f150-lightning-er",
@@ -878,7 +893,9 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 190.0,
         "mass_kg": 2650.0,
         "top_speed_kph": 210.0,
-        "source_note": _US_NOTE,
+        "source_note": _US_NOTE
+        + " Fitted to the 2024 Lyriq RWD on GM's Ultium pack: a 190 kW peak on"
+        + " a 102 kWh pack, so it gains SoC slowly in percentage terms.",
     },
 ]
 
