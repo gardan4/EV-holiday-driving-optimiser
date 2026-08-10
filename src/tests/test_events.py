@@ -61,6 +61,8 @@ class TestPathScrubbing:
             (f"/trip/{TRIP_ID}/live", "/trip/:id/live"),
             (f"/trip/{TRIP_ID}/drive", "/trip/:id/drive"),
             (f"/trip/{TRIP_ID}/runs/a1b2c3d4e5f6a7b8", "/trip/:id/runs/:id"),
+            ("/ev", "/ev"),
+            ("/ev/", "/ev"),
             # Unknown shapes collapse rather than being stored verbatim.
             ("/admin/whatever", "/other"),
             ("relative/path", "/other"),
@@ -69,6 +71,27 @@ class TestPathScrubbing:
     )
     def test_paths_reduce_to_known_patterns(self, raw, expected):
         assert normalize_path(raw) == expected
+
+    @pytest.mark.parametrize(
+        "slug",
+        [
+            # Long-with-a-digit, which _OPAQUE_RE would have caught…
+            "vw-id3-pro-58",
+            "hyundai-ioniq6-74-rwd",
+            # …and short or digit-free, which it would not. Both must land in
+            # the same bucket or the catalog's traffic is split across two rows.
+            "tesla-modely-rwd",
+            "renault-5-52",
+            "cupra-born-58",
+        ],
+    )
+    def test_vehicle_slugs_all_collapse_to_one_pattern(self, slug):
+        assert normalize_path(f"/ev/{slug}") == "/ev/:slug"
+        assert normalize_path(f"/ev/{slug}?utm_source=linkedin") == "/ev/:slug"
+
+    def test_ev_rule_does_not_swallow_deeper_paths(self):
+        """The rule is one segment deep — anything else takes the normal route."""
+        assert normalize_path("/ev/foo/bar") == "/other"
 
     def test_query_string_never_survives(self):
         """The query string is where a typed place name or a stray id would be."""

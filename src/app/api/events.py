@@ -52,6 +52,8 @@ KNOWN_PATHS = frozenset(
     {
         "/",
         "/privacy",
+        "/ev",
+        "/ev/:slug",
         "/trip/:id",
         "/trip/:id/live",
         "/trip/:id/drive",
@@ -67,6 +69,15 @@ _UUID_RE = re.compile(
 # failure mode of this regex is losing detail, never leaking an id.
 _OPAQUE_RE = re.compile(r"^(?=.*\d)[A-Za-z0-9_-]{12,}$")
 
+# Vehicle-catalog pages, collapsed before the generic id rules get a look in.
+#
+# The slug is public catalog data, not an identifier for anybody, so nothing
+# here is about hiding it — it is about counting it consistently. Left to
+# `_OPAQUE_RE`, "vw-id3-pro-58" would collapse to ":id" (long, has a digit)
+# while "tesla-modely-rwd" would not (no digit), so half the catalog would land
+# on "/ev/:slug" and the other half on "/other". One rule, one bucket.
+_EV_SLUG_RE = re.compile(r"^/ev/[a-z0-9-]+$")
+
 
 def normalize_path(raw: str | None) -> str | None:
     """Reduce a URL path to one of `KNOWN_PATHS`, or "/other"."""
@@ -79,6 +90,9 @@ def normalize_path(raw: str | None) -> str | None:
         path = "/" + path
     if len(path) > 1:
         path = path.rstrip("/") or "/"
+
+    if _EV_SLUG_RE.match(path):
+        return "/ev/:slug"
 
     parts = [
         ":id" if (_UUID_RE.match(seg) or _OPAQUE_RE.match(seg)) else seg
