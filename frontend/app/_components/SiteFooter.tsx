@@ -19,6 +19,9 @@ export default function SiteFooter() {
         <span className="font-display font-semibold text-ink-700">
           EV Trip Optimizer
         </span>
+        <Link href="/ev" className="underline underline-offset-2 hover:text-ink-800">
+          EV charging curves
+        </Link>
         <Link href="/privacy" className="underline underline-offset-2 hover:text-ink-800">
           Privacy &amp; what we store
         </Link>

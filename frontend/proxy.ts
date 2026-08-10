@@ -10,8 +10,11 @@ import { NextRequest, NextResponse } from "next/server"
 const INDEXABLE = [
   /^\/$/,
   /^\/privacy$/,
+  /^\/ev$/,
+  /^\/ev\/[a-z0-9-]+$/,
   /^\/robots\.txt$/,
   /^\/sitemap\.xml$/,
+  /^\/llms\.txt$/,
   /^\/opengraph-image/,
 ]
 

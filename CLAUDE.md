@@ -68,6 +68,15 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   SoC sliders) → `POST /api/trips` → redirect to `/trip/[id]`.
 - `app/trip/[id]/` — server-rendered results + per-trip OG image.
   `ResultsView` owns `selectedSpeed`; chart, itinerary, and 3D scene follow.
+- `app/ev/` — the indexable catalog: `/ev` plus one `/ev/[slug]` page per car,
+  server-rendered from `GET /api/vehicles` on an hourly revalidate.
+  `lib/vehicles.ts` holds the fetch *and* a deliberate port of the simulator's
+  `curve_power_kw` / `charge_minutes` / `consumption_wh_km` — the pages claim
+  these are what the app models, so the two must move together.
+- SEO surface: `lib/seo.ts` (schema.org JSON-LD, emitted via
+  `_components/JsonLd.tsx`), `lib/faq.ts` (one source for the rendered FAQ and
+  its `FAQPage` markup — they must not drift), `app/llms.txt/route.ts`,
+  `lib/site.ts` (the single `SITE_URL`).
 - `app/_components/trip/scene/JourneyScene.tsx` — the 3D diorama (all
   procedural geometry, no assets, strict-CSP safe). `geometry.ts` maps the real
   polyline to an arc-length-true scene curve — stop positions and playback are
@@ -121,6 +130,22 @@ the pipeline is green before infra exists. Infra deploy is manual
   `usage.ALLOWED_EVENTS`, so a public write endpoint can't become free storage.
   Rows expire at 90 days via `scripts.purge_old_events`, on the same
   `main._purge_loop` as the location trails.
+- **The catalog pages are the SEO surface, and they are computed.** Before
+  them the site had two indexable pages, one of which was the privacy notice,
+  and an `<h1>` ("Should you really drive 100?") matching no query anyone types.
+  `/ev/[slug]` exists because 46 hand-curated charge curves are the one thing
+  here nobody else has — stated as server-rendered text and `Vehicle` JSON-LD,
+  which is what answer engines cite. Every number on those pages is derived
+  from the catalog by the ported simulator maths; none of it is hand-typed, so
+  nothing can quietly go stale or contradict the planner. Keep the "what the
+  model does not include" section honest — flat road, mild weather, no
+  charger-side limits — it is why the numbers are worth trusting.
+- **`robots.ts` names AI crawlers explicitly** even though `User-agent: *`
+  already allows them. It is the artefact you point at when a bot is missing,
+  and it is where the line goes if training-vs-retrieval ever needs splitting.
+  A robots allow is necessary, not sufficient: Cloudflare's "block AI crawlers"
+  rule would stop all of them before they reach the origin.
+
 - **ORS free-flow under-caps fast roads**, so motorway-like segments
   (free-flow ≥ 105) use country legal caps instead; disclosed in the UI's
   assumptions accordion. The naive clamp survives behind

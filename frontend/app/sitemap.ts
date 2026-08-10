@@ -1,17 +1,29 @@
 import type { MetadataRoute } from "next"
+import { SITE_URL } from "@/lib/site"
+import { fetchVehiclesOrEmpty } from "@/lib/vehicles"
 
-// Fallback only. `NEXT_PUBLIC_SITE_URL` is set at build time by the deploy
-// workflow; this is what you get if that ever goes missing again. It has to be
-// a host we actually serve — the previous placeholder was a domain registered
-// to somebody else, so every og:image and canonical URL pointed at a stranger.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://evtrip.dev"
+/** Rebuilt hourly alongside the catalog pages it lists. */
+export const revalidate = 3600
 
-/** Public, indexable routes only. Add your marketing pages here as you build them.
- *  Keep in step with `INDEXABLE` in `proxy.ts` — a page listed here but noindexed
- *  there just tells crawlers to fetch something they are then told to discard. */
-export default function sitemap(): MetadataRoute.Sitemap {
+/** Public, indexable routes only. Keep in step with `INDEXABLE` in `proxy.ts` —
+ *  a page listed here but noindexed there just tells crawlers to fetch
+ *  something they are then told to discard.
+ *
+ *  Vehicle pages come from the live catalog rather than a hand-kept list, so
+ *  adding a car to `seed_vehicles.py` is all it takes to get it indexed. When
+ *  the API is unreachable this degrades to the static routes: a short sitemap
+ *  costs a crawl cycle, a 500 costs the whole file. */
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const vehicles = await fetchVehiclesOrEmpty()
+
   return [
     { url: `${SITE_URL}/`, changeFrequency: "weekly", priority: 1.0 },
+    { url: `${SITE_URL}/ev`, changeFrequency: "monthly", priority: 0.8 },
+    ...vehicles.map((v) => ({
+      url: `${SITE_URL}/ev/${v.slug}`,
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    })),
     { url: `${SITE_URL}/privacy`, changeFrequency: "yearly", priority: 0.3 },
   ]
 }
