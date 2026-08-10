@@ -79,6 +79,44 @@ export async function findVehicle(slug: string): Promise<Vehicle | null> {
 }
 
 // ---------------------------------------------------------------------------
+// Nameplates
+//
+// A nameplate is the car a reader is looking for; a vehicle is one variant of
+// it. `/ev` shows one page per nameplate with its variants side by side,
+// because four ID.4 pages differing only in table numbers are four weak
+// documents where one is strong. Which variants group together is a curation
+// call carried on the catalog row — see `nameplate_slug` in the seed file.
+// ---------------------------------------------------------------------------
+
+/** A variant with no nameplate is its own: it gets a page to itself. */
+export function nameplateKey(v: Vehicle): string {
+  return v.nameplate_slug ?? v.slug
+}
+
+/** Nameplates in catalog order, each holding its variants in catalog order. */
+export function groupByNameplate(vehicles: Vehicle[]): Map<string, Vehicle[]> {
+  const groups = new Map<string, Vehicle[]>()
+  for (const v of vehicles) {
+    const key = nameplateKey(v)
+    const existing = groups.get(key)
+    if (existing) existing.push(v)
+    else groups.set(key, [v])
+  }
+  return groups
+}
+
+/** "Volkswagen ID.4" — the nameplate, without any variant's trim string. */
+export function nameplateName(variants: Vehicle[]): string {
+  const [first] = variants
+  return [first.make, first.model].filter(Boolean).join(" ")
+}
+
+/** "ID.4" — for lists already grouped under the make. */
+export function nameplateShortName(variants: Vehicle[]): string {
+  return variants[0].model
+}
+
+// ---------------------------------------------------------------------------
 // Naming
 // ---------------------------------------------------------------------------
 
@@ -172,7 +210,7 @@ export function averageKw(v: Vehicle, socFrom: number, socTo: number): number {
  *
  *  Searched forward from the peak, not from 0: every curve here starts low
  *  (a cold-ish pack at 0% accepts well under peak), so scanning from zero would
- *  report "tapers at 0%" for all 46 cars. */
+ *  report "tapers at 0%" for every car in the catalog. */
 export function taperSoc(v: Vehicle, fraction = 0.5): number | null {
   let peak = 0
   let peakSoc = 0

@@ -97,22 +97,27 @@ export function breadcrumbLd(trail: { name: string; path: string }[]) {
 }
 
 /**
- * One car, as `Vehicle` (a schema.org subtype of Product).
+ * One variant, as `Vehicle` (a schema.org subtype of Product).
  *
  * The `additionalProperty` bag carries the numbers that make this page worth
  * citing at all — the fitted consumption coefficients, the modelled 10→80%
  * time, the average power that stop really delivers. Vocabulary has no terms
  * for those, and `PropertyValue` is how you say so without inventing any.
+ *
+ * `pageSlug` is the nameplate page the variant is published on, which is not
+ * its own slug once several variants share a page. The `@id` still keys on the
+ * variant, so three ID.4 nodes on one page stay three distinct things rather
+ * than three conflicting descriptions of one.
  */
-export function vehicleLd(v: Vehicle) {
+export function vehicleLd(v: Vehicle, pageSlug: string = v.slug) {
   const name = vehicleName(v)
   const peakKw = Math.max(...v.charge_curve.map(([, kw]) => kw))
 
   return {
     "@type": "Vehicle",
-    "@id": abs(`/ev/${v.slug}`) + "#vehicle",
+    "@id": abs(`/ev/${pageSlug}`) + `#${v.slug}`,
     name,
-    url: abs(`/ev/${v.slug}`),
+    url: abs(`/ev/${pageSlug}`),
     manufacturer: { "@type": "Organization", name: v.make },
     model: v.model,
     vehicleConfiguration: v.variant ?? undefined,

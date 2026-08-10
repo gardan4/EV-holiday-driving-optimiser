@@ -1,5 +1,9 @@
 import { SITE_NAME, abs } from "@/lib/site"
-import { fetchVehiclesOrEmpty, vehicleName } from "@/lib/vehicles"
+import {
+  fetchVehiclesOrEmpty,
+  groupByNameplate,
+  nameplateName,
+} from "@/lib/vehicles"
 
 /**
  * `/llms.txt` — the llmstxt.org convention: one markdown file that tells a
@@ -17,21 +21,38 @@ export const revalidate = 3600
 
 export async function GET() {
   const vehicles = await fetchVehiclesOrEmpty()
+  const nameplates = [...groupByNameplate(vehicles).entries()]
 
-  const catalog = vehicles.length
-    ? vehicles
-        .map(
-          (v) =>
-            `- [${vehicleName(v)}](${abs(`/ev/${v.slug}`)}): ${v.usable_kwh} kWh usable, ` +
-            `${Math.round(Math.max(...v.charge_curve.map(([, kw]) => kw)))} kW peak DC. ` +
+  // One line per nameplate, listing the versions it covers — a model reading
+  // this should learn that "ID.4" is several cars with different numbers, not
+  // pick whichever variant happened to be listed first.
+  const catalog = nameplates.length
+    ? nameplates
+        .map(([slug, group]) => {
+          const packs = group.map((v) => v.usable_kwh)
+          const peak = Math.round(
+            Math.max(...group.flatMap((v) => v.charge_curve.map(([, kw]) => kw)))
+          )
+          const versions =
+            group.length > 1
+              ? `${group.length} versions (${group.map((v) => v.variant ?? v.model).join("; ")}), `
+              : ""
+          const kwh =
+            Math.min(...packs) === Math.max(...packs)
+              ? `${packs[0]} kWh usable`
+              : `${Math.min(...packs)}-${Math.max(...packs)} kWh usable`
+          return (
+            `- [${nameplateName(group)}](${abs(`/ev/${slug}`)}): ${versions}${kwh}, ` +
+            `up to ${peak} kW peak DC. ` +
             `Charging curve, modelled charge times, motorway consumption and range by cruise speed.`
-        )
+          )
+        })
         .join("\n")
     : `- [EV catalog](${abs("/ev")}): charging curves and motorway consumption for every car in the planner.`
 
   const body = `# ${SITE_NAME}
 
-> A free, no-signup web app that answers one question: what cruise speed gets you to your destination earliest in an electric car, once charging stops are counted? It fetches the real route, then simulates it at every speed from 90 to 160 km/h, each with its own optimal DC charging plan, and returns the total-time-versus-speed curve, a stop-by-stop itinerary, and an animated 3D playback of the drive.
+> A free, no-signup web app that answers one question: what cruise speed gets you to your destination earliest in an electric car, once charging stops are counted? It fetches the real route, then simulates it at every speed from 90 km/h up to the car's own limiter (160 at most, lower for cars limited below it), each with its own optimal DC charging plan, and returns the total-time-versus-speed curve, a stop-by-stop itinerary, and an animated 3D playback of the drive.
 
 ## What it does
 

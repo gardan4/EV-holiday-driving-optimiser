@@ -9,10 +9,24 @@ import {
   chargeMinutes,
   consumptionWhKm,
   fetchVehicles,
+  groupByNameplate,
+  nameplateName,
+  nameplateShortName,
   rangeKm,
   vehicleShortName,
 } from "@/lib/vehicles"
 import type { Vehicle } from "@/lib/client"
+
+/** One nameplate: its page slug and the variants published on it. */
+type Nameplate = [string, Vehicle[]]
+
+/** "58-77" when a nameplate's versions differ, "77" when they agree. */
+function range(group: Vehicle[], of: (v: Vehicle) => number): string {
+  const values = group.map(of)
+  const lo = Math.min(...values)
+  const hi = Math.max(...values)
+  return lo === hi ? `${lo}` : `${lo}-${hi}`
+}
 
 // The catalog only changes on deploy, so render once an hour and serve the
 // cached HTML to everything else — including crawlers, which is most of the
@@ -37,7 +51,8 @@ export const metadata: Metadata = {
 
 export default async function VehicleIndexPage() {
   const vehicles = await fetchVehicles()
-  const byMake = groupByMake(vehicles)
+  const nameplates = [...groupByNameplate(vehicles).entries()]
+  const byMake = groupByMake(nameplates)
 
   return (
     <main className="min-h-screen">
@@ -56,12 +71,12 @@ export default async function VehicleIndexPage() {
             url: abs("/ev"),
             mainEntity: {
               "@type": "ItemList",
-              numberOfItems: vehicles.length,
-              itemListElement: vehicles.map((v, i) => ({
+              numberOfItems: nameplates.length,
+              itemListElement: nameplates.map(([slug, group], i) => ({
                 "@type": "ListItem",
                 position: i + 1,
-                url: abs(`/ev/${v.slug}`),
-                name: `${v.make} ${vehicleShortName(v)}`,
+                url: abs(`/ev/${slug}`),
+                name: nameplateName(group),
               })),
             },
           }
@@ -81,11 +96,11 @@ export default async function VehicleIndexPage() {
           Charging curves and motorway consumption
         </h1>
         <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-500">
-          These are the {vehicles.length} cars the trip planner can simulate. Each one carries a
-          hand-curated DC charging curve and a consumption model fitted to motorway speeds, and
-          each page shows what those mean in practice: how long a 10-80% stop really takes, what
-          the car uses per kilometre at 100 versus 130 km/h, and how far a full pack goes at each
-          cruise speed.
+          These are the {vehicles.length} cars the trip planner can simulate, across{" "}
+          {nameplates.length} models. Each version carries a hand-curated DC charging curve and a
+          consumption model fitted to motorway speeds, and each page shows what those mean in
+          practice: how long a 10-80% stop really takes, what the car uses per kilometre at 100
+          versus 130 km/h, and how far a full pack goes at each cruise speed.
         </p>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-400">
           The figures are modelled, not measured by us. Charging curves are curated from published
@@ -97,29 +112,44 @@ export default async function VehicleIndexPage() {
           <section key={make} className="mt-10">
             <h2 className="font-display text-xl font-semibold text-ink-900">{make}</h2>
             <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-              {cars.map((v) => (
-                <li key={v.slug}>
-                  <Link
-                    href={`/ev/${v.slug}`}
-                    className="block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition hover:border-brand-300 hover:shadow-md"
-                  >
-                    <span className="font-display font-semibold text-ink-900">
-                      {vehicleShortName(v)}
-                    </span>
-                    <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-ink-500">
-                      <Stat label="Usable" value={`${v.usable_kwh} kWh`} />
-                      <Stat label="10-80%" value={`${Math.round(chargeMinutes(v, 10, 80))} min`} />
-                      <Stat
-                        label="At 130"
-                        value={`${Math.round(consumptionWhKm(v, 130))} Wh/km`}
-                      />
-                    </dl>
-                    <p className="mt-2 text-xs text-ink-400">
-                      About {Math.round(rangeKm(v, 120))} km at a steady 120 km/h on a full pack.
-                    </p>
-                  </Link>
-                </li>
-              ))}
+              {cars.map(([slug, group]) => {
+                // Ranges where the versions differ, a single figure where they
+                // agree — a card that says "58-77 kWh" is telling the reader
+                // something a card that silently picks one version is not.
+                const best = group.reduce((a, b) => (a.usable_kwh >= b.usable_kwh ? a : b))
+                return (
+                  <li key={slug}>
+                    <Link
+                      href={`/ev/${slug}`}
+                      className="block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition hover:border-brand-300 hover:shadow-md"
+                    >
+                      <span className="font-display font-semibold text-ink-900">
+                        {nameplateShortName(group)}
+                      </span>
+                      {group.length > 1 && (
+                        <span className="ml-2 text-xs text-ink-400">
+                          {group.length} versions
+                        </span>
+                      )}
+                      <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-ink-500">
+                        <Stat label="Usable" value={`${range(group, (v) => v.usable_kwh)} kWh`} />
+                        <Stat
+                          label="10-80%"
+                          value={`${range(group, (v) => Math.round(chargeMinutes(v, 10, 80)))} min`}
+                        />
+                        <Stat
+                          label="At 130"
+                          value={`${range(group, (v) => Math.round(consumptionWhKm(v, 130)))} Wh/km`}
+                        />
+                      </dl>
+                      <p className="mt-2 text-xs text-ink-400">
+                        About {Math.round(rangeKm(best, 120))} km at a steady 120 km/h on a full
+                        pack{group.length > 1 ? `, in the ${vehicleShortName(best)}` : ""}.
+                      </p>
+                    </Link>
+                  </li>
+                )
+              })}
             </ul>
           </section>
         ))}
@@ -141,12 +171,13 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 /** Group by make, keeping the catalog's own ordering within each make (the API
  *  sorts by `sort_order`, which is the curated "show the Born first" order). */
-function groupByMake(vehicles: Vehicle[]): [string, Vehicle[]][] {
-  const groups = new Map<string, Vehicle[]>()
-  for (const v of vehicles) {
-    const list = groups.get(v.make)
-    if (list) list.push(v)
-    else groups.set(v.make, [v])
+function groupByMake(nameplates: Nameplate[]): [string, Nameplate[]][] {
+  const groups = new Map<string, Nameplate[]>()
+  for (const nameplate of nameplates) {
+    const make = nameplate[1][0].make
+    const list = groups.get(make)
+    if (list) list.push(nameplate)
+    else groups.set(make, [nameplate])
   }
   return [...groups.entries()]
 }
