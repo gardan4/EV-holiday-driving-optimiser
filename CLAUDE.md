@@ -133,7 +133,7 @@ the pipeline is green before infra exists. Infra deploy is manual
 - **The catalog pages are the SEO surface, and they are computed.** Before
   them the site had two indexable pages, one of which was the privacy notice,
   and an `<h1>` ("Should you really drive 100?") matching no query anyone types.
-  `/ev/[slug]` exists because 46 hand-curated charge curves are the one thing
+  `/ev/[slug]` exists because the hand-curated charge curves are the one thing
   here nobody else has — stated as server-rendered text and `Vehicle` JSON-LD,
   which is what answer engines cite. Every number on those pages is derived
   from the catalog by the ported simulator maths; none of it is hand-typed, so
