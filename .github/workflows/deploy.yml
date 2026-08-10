@@ -27,6 +27,12 @@ env:
   # DNS. The azurewebsites hosts stay reachable but are no longer what the app
   # calls itself.
   SITE_URL: https://evtrip.dev
+  # IndexNow ownership key. Public by design — the proof is that the same value
+  # is served from the site's own root, so there is nothing here to keep secret
+  # and a GitHub secret would only hide it from the person maintaining it.
+  # MUST match the filename in frontend/public/<key>.txt. Rotating means
+  # renaming that file and this line in the same commit.
+  INDEXNOW_KEY: 6581342a69b7a4d859b3c51982389db3
   API_URL: https://api.evtrip.dev
 
 jobs:
@@ -389,4 +395,68 @@ jobs:
           az webapp restart \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --name ${{ env.WEB_APP_NAME }} \
-            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container." 
+            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container."
+
+      # Push the new URL set to Bing/Yandex instead of waiting to be crawled.
+      # Advisory only: `continue-on-error` because a search engine's ingest
+      # endpoint being unhappy is not a reason to call a good deploy failed.
+      - name: Ping IndexNow
+        if: steps.az.outputs.configured == 'true'
+        continue-on-error: true
+        env:
+          SITE: ${{ env.SITE_URL }}
+          KEY: ${{ env.INDEXNOW_KEY }}
+        run: |
+          set -uo pipefail
+          HOST="${SITE#https://}"
+
+          # The container was just rolled. Submitting before it answers would
+          # ship the *old* sitemap, and the key file 404s during a cold start —
+          # which IndexNow reports as 403 "invalid key" and is a confusing thing
+          # to debug a week later.
+          for i in $(seq 1 30); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$SITE/$KEY.txt")" = "200" ]; then
+              echo "key file live after ${i} attempt(s)"; break
+            fi
+            [ "$i" = "30" ] && { echo "::warning title=IndexNow skipped::key file never came up"; exit 0; }
+            sleep 10
+          done
+
+          # Serve-side check before we ask anyone else to trust it: the file has
+          # to contain exactly the key we are about to submit. A mismatch here
+          # is the whole failure mode of the two-copies-of-the-key design.
+          SERVED="$(curl -s --max-time 10 "$SITE/$KEY.txt" | tr -d '[:space:]')"
+          if [ "$SERVED" != "$KEY" ]; then
+            echo "::warning title=IndexNow skipped::key file content does not match INDEXNOW_KEY"
+            exit 0
+          fi
+
+          # The sitemap is already the answer to "what should be indexed", so
+          # derive the list from it rather than keeping a second copy in CI.
+          # Two plain substitutions rather than one `</\?loc>`: the `\?` there is
+          # a GNU sed extension that quietly leaves the tags in place on BSD sed,
+          # and the payload still looks plausible when it does.
+          curl -s --max-time 30 "$SITE/sitemap.xml" \
+            | grep -o '<loc>[^<]*</loc>' \
+            | sed -e 's|<loc>||' -e 's|</loc>||' > urls.txt
+          COUNT=$(wc -l < urls.txt | tr -d ' ')
+          if [ "$COUNT" = "0" ]; then
+            echo "::warning title=IndexNow skipped::sitemap returned no URLs"
+            exit 0
+          fi
+
+          jq -Rn --arg host "$HOST" --arg key "$KEY" \
+                 --arg loc "$SITE/$KEY.txt" \
+                 '{host:$host, key:$key, keyLocation:$loc,
+                   urlList:[inputs | select(length>0)]}' urls.txt > body.json
+
+          CODE=$(curl -s -o resp.txt -w '%{http_code}' --max-time 30 \
+            -X POST "https://api.indexnow.org/indexnow" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data @body.json)
+
+          # 200 accepted, 202 accepted with key validation still pending.
+          case "$CODE" in
+            200|202) echo "::notice title=IndexNow::submitted $COUNT URLs (HTTP $CODE)" ;;
+            *) echo "::warning title=IndexNow::HTTP $CODE — $(cat resp.txt)" ;;
+          esac 
