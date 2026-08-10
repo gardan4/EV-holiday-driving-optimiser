@@ -10,6 +10,62 @@ interface VehiclePickerProps {
   onChange: (vehicleId: string) => void
 }
 
+/**
+ * One folded spelling of a car's printed name, with every separator removed.
+ *
+ * Two things people type were unreachable before this. Accents: the catalog
+ * says "Škoda" and "Mégane", nobody reaches for the caron, and a plain
+ * lower-cased `includes` never matched. Punctuation: the catalog says "ID.3"
+ * and people type "id3" or "id 3". Stripping the separators from both sides
+ * collapses all three spellings onto one string, so each of them hits.
+ *
+ * The name is still the only thing searched — see the note in the component.
+ */
+function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+}
+
+interface SearchResult {
+  shown: Vehicle[]
+  /** True when nothing matched every term and these are the near misses. */
+  approximate: boolean
+}
+
+/**
+ * Filter the catalog, and fall back to the closest cars rather than to nothing.
+ *
+ * An empty result is nearly always someone whose exact variant we do not carry
+ * — they type "id4 gtx" or "enyaq 60" and the make and model are right. So when
+ * requiring every term matches no car, keep the cars that match the most terms
+ * instead. That surfaces the rest of the ID.4 range, which is the useful answer.
+ *
+ * When no term matches anything at all the brand genuinely is not in the
+ * catalog, and there is no nearest car worth showing. That case still returns
+ * empty, and the component says so plainly.
+ */
+function search(vehicles: Vehicle[], query: string): SearchResult {
+  const terms = query.trim().split(/\s+/).map(fold).filter(Boolean)
+  if (terms.length === 0) return { shown: vehicles, approximate: false }
+
+  const scored = vehicles.map((v) => {
+    const hay = fold(`${v.make} ${v.model} ${v.variant ?? ""}`)
+    return { v, hits: terms.filter((t) => hay.includes(t)).length }
+  })
+
+  const exact = scored.filter((s) => s.hits === terms.length)
+  if (exact.length > 0) return { shown: exact.map((s) => s.v), approximate: false }
+
+  // Only the joint-best near misses: for "tesla model 9" that is every Tesla,
+  // not every car whose name happens to contain a 9.
+  const best = Math.max(...scored.map((s) => s.hits))
+  if (best === 0) return { shown: [], approximate: false }
+  return { shown: scored.filter((s) => s.hits === best).map((s) => s.v), approximate: true }
+}
+
 /** Card-per-car picker (radio semantics), filterable once the catalog is long. */
 export default function VehiclePicker({ vehicles, value, onChange }: VehiclePickerProps) {
   const [query, setQuery] = useState("")
@@ -17,15 +73,10 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
   // Match the printed name only. Folding the spec numbers in as well seemed
   // helpful until "ioniq 6" matched the Ioniq 5, whose 72.6 kWh contains a 6 —
   // people search for their car by name, so the name is what we search.
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return vehicles
-    const terms = q.split(/\s+/)
-    return vehicles.filter((v) => {
-      const hay = `${v.make} ${v.model} ${v.variant ?? ""}`.toLowerCase()
-      return terms.every((t) => hay.includes(t))
-    })
-  }, [vehicles, query])
+  const { shown, approximate } = useMemo(
+    () => search(vehicles, query),
+    [vehicles, query]
+  )
 
   return (
     <div>
@@ -69,6 +120,12 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
             className="w-full rounded-xl border border-ink-200 bg-white py-2 pl-9 pr-3 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
           />
         </div>
+      )}
+
+      {approximate && (
+        <p className="mb-2 text-xs text-ink-500" role="status">
+          Nothing matches “{query}” exactly. The closest cars we model:
+        </p>
       )}
 
       <div
@@ -125,7 +182,7 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
 
       {vehicles.length > 0 && shown.length === 0 && (
         <p className="mt-2 text-xs text-ink-400">
-          No car matches “{query}”.{" "}
+          We don&apos;t model any car like “{query}” yet.{" "}
           <button
             type="button"
             onClick={() => setQuery("")}
