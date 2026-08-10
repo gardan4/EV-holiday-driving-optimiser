@@ -189,7 +189,7 @@ export default function FeedbackLink() {
                   <Check className="h-5 w-5 text-brand-600" />
                 </div>
                 <p className="mt-3 font-display text-base font-semibold text-ink-900">
-                  That landed — thank you.
+                  That landed. Thank you.
                 </p>
                 <p className="mt-1 text-sm text-ink-500">
                   It genuinely helps. Every message gets read.
@@ -213,7 +213,7 @@ export default function FeedbackLink() {
                       What would make this better?
                     </h2>
                     <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-                      Goes straight to the person who built it — no account, no
+                      Goes straight to the person who built it. No account, no
                       third party.
                     </p>
                   </div>
@@ -269,7 +269,7 @@ export default function FeedbackLink() {
                   autoComplete="email"
                   aria-label="Your email, only if you want a reply"
                   className="mt-2 w-full rounded-lg border border-ink-200 px-3 py-2 text-base text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200 sm:text-sm"
-                  placeholder="Email — only if you want a reply (optional)"
+                  placeholder="Email, only if you want a reply (optional)"
                 />
 
                 <button

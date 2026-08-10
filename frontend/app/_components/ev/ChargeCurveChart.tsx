@@ -42,7 +42,7 @@ export default function ChargeCurveChart({ vehicle }: { vehicle: Vehicle }) {
       role="img"
       aria-label={`DC charging power against state of charge, peaking at ${Math.round(peak)} kilowatts`}
     >
-      <title>{`DC charging curve — peak ${Math.round(peak)} kW`}</title>
+      <title>{`DC charging curve, peak ${Math.round(peak)} kW`}</title>
       <desc>
         {vehicle.charge_curve
           .map(([soc, kw]) => `${soc}% ${Math.round(kw)} kW`)

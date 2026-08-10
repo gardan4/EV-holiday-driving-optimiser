@@ -34,7 +34,7 @@ export async function generateMetadata({
   if (best?.total_min != null) {
     description = `${origin} → ${dest}: cruise ${best.speed_kph} km/h and you're there in ${fmtHm(best.total_min)}`
     if (baseline?.total_min != null && baseline.total_min > best.total_min) {
-      description += ` — ${fmtDuration(baseline.total_min - best.total_min)} sooner than at 100 km/h`
+      description += `, ${fmtDuration(baseline.total_min - best.total_min)} sooner than at 100 km/h`
     }
     description += ", charging stops included."
   }

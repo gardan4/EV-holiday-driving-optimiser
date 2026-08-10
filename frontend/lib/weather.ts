@@ -40,7 +40,7 @@ export function describeTemp(tempC: number): string {
   const aux = auxKwForTemp(tempC)
   const charge = Math.round(chargePowerFactorForTemp(tempC) * 100)
   if (extra === 0 && aux === 0 && charge === 100) {
-    return "no weather penalty — full range and full charging speed"
+    return "no weather penalty, full range and full charging speed"
   }
   const parts: string[] = []
   if (extra > 0) parts.push(`${extra}% more energy per km`)

@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "EV Trip Optimizer",
     short_name: "EV Trip",
     description:
-      "Find the cruise speed that gets you there earliest in an EV, charging stops included — then follow the drive as it happens.",
+      "Find the cruise speed that gets you there earliest in an EV, charging stops included, then follow the drive as it happens.",
     start_url: "/",
     display: "standalone",
     background_color: "#f8fafc",

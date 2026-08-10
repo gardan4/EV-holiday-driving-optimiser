@@ -42,7 +42,7 @@ export default function BatteryChart({ result, departureIso, targetSoc }: Batter
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
       <div className="mb-1 flex items-baseline justify-between gap-3">
         <h2 className="font-display text-base font-semibold text-ink-900">
-          Battery through the night — {result.speed_kph} km/h
+          Battery through the night, {result.speed_kph} km/h
         </h2>
         <span className="text-xs text-ink-400">
           each spike is a charging stop

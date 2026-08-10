@@ -87,7 +87,7 @@ export default function StartDrivePanel({
           </p>
           <p className="mt-1 text-sm text-amber-900/90">
             Another device started it. Follow that drive, or take over from here
-            — taking over ends the other one.
+            Taking over ends the other one.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Link
@@ -122,7 +122,7 @@ export default function StartDrivePanel({
               <Big label="+5" onClick={() => setSoc((s) => clamp(s + 5))} />
             </div>
             <p className="mt-2 text-center text-xs text-ink-400">
-              Read it off the dash — the whole drive is measured from here.
+              Read it off the dash. The whole drive is measured from here.
             </p>
           </div>
 

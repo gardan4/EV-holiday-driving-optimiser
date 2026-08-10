@@ -66,7 +66,7 @@ export default function CostChart({
     if (saved > 0 && extra > 0) {
       verdict =
         `The fastest plan costs €${extra.toFixed(2)} more than the cheapest and saves ` +
-        `${fmtDuration(saved)} — about €${(extra / (saved / 60)).toFixed(2)} per hour bought.`
+        `${fmtDuration(saved)}, about €${(extra / (saved / 60)).toFixed(2)} per hour bought.`
     }
   }
 
@@ -127,7 +127,7 @@ export default function CostChart({
                 return (
                   <div className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-xs shadow-lg shadow-ink-900/10">
                     <div className="font-semibold text-ink-900">
-                      {label} km/h — €{p.cost.toFixed(2)}
+                      {label} km/h, €{p.cost.toFixed(2)}
                     </div>
                     <div className="text-ink-500">{Math.round(p.kwh)} kWh bought</div>
                   </div>

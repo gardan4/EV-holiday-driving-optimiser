@@ -252,11 +252,11 @@ export default function SpeedChart({
                 if (!p.feasible)
                   return (
                     <TooltipCard title={`${label} km/h`}>
-                      <span className="text-ink-500">not feasible — charger gaps too large</span>
+                      <span className="text-ink-500">not feasible: charger gaps too large</span>
                     </TooltipCard>
                   )
                 return (
-                  <TooltipCard title={`${label} km/h — ${fmtHm(p.total ?? 0)}`}>
+                  <TooltipCard title={`${label} km/h, ${fmtHm(p.total ?? 0)}`}>
                     <Row color={DRIVE} text={`driving ${fmtDuration(p.drive)}`} />
                     <Row
                       color={CHARGE}

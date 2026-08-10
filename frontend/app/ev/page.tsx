@@ -21,7 +21,7 @@ export const revalidate = 3600
 
 const TITLE = "EV charging curves and motorway consumption"
 const DESCRIPTION =
-  "Usable battery, peak DC power, modelled 10–80% charge time and motorway consumption at 100 and 130 km/h for every electric car in the EV Trip Optimizer catalog."
+  "Usable battery, peak DC power, modelled 10-80% charge time and motorway consumption at 100 and 130 km/h for every electric car in the EV Trip Optimizer catalog."
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -83,14 +83,14 @@ export default async function VehicleIndexPage() {
         <p className="mt-4 max-w-2xl text-base leading-relaxed text-ink-500">
           These are the {vehicles.length} cars the trip planner can simulate. Each one carries a
           hand-curated DC charging curve and a consumption model fitted to motorway speeds, and
-          each page shows what those mean in practice: how long a 10–80% stop really takes, what
+          each page shows what those mean in practice: how long a 10-80% stop really takes, what
           the car uses per kilometre at 100 versus 130 km/h, and how far a full pack goes at each
           cruise speed.
         </p>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-400">
           The figures are modelled, not measured by us. Charging curves are curated from published
-          fast-charge tests and consumption coefficients are fitted to steady motorway cruising —
-          every page names its own sources.
+          fast-charge tests and consumption coefficients are fitted to steady motorway cruising.
+          Every page names its own sources.
         </p>
 
         {byMake.map(([make, cars]) => (
@@ -108,7 +108,7 @@ export default async function VehicleIndexPage() {
                     </span>
                     <dl className="mt-2 grid grid-cols-3 gap-2 text-xs text-ink-500">
                       <Stat label="Usable" value={`${v.usable_kwh} kWh`} />
-                      <Stat label="10–80%" value={`${Math.round(chargeMinutes(v, 10, 80))} min`} />
+                      <Stat label="10-80%" value={`${Math.round(chargeMinutes(v, 10, 80))} min`} />
                       <Stat
                         label="At 130"
                         value={`${Math.round(consumptionWhKm(v, 130))} Wh/km`}

@@ -17,9 +17,9 @@ const display = Bricolage_Grotesque({
 // to somebody else, so every og:image and canonical URL pointed at a stranger.
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://evtrip.dev";
 
-const TITLE = "EV Trip Optimizer — find your fastest cruise speed";
+const TITLE = "EV Trip Optimizer: find your fastest cruise speed";
 const DESCRIPTION =
-  "Should you really drive 100? Enter your route and EV, and find the cruise speed that gets you there first — charging stops included.";
+  "Should you really drive 100? Enter your route and EV, and find the cruise speed that gets you there first, charging stops included.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

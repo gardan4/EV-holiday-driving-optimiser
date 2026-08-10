@@ -45,7 +45,7 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
             className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 opacity-0 shadow-xl shadow-ink-900/10 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100"
           >
             Sets the battery size, how quickly it charges (the taper matters more than the
-            peak), how much it uses at speed, and its top speed — the plan never simulates
+            peak), how much it uses at speed, and its top speed. The plan never simulates
             faster than the car can actually go.
           </span>
         </span>
@@ -64,7 +64,7 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={`Filter ${vehicles.length} cars — try "volvo" or "ioniq"`}
+            placeholder={`Filter ${vehicles.length} cars, try "volvo" or "ioniq"`}
             aria-label="Filter cars"
             className="w-full rounded-xl border border-ink-200 bg-white py-2 pl-9 pr-3 text-sm text-ink-900 placeholder:text-ink-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200"
           />

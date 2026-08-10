@@ -83,7 +83,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
           </span>
           <span className="block text-xs text-ink-400">
             the car, every number you set, how the route is modelled, and what the
-            model can&apos;t see — all of it editable
+            model can&apos;t see, all of it editable
           </span>
         </span>
         <span className="shrink-0 rounded-lg border border-ink-200 px-2.5 py-1 text-xs font-semibold text-ink-600 group-hover:border-brand-300 group-hover:text-brand-700">
@@ -117,7 +117,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
           </p>
           <ChargeCurve curve={v.charge_curve} maxKw={v.max_dc_kw} />
           <p className="mt-1 text-xs leading-relaxed text-ink-500">
-            Power the car accepts as the battery fills — the taper is why the plan
+            Power the car accepts as the battery fills. The taper is why the plan
             arrives low and leaves before it&apos;s full.
           </p>
           {v.source_note && (
@@ -182,7 +182,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                     Ignore speed limits entirely
                   </span>
                   <span className="block text-xs leading-relaxed text-ink-500">
-                    Every motorway derestricted — what the drive costs if the law
+                    Every motorway derestricted, so what the drive costs if the law
                     isn&apos;t the constraint. Ordinary roads still go at their own pace.
                   </span>
                 </span>
@@ -319,7 +319,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               <b className="font-semibold text-ink-700">Speed.</b>{" "}
               Your cruise speed applies on motorway stretches up to each country&apos;s legal cap (130 in
               AT/NL). German autobahn counts as derestricted only for the{" "}
-              {Math.round((r.autobahn_open_share ?? 0.3) * 100)}% you set above —
+              {Math.round((r.autobahn_open_share ?? 0.3) * 100)}% you set above.
               roadworks, traffic and posted limits take back the rest. Everywhere else
               the road&apos;s own driving speed governs.
             </li>
@@ -330,7 +330,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                   quietly recommend a cruise speed that isn't legal there. */}
               <b className="font-semibold text-ink-700">Which limits are real.</b>{" "}
               {r.ignore_speed_limits ? (
-                `None — you asked for every motorway derestricted, so the cruise speed ` +
+                `None. You asked for every motorway derestricted, so the cruise speed ` +
                 `itself is the only limit. This is a what-if, not a plan you can legally ` +
                 `drive outside the open stretches of German autobahn.`
               ) : modelled.length > 0 ? (
@@ -346,7 +346,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                   whitespace at each line's edges, which silently glued "113" to
                   "km/h" and then "above" to the dash. */}
               {`Everywhere else uses the ${Math.round(r.motorway_cap_kph ?? 130)} km/h ` +
-                `you set above — check it against the local limit, because it's the ` +
+                `you set above. Check it against the local limit, because it's the ` +
                 `number the recommended speed is built on.`}
             </li>
             <li>
@@ -358,12 +358,12 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <li>
               <b className="font-semibold text-ink-700">Weather.</b> Consumption is a
               per-car fit from public range tests, scaled by the temperature above. Cold
-              also slows <em>charging</em> — the bigger of the two effects on a winter
-              trip — so it derates the charge curve as well.
+              also slows <em>charging</em>, the bigger of the two effects on a winter
+              trip, so it derates the charge curve as well.
             </li>
             <li>
               <b className="font-semibold text-ink-700">Cost.</b>{" "}
-              Energy is priced at the plug, including charging losses, so the figure is what you&apos;d pay — not
+              Energy is priced at the plug, including charging losses, so the figure is what you&apos;d pay, not
               the energy that reaches the battery.
             </li>
           </ul>
@@ -381,20 +381,20 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               guess you get to make, not a measurement.
             </li>
             <li>
-              <b className="font-semibold text-ink-700">Traffic.</b> Not modelled at all —
+              <b className="font-semibold text-ink-700">Traffic.</b> Not modelled at all.
               the times assume a clear road, which is close enough overnight and
               optimistic in daylight. Departure time shifts the clock, not the plan.
             </li>
             <li>
               <b className="font-semibold text-ink-700">Charger detours.</b> Estimated from
-              how far the site sits off the route, not routed door to door — so arrival
+              how far the site sits off the route, not routed door to door, so arrival
               times at chargers are ±5 minutes.
             </li>
             <li>
               <b className="font-semibold text-ink-700">Whether the charger works.</b> Sites
               come from OpenChargeMap and are filtered to operational CCS above 100 kW, but
               a broken or occupied stall is exactly the thing a crowdsourced database is
-              worst at — glance at the operator and Maps link before counting on one.
+              worst at. Glance at the operator and Maps link before counting on one.
             </li>
           </ul>
         </div>

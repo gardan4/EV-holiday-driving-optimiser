@@ -81,7 +81,7 @@ export default function ResultsView({
     try {
       await navigator.clipboard.writeText(window.location.href)
       setCopied(true)
-      toast.success("Trip link copied — send it to your co-driver")
+      toast.success("Trip link copied, send it to your co-driver")
       setTimeout(() => setCopied(false), 2000)
     } catch {
       toast.error("Could not copy the link")
@@ -188,7 +188,7 @@ export default function ResultsView({
             label={slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
             value={
               vsBaseline == null
-                ? "—"
+                ? "-"
                 : isBaseline || vsTie
                   ? "±0"
                   : `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}`
@@ -214,7 +214,7 @@ export default function ResultsView({
               Anything from {band.lo} to {band.hi} km/h arrives within{" "}
               {band.toleranceMin} minutes of the best.
             </span>{" "}
-            The curve is flat across that range, so hold whatever is comfortable —
+            The curve is flat across that range, so hold whatever is comfortable.
             sitting at {band.lo} instead of {band.best} costs you{" "}
             {band.loCostMin <= 0 ? "nothing" : `${band.loCostMin} min`}
             {band.loSavesEur > 0.5 && (
@@ -236,8 +236,8 @@ export default function ResultsView({
           <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
             <span className="font-semibold">The curve never turned.</span> Under these
             assumptions the trip keeps getting shorter right up to{" "}
-            {Math.round(result.vehicle.top_speed_kph)} km/h — the {result.vehicle.make}{" "}
-            {result.vehicle.model}&apos;s limiter — so the theoretical optimum is faster
+            {Math.round(result.vehicle.top_speed_kph)} km/h, the {result.vehicle.make}{" "}
+            {result.vehicle.model}&apos;s limiter, so the theoretical optimum is faster
             than the car goes. Charging is quick enough here that speed simply wins;
             try colder conditions or a lower open-autobahn share to see it turn.
           </p>
@@ -278,7 +278,7 @@ export default function ResultsView({
                 onClick={() => select(best.speed_kph)}
                 className="w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-800 transition-colors hover:bg-brand-100"
               >
-                Jump to the fastest plan — {best.speed_kph} km/h, arrives{" "}
+                Jump to the fastest plan: {best.speed_kph} km/h, arrives{" "}
                 {clockAt(trip.request.departure_iso, best.total_min ?? 0)}
               </button>
             )}
@@ -338,7 +338,7 @@ function SpeedPills({
       {/* The pills, the two charts and the journey band at the top of the page
           are all one selection. Say so once, next to the plainest control. */}
       <p className="mb-1.5 px-0.5 text-xs text-ink-400">
-        <span className="font-semibold text-ink-500">Cruise speed</span> — sets the
+        <span className="font-semibold text-ink-500">Cruise speed</span> sets the
         itinerary, both charts, and the journey you scroll through at the top.
       </p>
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cruise speed">
@@ -352,7 +352,7 @@ function SpeedPills({
               aria-checked={isSelected}
               disabled={!s.feasible}
               onClick={() => onSelect(s.speed_kph)}
-              title={!s.feasible ? "Not feasible — charger gaps too large at this speed" : undefined}
+              title={!s.feasible ? "Not feasible: charger gaps too large at this speed" : undefined}
               className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
                 isSelected
                   ? "border-ink-900 bg-ink-900 text-white"

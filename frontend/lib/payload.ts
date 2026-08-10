@@ -47,8 +47,8 @@ export function describePayload(
   const rangeDelta = rangeKm - (usableKwh * 1000) / (whPerKmAtCruise + extra)
   const kg = Math.round(payloadExtraKg(occupants, luggageKg))
   return extra > 0
-    ? `+${kg} kg over the reference load — about +${extra.toFixed(1)} Wh/km, ` +
+    ? `+${kg} kg over the reference load, about +${extra.toFixed(1)} Wh/km, ` +
         `costing roughly ${Math.round(rangeDelta)} km of range per charge.`
-    : `${kg} kg under the reference load — about ${extra.toFixed(1)} Wh/km, ` +
+    : `${kg} kg under the reference load, about ${extra.toFixed(1)} Wh/km, ` +
         `worth roughly ${Math.round(-rangeDelta)} km of extra range per charge.`
 }

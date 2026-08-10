@@ -62,8 +62,8 @@ export default function BatteryCheck({
       const off = state.soc - value
       toast.success(
         Math.abs(off) < 1
-          ? "Thanks — the estimate was on the money."
-          : `Thanks — we were ${Math.abs(off).toFixed(0)}% ${
+          ? "Thanks, the estimate was on the money."
+          : `Thanks, we were ${Math.abs(off).toFixed(0)}% ${
               off > 0 ? "optimistic" : "pessimistic"
             }. The rest of the drive is tuned to your car now.`
       )
@@ -103,8 +103,8 @@ export default function BatteryCheck({
           <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
             We reckon <strong>{Math.round(state.soc)}%</strong>
             {state.soc_is_measured
-              ? " — confirmed just now."
-              : ` — estimated from distance driven, ${fmtDuration(
+              ? ", confirmed just now."
+              : `, estimated from distance driven, ${fmtDuration(
                   state.anchor_age_min
                 )} since you last confirmed it. No car tells a web page its battery.`}
           </p>

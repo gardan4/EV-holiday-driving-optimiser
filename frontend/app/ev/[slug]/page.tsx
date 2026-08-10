@@ -33,7 +33,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!v) return { title: "Car not found" }
 
   const name = vehicleName(v)
-  const title = `${name} — charging curve, consumption and motorway range`
+  const title = `${name} charging curve, consumption and motorway range`
   const description = `${name}: ${v.usable_kwh} kWh usable, ${Math.round(
     peakKw(v)
   )} kW peak DC, about ${Math.round(chargeMinutes(v, 10, 80))} minutes from 10 to 80%. Modelled consumption and range at every cruise speed from 90 to ${Math.max(
@@ -108,9 +108,9 @@ export default async function VehiclePage({ params }: Params) {
         <p className="mt-5 text-base leading-relaxed text-ink-500">
           The {name} has {v.usable_kwh} kWh of usable battery and peaks at {Math.round(peak)}
           {" kW"} on a DC charger. In this app&apos;s model it uses about {Math.round(c100)} Wh/km at a steady
-          100 km/h and {Math.round(c130)} Wh/km at 130 — {penalty}% more energy per kilometre for
-          30 km/h more speed. That trade, against a {Math.round(chargeMinutes(v, 10, 80))}-minute
-          10–80% charging stop, is what decides the fastest cruise speed for a long trip.
+          100 km/h and {Math.round(c130)} Wh/km at 130, so {penalty}% more energy per kilometre buys
+          you 30 km/h more speed. Weigh that against a {Math.round(chargeMinutes(v, 10, 80))}-minute
+          10-80% charging stop and you have the whole question of how fast to drive.
         </p>
 
         <KeyNumbers vehicle={v} />
@@ -123,7 +123,7 @@ export default async function VehiclePage({ params }: Params) {
           Charging power against state of charge, on a charger fast enough not to be the limit.
           Peak power is {Math.round(peak)} kW
           {taper !== null
-            ? `, but it has halved by about ${taper}% state of charge — which is why a short stop low
+            ? `, but it has halved by about ${taper}% state of charge. That is why a short stop low
                down the curve usually beats a long one near the top.`
             : "."}
         </p>
@@ -137,9 +137,9 @@ export default async function VehiclePage({ params }: Params) {
         </h3>
         <Table
           caption={`Modelled DC charging times for the ${name}, on an unrestricted charger.`}
-          head={["From → to", "Time", "Energy added", "Average power"]}
+          head={["Charge from", "Time", "Energy added", "Average power"]}
           rows={CHARGE_WINDOWS.map(([from, to]) => [
-            `${from}% → ${to}%`,
+            `${from}% to ${to}%`,
             `${Math.round(chargeMinutes(v, from, to))} min`,
             `${((v.usable_kwh * (to - from)) / 100).toFixed(1)} kWh`,
             `${Math.round(averageKw(v, from, to))} kW`,
@@ -165,11 +165,11 @@ export default async function VehiclePage({ params }: Params) {
             Wh/km = {v.consumption.a_wh_km} + {v.consumption.b_wh_km_per_kph2} · v²
           </span>
           . The &ldquo;usable range&rdquo; column is the honest one for trip planning: it is
-          100% → 10%, because nobody arrives on empty.
+          100% down to 10%, because nobody arrives on empty.
         </p>
         <Table
           caption={`Modelled motorway consumption and range for the ${name} at each cruise speed.`}
-          head={["Cruise speed", "Consumption", "Range (full pack)", "Usable range (100→10%)"]}
+          head={["Cruise speed", "Consumption", "Range (full pack)", "Usable range (100 to 10%)"]}
           rows={speeds.map((kph) => [
             `${kph} km/h`,
             `${Math.round(consumptionWhKm(v, kph))} Wh/km`,
@@ -189,7 +189,7 @@ export default async function VehiclePage({ params }: Params) {
           </li>
           <li>
             Temperature. These are mild-weather numbers. Cold raises consumption and cuts the
-            charging curve, and the planner models both — the numbers here do not.
+            charging curve. The planner models both. The numbers on this page do not.
           </li>
           <li>
             Wind, rain, roof boxes, payload and tyre choice, all of which move real consumption more
@@ -216,7 +216,7 @@ export default async function VehiclePage({ params }: Params) {
             What speed should you actually drive?
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-ink-600">
-            It depends on your route — on where the fast chargers happen to be and how the legal
+            It depends on your route, on where the fast chargers happen to be and how the legal
             limits fall. Plan the real trip and the simulator will sweep every cruise speed against
             this car&apos;s curves and tell you which one arrives first.
           </p>
@@ -281,8 +281,8 @@ function KeyNumbers({ vehicle }: { vehicle: Vehicle }) {
   const items = [
     { label: "Usable battery", value: `${vehicle.usable_kwh} kWh` },
     { label: "Peak DC power", value: `${Math.round(peakKw(vehicle))} kW` },
-    { label: "10–80% charge", value: `${Math.round(chargeMinutes(vehicle, 10, 80))} min` },
-    { label: "Average kW 10–80%", value: `${Math.round(averageKw(vehicle, 10, 80))} kW` },
+    { label: "10-80% charge", value: `${Math.round(chargeMinutes(vehicle, 10, 80))} min` },
+    { label: "Average kW 10-80%", value: `${Math.round(averageKw(vehicle, 10, 80))} kW` },
     { label: "Kerb mass", value: `${Math.round(vehicle.mass_kg)} kg` },
     { label: "Top speed", value: `${Math.round(vehicle.top_speed_kph)} km/h` },
   ]

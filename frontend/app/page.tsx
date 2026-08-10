@@ -34,7 +34,7 @@ export default function Home() {
             drive <span className="text-brand-500">100</span>?
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-ink-500 sm:text-lg">
-            Faster driving means more charging — but slower isn&apos;t always sooner.
+            Faster driving means more charging, but slower isn&apos;t always sooner.
             We simulate your route at every cruise speed, charging curve and all,
             and find the one that gets you there first.
           </p>
@@ -62,19 +62,25 @@ export default function Home() {
             What speed should you drive an EV on a long trip?
           </h2>
           <p className="mt-4 text-base leading-relaxed text-ink-500">
-            Faster driving costs energy on a square law: aerodynamic drag rises with the square of
-            speed, so 130 km/h uses roughly a quarter more energy per kilometre than 100 does. That
-            extra energy has to come back at a charger, and a DC charging curve tapers steeply as
-            the battery fills — so the time you save on the road can be handed straight back at the
-            plug. Somewhere between those two effects is a cruise speed that gets you there
-            earliest. For most European motorway trips in a modern EV it lands between 110 and 130
-            km/h, but the exact answer depends on your car and on where the fast chargers happen to
-            be along your route.
+            Aerodynamic drag rises with the square of speed, so 130 km/h uses roughly a quarter
+            more energy per kilometre than 100 does. That energy has to come back at a charger, and
+            charging power tapers steeply as the battery fills, so the time you save on the road can
+            be handed straight back at the plug. Somewhere between those two effects sits the speed
+            that gets you there earliest.
           </p>
           <p className="mt-4 text-base leading-relaxed text-ink-500">
-            This app works it out for the actual trip. It fetches your real route, then simulates it
-            at every cruise speed from 90 to 160 km/h — each one with its own optimal charging plan —
-            and shows you the total journey time for all of them.
+            It is usually higher than people expect. On a real 956 km run from Utrecht to Innsbruck
+            in a Cupra Born 58, driving 130 took 10h41 and the quickest speed of all, 145, took
+            10h36. Five minutes for fifteen more km/h. Drop to 100 and the same trip takes 11h40.
+            The penalty for crawling is far bigger than the prize for pushing on, which is roughly
+            the opposite of the usual advice.
+          </p>
+          <p className="mt-4 text-base leading-relaxed text-ink-500">
+            That is one route in one car, though, and yours will differ. Where the fast chargers sit
+            on your road matters as much as the car does. So the app works it out for the actual
+            trip: it fetches your real route, simulates it at every cruise speed from 90 to 160 km/h
+            with a separate charging plan for each, and shows you the total journey time for all of
+            them.
           </p>
 
           <h2 className="mt-14 font-display text-2xl font-bold tracking-tight text-ink-900 sm:text-3xl">
@@ -95,8 +101,8 @@ export default function Home() {
             <Step n={3} title="Every speed, every stop plan">
               For each cruise speed a dynamic program searches every combination of charger and
               charge level and returns the fastest one. Nothing tells it to &ldquo;arrive low and
-              charge to 70%&rdquo; — that behaviour falls out of the search, which is how you know
-              it is the maths and not a rule of thumb.
+              charge to 70%&rdquo;. That behaviour falls out of the search on its own, which is how
+              you know it is the maths and not a rule of thumb.
             </Step>
           </ol>
 
@@ -105,8 +111,8 @@ export default function Home() {
               Charging curves for every car in the catalog
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-ink-600">
-              Usable battery, peak DC power, modelled 10–80% time and motorway consumption at each
-              cruise speed — for every electric car the planner can simulate.
+              Usable battery, peak DC power, modelled 10-80% time and motorway consumption at each
+              cruise speed, for every electric car the planner can simulate.
             </p>
             <Link
               href="/ev"

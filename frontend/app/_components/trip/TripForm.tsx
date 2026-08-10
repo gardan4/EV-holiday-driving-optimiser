@@ -49,7 +49,7 @@ export default function TripForm() {
         setVehicles(vs)
         if (vs.length > 0) setVehicleId((prev) => prev ?? vs[0].id)
       })
-      .catch(() => toast.error("Could not load the car list — is the API running?"))
+      .catch(() => toast.error("Could not load the car list. Is the API running?"))
   }, [])
 
   const ready = origin && dest && vehicleId && allValid && !submitting
@@ -148,7 +148,7 @@ export default function TripForm() {
           max={45}
           step={1}
           onChange={setTempC}
-          explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one — it can move the best cruise speed down by 30 km/h."
+          explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one. It can move the best cruise speed down by 30 km/h."
           readout={describeTemp(tempC)}
         />
         </div>
@@ -166,7 +166,7 @@ export default function TripForm() {
           max={9}
           step={1}
           onChange={setOccupants}
-          explain="Everyone in the car, driver included, counted at 75 kg each. Weight costs energy through rolling resistance on the flat and through sheer lifting on a climb — a full car on an alpine run is a real handicap."
+          explain="Everyone in the car, driver included, counted at 75 kg each. Weight costs energy through rolling resistance on the flat and through sheer lifting on a climb. A full car on an alpine run is a real handicap."
         />
         <NumberField
           id="luggage"
@@ -189,7 +189,7 @@ export default function TripForm() {
         <SocSlider
           id="depart-soc"
           label="Battery at departure"
-          explain="How full the car is when you set off — charge at home the night before and this is 100%."
+          explain="How full the car is when you set off. Charge at home the night before and this is 100%."
           value={departSoc}
           min={30}
           max={100}
@@ -232,7 +232,7 @@ export default function TripForm() {
             </span>
             <span className="block text-xs leading-relaxed text-ink-500">
               Every motorway treated as derestricted, so your cruise speed is the
-              only limit — what the drive would look like if the law weren&apos;t
+              only limit, so what the drive would look like if the law weren&apos;t
               there. Ordinary roads still go at their own pace.
             </span>
           </span>
@@ -250,10 +250,10 @@ export default function TripForm() {
           max={200}
           step={5}
           onChange={setMotorwayCap}
-          explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this — everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
+          explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this. Everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
           readout={
             motorwayCap === 130
-              ? "130 is a western-European motorway — lower it elsewhere"
+              ? "130 is a western-European motorway, so lower it elsewhere"
               : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
           }
         />
@@ -285,8 +285,8 @@ export default function TripForm() {
             <span className="flex items-center gap-1.5">
               German autobahn actually open
               <InfoTip>
-                Germany only — it does nothing on a route that never enters it. How much
-                of the derestricted-looking autobahn you&apos;ll really get to use — the
+                Germany only, so it does nothing on a route that never enters it. How much
+                of the derestricted-looking autobahn you&apos;ll really get to use. The
                 rest is roadworks, traffic and signposted limits. About 30% is realistic.
                 Set it to 100% and fast driving looks free, which is the assumption that
                 flatters high speeds most.
@@ -314,7 +314,7 @@ export default function TripForm() {
         <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
           Charging, breaks and the fine print
           <span className="ml-2 font-normal normal-case tracking-normal text-ink-400">
-            sensible defaults — open it if yours differ
+            sensible defaults, open it if yours differ
           </span>
         </summary>
 
@@ -341,7 +341,7 @@ export default function TripForm() {
               max={100}
               step={5}
               onChange={setSitePower}
-              explain="A charger's rating is the headline figure, not what reaches your car. A 350 kW cabinet shared with the car beside you, or a busy Supercharger splitting a stall pair, delivers roughly half. This is throughput while you're plugged in — the queue field below covers waiting for a plug."
+              explain="A charger's rating is the headline figure, not what reaches your car. A 350 kW cabinet shared with the car beside you, or a busy Supercharger splitting a stall pair, delivers roughly half. This is throughput while you're plugged in. The queue field below covers waiting for a plug."
               readout={
                 sitePower >= 100
                   ? "every charger delivers its full rating"
@@ -357,7 +357,7 @@ export default function TripForm() {
               min={0}
               max={30}
               onChange={setQueue}
-              explain="Waiting for a free stall. Nil in the middle of the night; 10 or more on a holiday getaway weekend. The more stops a plan makes, the more times you risk it — which is the honest cost of driving fast."
+              explain="Waiting for a free stall. Nil in the middle of the night; 10 or more on a holiday getaway weekend. The more stops a plan makes, the more times you risk it, which is the honest cost of driving fast."
             />
           </div>
 
@@ -372,7 +372,7 @@ export default function TripForm() {
                 min={0}
                 max={8}
                 onChange={setRestEveryH}
-                explain="How long you'll drive before stopping to rest. Time already spent standing at a charger counts towards it, so a fast plan with many stops usually gets its breaks for free — a slow plan has to add them. Set 0 if you'd rather not model breaks."
+                explain="How long you'll drive before stopping to rest. Time already spent standing at a charger counts towards it, so a fast plan with many stops usually gets its breaks for free. A slow plan has to add them. Set 0 if you'd rather not model breaks."
                 readout={restEveryH === 0 ? "no breaks modelled" : undefined}
               />
               <NumberField
@@ -398,7 +398,7 @@ export default function TripForm() {
               max={3}
               step={0.01}
               onChange={setPrice}
-              explain="What you pay at a public fast charger — about €0.59 on most European networks without a subscription. Priced at the plug, so it already includes charging losses."
+              explain="What you pay at a public fast charger, about €0.59 on most European networks without a subscription. Priced at the plug, so it already includes charging losses."
             />
           </div>
         </div>
@@ -423,7 +423,7 @@ export default function TripForm() {
       </button>
       {!allValid && (
         <p className="mt-2 text-center text-xs text-red-600">
-          One of the numbers is empty or out of range — the field is marked in red.
+          One of the numbers is empty or out of range. The field is marked in red.
         </p>
       )}
     </form>

@@ -36,7 +36,7 @@ export default function OpengraphImage() {
           Should you really drive 100?
         </div>
         <div style={{ fontSize: 28, lineHeight: 1.35, color: "rgba(255,255,255,0.82)", maxWidth: 880 }}>
-          Find the cruise speed that gets your EV there first — charging stops included.
+          Find the cruise speed that gets your EV there first, charging stops included.
         </div>
       </div>
     ),

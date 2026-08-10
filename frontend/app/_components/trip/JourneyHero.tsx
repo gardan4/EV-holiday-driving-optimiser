@@ -455,7 +455,7 @@ export default function JourneyHero({
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center px-6 text-center text-sm text-white/60">
-          3D view unavailable (WebGL is off) — the charts and itinerary below have everything.
+          3D view unavailable (WebGL is off). The charts and itinerary below have everything.
         </div>
       )}
 

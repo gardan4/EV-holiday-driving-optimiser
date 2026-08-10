@@ -192,7 +192,7 @@ export function useLiveRun(
       (err) => {
         setGpsError(
           err.code === err.PERMISSION_DENIED
-            ? "Location is blocked — allow it to follow the drive automatically."
+            ? "Location is blocked. Allow it to follow the drive automatically."
             : "Can't get a location fix right now."
         )
       },

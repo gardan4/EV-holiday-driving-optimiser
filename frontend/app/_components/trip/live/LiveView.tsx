@@ -112,8 +112,8 @@ export default function LiveView({
       if (plan) {
         toast.success(
           plan.benchmark.delta_min > 1
-            ? `Revised — ${fmtDuration(Math.abs(plan.benchmark.delta_min))} later than promised`
-            : "Revised — you're still on for the original arrival"
+            ? `Revised: ${fmtDuration(Math.abs(plan.benchmark.delta_min))} later than promised`
+            : "Revised, you're still on for the original arrival"
         )
       }
     } catch (err) {
@@ -251,7 +251,7 @@ export default function LiveView({
  */
 function socLabel(soc: number, measured: boolean, band: number): string {
   if (measured || band < 1) return `${Math.round(soc)}%`
-  return `${Math.max(0, Math.round(soc - band))}–${Math.min(100, Math.round(soc + band))}%`
+  return `${Math.max(0, Math.round(soc - band))}-${Math.min(100, Math.round(soc + band))}%`
 }
 
 /** The next charging stop ahead of the car, on whichever plan is in force. */

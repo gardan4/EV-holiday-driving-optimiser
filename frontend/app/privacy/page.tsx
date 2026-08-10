@@ -40,8 +40,8 @@ export default function PrivacyPage() {
 
         <Section title="Following a drive stores where you were">
           If you start a drive, the phone doing the driving sends its position
-          every 25 seconds while the tab is open. We keep a coarse trail — a
-          point every five minutes or so — plus the battery readings you type
+          every 25 seconds while the tab is open. We keep a coarse trail, a
+          point every five minutes or so, plus the battery readings you type
           in, so the app can tell you whether you&apos;re ahead or behind and
           show you afterwards how it went.
           <strong className="block pt-2 font-semibold text-ink-800">
@@ -54,7 +54,7 @@ export default function PrivacyPage() {
 
         <Section title="How long it's kept">
           Drives and their location trails are deleted 90 days after they
-          started — the app runs that deletion itself, once a day. Planned trips
+          started. The app runs that deletion itself, once a day. Planned trips
           are kept indefinitely so old links keep working. A planned trip has no
           location trail, but it does hold the start and destination you typed,
           their coordinates, and the route between them.
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
           to know. It is done here rather than by Google or anyone else: no
           third-party script, no advertising, no profile, and nothing that
           follows you to another site. What a visit records is the page you
-          opened — as a pattern like <em>/trip/…</em>, never which trip — and
+          opened, as a pattern like <em>/trip/…</em>, never which trip, and
           whether you planned a route or started a drive. If you arrived from a
           link somewhere, we keep the site&apos;s name and not the page.
           <strong className="block pt-2 font-semibold text-ink-800">
@@ -96,7 +96,7 @@ export default function PrivacyPage() {
 
         <Section title="Getting something removed">
           Every trip page has a delete button. It removes the trip, any drives
-          on it and their location trails, immediately and for good — that is
+          on it and their location trails, immediately and for good. That is
           the whole record, because a trip is all we have. It works for anyone
           holding the link, since the link is the only key that exists, so treat
           it the same way you would treat the trip itself.
@@ -110,7 +110,7 @@ export default function PrivacyPage() {
           yours. What you write is also forwarded to a private Discord channel
           so it actually gets read, and if you add an email address it goes
           there too, so a reply is easy. If you would rather not have your
-          address in a chat channel, leave that field empty — the feedback is
+          address in a chat channel, leave that field empty. The feedback is
           just as welcome without it.
         </Section>
 
@@ -118,7 +118,7 @@ export default function PrivacyPage() {
           A personal project, run by an individual in the Netherlands, not a
           company. If something here looks wrong, the source is public and
           issues are welcome. If you are in the EU you also have the right to
-          complain to your data protection authority — in the Netherlands that
+          complain to your data protection authority. In the Netherlands that
           is the Autoriteit Persoonsgegevens.
         </Section>
 

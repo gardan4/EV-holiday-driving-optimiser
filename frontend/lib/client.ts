@@ -373,7 +373,7 @@ export async function sendFeedback(req: FeedbackRequest): Promise<void> {
       getErrorMessage(
         data.detail,
         resp.status === 429
-          ? "That's a few messages already — try again a bit later."
+          ? "That's a few messages already. Try again a bit later."
           : "Could not send that"
       )
     )

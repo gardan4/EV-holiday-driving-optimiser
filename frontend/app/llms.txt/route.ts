@@ -31,14 +31,14 @@ export async function GET() {
 
   const body = `# ${SITE_NAME}
 
-> A free, no-signup web app that answers one question: what cruise speed gets you to your destination earliest in an electric car, once charging stops are counted? It fetches the real route, then simulates it at every speed from 90 to 160 km/h — each with its own optimal DC charging plan — and returns the total-time-versus-speed curve, a stop-by-stop itinerary, and an animated 3D playback of the drive.
+> A free, no-signup web app that answers one question: what cruise speed gets you to your destination earliest in an electric car, once charging stops are counted? It fetches the real route, then simulates it at every speed from 90 to 160 km/h, each with its own optimal DC charging plan, and returns the total-time-versus-speed curve, a stop-by-stop itinerary, and an animated 3D playback of the drive.
 
 ## What it does
 
 - Routes with OpenRouteService and applies per-country motorway speed limits, including German autobahn derestriction.
 - Finds real DC fast chargers along the corridor via OpenChargeMap.
 - Models each car with a quadratic motorway consumption fit (Wh/km = a + b·v²) and a hand-curated piecewise-linear DC charging curve.
-- Discovers the optimal stop plan per cruise speed with an exact forward dynamic program over charger nodes and state-of-charge buckets. The familiar "arrive low, charge to roughly 60–80%" pattern is an output of that search, not a rule written into it.
+- Discovers the optimal stop plan per cruise speed with an exact forward dynamic program over charger nodes and state-of-charge buckets. The familiar "arrive low, charge to roughly 60 to 80%" pattern is an output of that search, not a rule written into it.
 - Models cold weather as both higher consumption and reduced charge acceptance.
 
 ## What it is not

@@ -123,7 +123,7 @@ export function SendToPhonePanel({
           </h3>
           <p className="mt-1 text-sm leading-relaxed text-ink-600">
             Scan this with the phone that&apos;s coming along. That phone starts
-            the drive and follows it — everyone else you send the link to can
+            the drive and follows it. Everyone else you send the link to can
             watch, but only the phone that starts it can steer.
           </p>
           <p className="mt-2 text-xs leading-relaxed text-ink-500">

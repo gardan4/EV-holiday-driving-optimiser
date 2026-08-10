@@ -70,7 +70,7 @@ export default function LiveHud({
           }`}
           title={
             live.stale
-              ? "Off the planned route — position and battery are last known"
+              ? "Off the planned route, so position and battery are last known"
               : quiet
                 ? "No recent update from the driving phone"
                 : "Following the drive as it happens"
@@ -159,7 +159,7 @@ export default function LiveHud({
       {dimmed && (
         <p className="mt-1 px-1 text-[11px] leading-relaxed text-amber-200/90">
           {live.stale
-            ? "Off the planned route — these are the last known figures, not live ones."
+            ? "Off the planned route, so these are the last known figures, not live ones."
             : `No update from the driving phone for ${fmtDuration(
                 live.secondsSincePing / 60
               )}. It may have lost signal.`}

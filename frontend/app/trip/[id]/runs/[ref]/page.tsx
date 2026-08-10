@@ -94,7 +94,7 @@ export default async function ReviewPage({
             value={
               review.actual_total_min != null
                 ? fmtDuration(review.actual_total_min)
-                : "—"
+                : "-"
             }
           />
           <Cell
@@ -102,7 +102,7 @@ export default async function ReviewPage({
             value={
               review.delta_min != null
                 ? `${late ? "+" : "−"}${fmtDuration(Math.abs(review.delta_min))}`
-                : "—"
+                : "-"
             }
             tone={late ? "warn" : "good"}
           />
@@ -122,7 +122,7 @@ export default async function ReviewPage({
             </strong>{" "}
             energy than the catalog consumption curve predicted. Wind, load,
             tyres and how the car was actually driven all live in that one
-            number — it is the honest gap between a fitted curve and a real
+            number. It is the honest gap between a fitted curve and a real
             Tuesday.
           </p>
         )}
@@ -147,15 +147,15 @@ export default async function ReviewPage({
                   <td className="py-2 text-right font-mono text-xs text-ink-500">
                     {s.planned_arrive_min != null
                       ? clockAt(trip.request.departure_iso, s.planned_arrive_min)
-                      : "—"}
+                      : "-"}
                   </td>
                   <td className="py-2 text-right font-mono text-xs text-ink-800">
                     {s.actual_arrive_min != null
                       ? clockAt(trip.request.departure_iso, s.actual_arrive_min)
-                      : "—"}
+                      : "-"}
                   </td>
                   <td className="py-2 text-right font-mono text-xs text-ink-500">
-                    {s.planned_soc != null ? `${s.planned_soc.toFixed(0)}%` : "—"}
+                    {s.planned_soc != null ? `${s.planned_soc.toFixed(0)}%` : "-"}
                     {s.actual_soc != null && (
                       <span className="text-ink-800"> → {s.actual_soc.toFixed(0)}%</span>
                     )}
@@ -166,7 +166,7 @@ export default async function ReviewPage({
           </table>
         </div>
         <p className="mt-2 text-xs leading-relaxed text-ink-400">
-          Blank actuals mean the drive was never logged near that stop — either
+          Blank actuals mean the drive was never logged near that stop. Either
           it was skipped, or the phone wasn&apos;t reporting at the time.
         </p>
 

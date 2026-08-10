@@ -44,7 +44,7 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
     : "Should you really drive 100?"
   const sub =
     delta != null && best
-      ? `${delta} minutes sooner than at 100 km/h — charging stops included.`
+      ? `${delta} minutes sooner than at 100 km/h, charging stops included.`
       : "Find the cruise speed that gets your EV there first."
 
   return new ImageResponse(

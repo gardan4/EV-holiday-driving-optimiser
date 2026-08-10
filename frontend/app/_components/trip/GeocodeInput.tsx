@@ -44,14 +44,14 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
       try {
         const results = await geocode(next.trim())
         setHits(results)
-        setError(results.length === 0 ? "No places found — try a city name." : null)
+        setError(results.length === 0 ? "No places found. Try a city name." : null)
         setOpen(true)
         setActive(-1)
       } catch (err) {
         // Surface the backend's message (e.g. "Routing is not configured") —
         // a silently empty dropdown reads as a broken input.
         setHits([])
-        setError(err instanceof Error ? err.message : "Search failed — try again.")
+        setError(err instanceof Error ? err.message : "Search failed. Try again.")
         setOpen(true)
       } finally {
         setLoading(false)
