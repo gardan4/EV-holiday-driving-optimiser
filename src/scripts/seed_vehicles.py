@@ -54,6 +54,14 @@ _MEB_NOTE = (
     "Curated from Fastned model guide + P3 Charging Index style tests."
 )
 
+_MEB_2025_NOTE = (
+    "VW MEB, 2025-on pack and rear motor: a taller peak than the 120/135 kW "
+    "generation and a much later taper, so these want a single long stop where "
+    "the older MEB cars wanted two short ones. Curve fitted to the 10-80% time "
+    "and average power published by EV Database, cross-checked against the "
+    "manufacturer's own charging figures."
+)
+
 _EGMP_NOTE = (
     "Hyundai/Kia E-GMP 800 V platform — peak power held nearly flat to ~45-50% "
     "SoC, then a steep taper, so these cars want short stops taken low. "
@@ -117,11 +125,30 @@ VEHICLES: list[dict] = [
         + " the floor the heavier 120 kW MEB cars are measured against.",
     },
     {
+        "slug": "vw-id3-pro-s-79",
+        "nameplate_slug": "vw-id3",
+        "make": "Volkswagen",
+        "model": "ID.3",
+        "variant": "Pro S 79 kWh (2025 on)",
+        "usable_kwh": 79.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 57.0, "b_wh_km_per_kph2": 0.0108},
+        "charge_curve": [
+            [0, 78], [5, 176], [10, 185], [40, 185], [50, 141], [60, 107],
+            [70, 83], [80, 63], [90, 44], [100, 15],
+        ],
+        "max_dc_kw": 185.0,
+        "mass_kg": 2137.0,
+        "top_speed_kph": 160.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY26 Pro S: 185 kW, the highest peak of any MEB car"
+        + " here, and the 160 km/h limiter the whole ID.3 range shares.",
+    },
+    {
         "slug": "vw-id4-pro-77",
         "nameplate_slug": "vw-id4",
         "make": "Volkswagen",
         "model": "ID.4",
-        "variant": "Pro 77 kWh",
+        "variant": "Pro 77 kWh (2021-2024, 135 kW)",
         "usable_kwh": 77.0,
         "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0125},
         "charge_curve": [
@@ -132,6 +159,26 @@ VEHICLES: list[dict] = [
         "mass_kg": 2300.0,
         "top_speed_kph": 180.0,
         "source_note": _MEB_NOTE + " SUV body → higher consumption than ID.3.",
+    },
+    {
+        "slug": "vw-id4-pro-2025",
+        "nameplate_slug": "vw-id4",
+        "make": "Volkswagen",
+        "model": "ID.4",
+        "variant": "Pro 77 kWh (2025 on, 175 kW)",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 59.0, "b_wh_km_per_kph2": 0.0123},
+        "charge_curve": [
+            [0, 74], [5, 166], [10, 175], [37, 175], [47, 133], [57, 102],
+            [67, 79], [77, 60], [87, 42], [97, 28], [100, 14],
+        ],
+        "max_dc_kw": 175.0,
+        "mass_kg": 2319.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY26 ID.4 Pro. Same 77 kWh as the 2021-2024 car above"
+        + " and nine minutes quicker from 10 to 80%, which is the whole point of"
+        + " the update and the reason both are listed.",
     },
     {
         "slug": "vw-id7-pro-77",
@@ -150,6 +197,26 @@ VEHICLES: list[dict] = [
         "top_speed_kph": 180.0,
         "source_note": _MEB_NOTE
         + " Cd 0.23 saloon — a big car that is genuinely efficient at motorway speed.",
+    },
+    {
+        "slug": "vw-id7-pro-s-86",
+        "nameplate_slug": "vw-id7",
+        "make": "Volkswagen",
+        "model": "ID.7",
+        "variant": "Pro S 86 kWh",
+        "usable_kwh": 86.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 61.0, "b_wh_km_per_kph2": 0.0106},
+        "charge_curve": [
+            [0, 84], [5, 190], [10, 200], [40, 200], [50, 152], [60, 116],
+            [70, 90], [80, 68], [90, 48], [100, 16],
+        ],
+        "max_dc_kw": 200.0,
+        "mass_kg": 2406.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY26 ID.7 Pro S. The 86 kWh pack takes 200 kW, the"
+        + " highest in the MEB range, and the Cd 0.23 saloon body means it is"
+        + " also the one that wastes least of it at 130 km/h.",
     },
     {
         "slug": "cupra-born-58",
@@ -190,6 +257,26 @@ VEHICLES: list[dict] = [
         + " 135 kW and holds it about five points of SoC longer than the 58.",
     },
     {
+        "slug": "cupra-tavascan-77",
+        "nameplate_slug": "cupra-tavascan",
+        "make": "Cupra",
+        "model": "Tavascan",
+        "variant": "VZ 77 kWh",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0131},
+        "charge_curve": [
+            [0, 57], [5, 128], [10, 135], [53, 135], [63, 103], [73, 78],
+            [83, 61], [93, 46], [100, 11],
+        ],
+        "max_dc_kw": 135.0,
+        "mass_kg": 2453.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the 2024-2026 Tavascan VZ: the 135 kW peak held past 50%"
+        + " SoC, like the Enyaq 85. At nearly 2.3 tonnes before passengers it is"
+        + " the heaviest MEB car here, and the quadratic term shows it.",
+    },
+    {
         "slug": "skoda-enyaq-77",
         "nameplate_slug": "skoda-enyaq",
         "make": "Škoda",
@@ -211,6 +298,68 @@ VEHICLES: list[dict] = [
         + " Fitted to the 2021-2024 Enyaq 80, before the 2025 facelift raised"
         + " the peak to 175 kW. Tall SUV body, so the speed penalty is steeper"
         + " than the ID.3's on the same platform.",
+    },
+    {
+        "slug": "skoda-enyaq-85",
+        "nameplate_slug": "skoda-enyaq",
+        "make": "Škoda",
+        "model": "Enyaq",
+        "variant": "85 (77 kWh, 2025 on)",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 59.0, "b_wh_km_per_kph2": 0.012},
+        "charge_curve": [
+            [0, 57], [5, 128], [10, 135], [53, 135], [63, 103], [73, 78],
+            [83, 61], [93, 46], [100, 11],
+        ],
+        "max_dc_kw": 135.0,
+        "mass_kg": 2321.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY25 Enyaq 85, which keeps the 135 kW peak of the"
+        + " 2021-2024 car and holds it past 50% SoC instead of 30%. That alone"
+        + " takes nine minutes off a 10-80% stop, with no peak-power headline.",
+    },
+    {
+        "slug": "skoda-elroq-85",
+        "nameplate_slug": "skoda-elroq",
+        "make": "Škoda",
+        "model": "Elroq",
+        "variant": "85 (77 kWh)",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0121},
+        "charge_curve": [
+            [0, 69], [5, 157], [10, 165], [37, 165], [47, 125], [57, 96],
+            [67, 74], [77, 56], [87, 40], [97, 26], [100, 13],
+        ],
+        "max_dc_kw": 165.0,
+        "mass_kg": 2311.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY27 Elroq 85. Škoda's own press kit and EV Database"
+        + " disagree on this car's peak (135 vs 165 kW) because they describe"
+        + " different model years; the later figure is used, and it is the one"
+        + " to re-check first if these numbers ever look wrong.",
+    },
+    {
+        "slug": "audi-q4-45",
+        "nameplate_slug": "audi-q4-etron",
+        "make": "Audi",
+        "model": "Q4 e-tron",
+        "variant": "45 (77 kWh)",
+        "usable_kwh": 77.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 61.0, "b_wh_km_per_kph2": 0.0133},
+        "charge_curve": [
+            [0, 74], [5, 166], [10, 175], [37, 175], [47, 133], [57, 102],
+            [67, 79], [77, 60], [87, 42], [97, 28], [100, 14],
+        ],
+        "max_dc_kw": 175.0,
+        "mass_kg": 2325.0,
+        "top_speed_kph": 180.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the MY24-26 Q4 45, which shares the ID.4 Pro's pack and"
+        + " curve exactly. What differs is the body: it is the least slippery"
+        + " car on this platform, so it pays more per kilometre for the same"
+        + " charge.",
     },
     {
         "slug": "tesla-model3-rwd",
