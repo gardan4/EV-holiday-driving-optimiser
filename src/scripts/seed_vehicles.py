@@ -581,6 +581,68 @@ VEHICLES: list[dict] = [
         "and few stops. Curated from Fastned model guide + P3 Charging Index style tests.",
     },
     {
+        "slug": "bmw-ix1-edrive20",
+        "nameplate_slug": "bmw-ix1",
+        "make": "BMW",
+        "model": "iX1",
+        "variant": "eDrive20 65 kWh",
+        "usable_kwh": 65.2,
+        "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0117},
+        "charge_curve": [
+            [0, 55], [5, 124], [10, 130], [42, 130], [52, 99], [62, 75],
+            [72, 58], [82, 44], [92, 31], [100, 10],
+        ],
+        "max_dc_kw": 130.0,
+        "mass_kg": 2120.0,
+        "top_speed_kph": 170.0,
+        "source_note": "BMW iX1 eDrive20 (MY26): 130 kW and thirty minutes for 10-80%, on a "
+        "65 kWh pack that is small next to the i4's 84. It is the efficient "
+        "one of the pair at motorway speed, which narrows the range gap more "
+        "than the pack sizes imply. Curve fitted to EV Database's figures.",
+    },
+    {
+        "slug": "mercedes-eqa-250-plus",
+        "nameplate_slug": "mercedes-eqa",
+        "make": "Mercedes-Benz",
+        "model": "EQA",
+        "variant": "250+ 70.5 kWh",
+        "usable_kwh": 70.5,
+        "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0123},
+        "charge_curve": [
+            [0, 43], [5, 97], [10, 102], [51, 102], [61, 78], [71, 59],
+            [81, 46], [91, 35], [100, 8],
+        ],
+        "max_dc_kw": 102.0,
+        "mass_kg": 2230.0,
+        "top_speed_kph": 160.0,
+        "source_note": "Mercedes EQA 250+ (2023-2026): a 400 V car with the lowest peak of any "
+        "European entry here at 102 kW, held past 50% SoC so the 35-minute "
+        "10-80% is better than that number suggests. Limited to 160 km/h. "
+        "Curve fitted to EV Database's published 10-80% time.",
+    },
+    {
+        "slug": "mercedes-eqb-250-plus",
+        "nameplate_slug": "mercedes-eqb",
+        "make": "Mercedes-Benz",
+        "model": "EQB",
+        "variant": "250+ 70.5 kWh",
+        "usable_kwh": 70.5,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0136},
+        "charge_curve": [
+            [0, 43], [5, 97], [10, 102], [51, 102], [61, 78], [71, 59],
+            [81, 46], [91, 35], [100, 8],
+        ],
+        "max_dc_kw": 102.0,
+        "mass_kg": 2285.0,
+        "top_speed_kph": 160.0,
+        "source_note": "Mercedes EQB 250+ (2023-2026): the EQA's pack and charging hardware in "
+        "a taller seven-seat body, so the curve here is deliberately identical "
+        "and the consumption is not. Published motorway figures give the two "
+        "bodies the same number, which cannot be right for a box this much "
+        "larger; the quadratic term has been raised for its frontal area, and "
+        "that adjustment is ours rather than a measurement.",
+    },
+    {
         "slug": "volvo-ex30-er",
         "nameplate_slug": "volvo-ex30",
         "make": "Volvo",
