@@ -776,6 +776,48 @@ VEHICLES: list[dict] = [
         "range alone suggests. Curve fitted to EV Database's published time.",
     },
     {
+        "slug": "peugeot-e3008-73",
+        "nameplate_slug": "peugeot-e3008",
+        "make": "Peugeot",
+        "model": "e-3008",
+        "variant": "73 kWh",
+        "usable_kwh": 73.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 63.0, "b_wh_km_per_kph2": 0.0136},
+        "charge_curve": [
+            [0, 67], [5, 152], [10, 160], [28, 160], [38, 122], [48, 93],
+            [58, 72], [68, 54], [78, 38], [88, 26], [100, 13],
+        ],
+        "max_dc_kw": 160.0,
+        "mass_kg": 2363.0,
+        "top_speed_kph": 170.0,
+        "source_note": "Peugeot e-3008 73 kWh (2024-2026) on Stellantis' STLA Medium platform, "
+        "the first entry here from a group that sells more cars in Europe than "
+        "anyone else. A tall 160 kW peak that gives up early — the taper "
+        "starts under 30% SoC — so 10-80% still takes thirty-six minutes. "
+        "Curve fitted to EV Database's published time.",
+    },
+    {
+        "slug": "peugeot-e5008-73",
+        "nameplate_slug": "peugeot-e5008",
+        "make": "Peugeot",
+        "model": "e-5008",
+        "variant": "73 kWh",
+        "usable_kwh": 73.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 66.0, "b_wh_km_per_kph2": 0.0143},
+        "charge_curve": [
+            [0, 67], [5, 152], [10, 160], [28, 160], [38, 122], [48, 93],
+            [58, 72], [68, 54], [78, 38], [88, 26], [100, 13],
+        ],
+        "max_dc_kw": 160.0,
+        "mass_kg": 2440.0,
+        "top_speed_kph": 170.0,
+        "source_note": "Peugeot e-5008 73 kWh (2024-2026): the e-3008's pack, motor and curve "
+        "in a seven-seat body eighty kilos heavier. It is a separate nameplate "
+        "rather than a version of the e-3008 because nobody cross-shops them, "
+        "and the published motorway consumption really does separate the two "
+        "bodies here. Curve fitted to EV Database's published time.",
+    },
+    {
         "slug": "hyundai-ioniq5-73",
         "nameplate_slug": "hyundai-ioniq-5",
         "make": "Hyundai",
