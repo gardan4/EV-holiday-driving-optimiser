@@ -219,6 +219,28 @@ VEHICLES: list[dict] = [
         + " also the one that wastes least of it at 130 km/h.",
     },
     {
+        "slug": "vw-idbuzz-lwb-86",
+        "nameplate_slug": "vw-idbuzz",
+        "make": "Volkswagen",
+        "model": "ID. Buzz",
+        "variant": "LWB Pro 86 kWh",
+        "usable_kwh": 86.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 70.0, "b_wh_km_per_kph2": 0.017},
+        "charge_curve": [
+            [0, 84], [5, 190], [10, 200], [40, 200], [50, 152], [60, 116],
+            [70, 90], [80, 68], [90, 48], [100, 16],
+        ],
+        "max_dc_kw": 200.0,
+        "mass_kg": 2808.0,
+        "top_speed_kph": 160.0,
+        "source_note": _MEB_2025_NOTE
+        + " Fitted to the LWB Pro, which shares the ID.7 Pro S's 86 kWh pack,"
+        + " 200 kW peak and 26-minute 10-80% exactly — and then has to push a"
+        + " van through the air. Its quadratic term is the highest of any"
+        + " European car here, so this is the entry where cruise speed costs"
+        + " the most and the sweep has the most to say.",
+    },
+    {
         "slug": "cupra-born-58",
         "nameplate_slug": "cupra-born",
         "make": "Cupra",
@@ -360,6 +382,27 @@ VEHICLES: list[dict] = [
         + " curve exactly. What differs is the body: it is the least slippery"
         + " car on this platform, so it pays more per kilometre for the same"
         + " charge.",
+    },
+    {
+        "slug": "audi-q6-etron",
+        "nameplate_slug": "audi-q6-etron",
+        "make": "Audi",
+        "model": "Q6 e-tron",
+        "variant": "performance 95 kWh",
+        "usable_kwh": 94.9,
+        "consumption": {"model": "quadratic", "a_wh_km": 64.0, "b_wh_km_per_kph2": 0.0138},
+        "charge_curve": [
+            [0, 94], [5, 247], [10, 269], [37, 269], [47, 215], [57, 161],
+            [67, 118], [77, 83], [87, 54], [97, 32], [100, 16],
+        ],
+        "max_dc_kw": 269.0,
+        "mass_kg": 2455.0,
+        "top_speed_kph": 209.0,
+        "source_note": "Audi Q6 e-tron performance (MY24) on the 800 V PPE platform — a "
+        "different machine from the MEB Q4 above it: 269 kW held to nearly 40% "
+        "SoC, 23 minutes for 10-80% on a 95 kWh pack. It is also one of the "
+        "few cars here whose 209 km/h limiter is above the top of the sweep. "
+        "Curve fitted to EV Database's published 10-80% time.",
     },
     {
         "slug": "tesla-model3-rwd",
@@ -641,6 +684,29 @@ VEHICLES: list[dict] = [
         "bodies the same number, which cannot be right for a box this much "
         "larger; the quadratic term has been raised for its frontal area, and "
         "that adjustment is ours rather than a measurement.",
+    },
+    {
+        "slug": "mercedes-cla-250-plus",
+        "nameplate_slug": "mercedes-cla",
+        "make": "Mercedes-Benz",
+        "model": "CLA",
+        "variant": "Shooting Brake 250+ 85 kWh",
+        "usable_kwh": 85.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 52.0, "b_wh_km_per_kph2": 0.0098},
+        "charge_curve": [
+            [0, 106], [5, 318], [10, 353], [35, 353], [45, 261], [55, 191],
+            [65, 141], [75, 99], [85, 64], [95, 39], [100, 18],
+        ],
+        "max_dc_kw": 353.0,
+        "mass_kg": 2255.0,
+        "top_speed_kph": 209.0,
+        "source_note": "Mercedes CLA Shooting Brake 250+ (2025-2026) on the 800 V MMA platform: "
+        "the fastest-charging and most efficient car in this catalog, at 18 "
+        "minutes for 10-80% and a Cd that puts its quadratic term below every "
+        "European entry bar the Ioniq 6. Sources disagree on the peak — "
+        "Mercedes markets \"up to 320 kW\" and EV Database measures 353 — and "
+        "the higher figure is used here, so treat the very top of the curve as "
+        "the least certain part of it. Fitted to the published 10-80% time.",
     },
     {
         "slug": "volvo-ex30-er",

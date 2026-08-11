@@ -104,6 +104,7 @@ export default async function VehiclePage({ params }: Params) {
   const peak = Math.max(...variants.map(peakKw))
   const speeds = cruiseSpeedsFor(v)
   const taper = taperSoc(v, 0.5)
+  const stopMinutes = Math.round(chargeMinutes(v, 10, 80))
   const c100 = consumptionWhKm(v, 100)
   const c130 = consumptionWhKm(v, 130)
   const penalty = Math.round(((c130 - c100) / c100) * 100)
@@ -161,7 +162,7 @@ export default async function VehiclePage({ params }: Params) {
           {v.usable_kwh} kWh of usable battery and peaks at {Math.round(peakKw(v))}
           {" kW"} on a DC charger. In this app&apos;s model it uses about {Math.round(c100)} Wh/km at a steady
           100 km/h and {Math.round(c130)} Wh/km at 130, so {penalty}% more energy per kilometre buys
-          you 30 km/h more speed. Weigh that against a {Math.round(chargeMinutes(v, 10, 80))}-minute
+          you 30 km/h more speed. Weigh that against {article(stopMinutes)} {stopMinutes}-minute
           10-80% charging stop and you have the whole question of how fast to drive.
         </p>
 
@@ -375,6 +376,17 @@ const CHARGE_WINDOWS: [number, number][] = [
 
 function peakKw(v: Vehicle): number {
   return Math.max(...v.charge_curve.map(([, kw]) => kw))
+}
+
+/** "a" or "an" for a number that is about to be read aloud.
+ *
+ *  Every charge time on this page is computed, so the sentence around it has
+ *  to be too — the fastest cars land on 18 minutes and were reading "a
+ *  18-minute stop". Vowel *sound*, not vowel letter: eight, eleven, eighteen
+ *  and the eighties take "an", and nothing else in this range does. */
+function article(n: number): string {
+  const s = String(n)
+  return n === 8 || n === 11 || n === 18 || s.startsWith("8") ? "an" : "a"
 }
 
 /** "58-77" across a nameplate's variants, or "77" when they all share a pack. */
