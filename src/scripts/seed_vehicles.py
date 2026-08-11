@@ -712,6 +712,26 @@ VEHICLES: list[dict] = [
         "steep taper. Curated from Fastned/P3 tests.",
     },
     {
+        "slug": "hyundai-ioniq5-84",
+        "nameplate_slug": "hyundai-ioniq-5",
+        "make": "Hyundai",
+        "model": "Ioniq 5",
+        "variant": "84 kWh RWD (2024 on)",
+        "usable_kwh": 80.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 62.0, "b_wh_km_per_kph2": 0.0127},
+        "charge_curve": [
+            [0, 79], [10, 263], [45, 263], [55, 208], [65, 139], [75, 92],
+            [80, 68], [90, 39], [100, 11],
+        ],
+        "max_dc_kw": 263.0,
+        "mass_kg": 2240.0,
+        "top_speed_kph": 185.0,
+        "source_note": _EGMP_NOTE
+        + " Fitted to the MY24 84 kWh RWD, the fastest-charging car in this"
+        + " catalog: 263 kW held to 45% SoC puts 10-80% at eighteen minutes."
+        + " On a long drive that is worth more than its extra range.",
+    },
+    {
         "slug": "hyundai-ioniq6-74-rwd",
         "nameplate_slug": "hyundai-ioniq-6",
         "make": "Hyundai",
@@ -731,6 +751,26 @@ VEHICLES: list[dict] = [
         "later than on the Ioniq 5 it shares a pack with.",
     },
     {
+        "slug": "hyundai-kona-65",
+        "nameplate_slug": "hyundai-kona",
+        "make": "Hyundai",
+        "model": "Kona Electric",
+        "variant": "65 kWh",
+        "usable_kwh": 65.4,
+        "consumption": {"model": "quadratic", "a_wh_km": 57.0, "b_wh_km_per_kph2": 0.0123},
+        "charge_curve": [
+            [0, 44], [5, 100], [10, 105], [42, 105], [52, 80], [62, 61],
+            [72, 47], [82, 36], [92, 25], [100, 8],
+        ],
+        "max_dc_kw": 105.0,
+        "mass_kg": 1953.0,
+        "top_speed_kph": 172.0,
+        "source_note": "Hyundai Kona Electric (MY24-25): a 400 V car on its own platform, not "
+        "E-GMP, and the slowest charger of the Koreans here at 105 kW. Thirty-"
+        "seven minutes for 10-80% is the number that decides its long trips, "
+        "not the pack size. Curve fitted to EV Database's published figures.",
+    },
+    {
         "slug": "kia-ev6-74-rwd",
         "nameplate_slug": "kia-ev6",
         "make": "Kia",
@@ -746,6 +786,26 @@ VEHICLES: list[dict] = [
         "mass_kg": 2195.0,
         "top_speed_kph": 185.0,
         "source_note": _EGMP_NOTE,
+    },
+    {
+        "slug": "kia-ev3-78",
+        "nameplate_slug": "kia-ev3",
+        "make": "Kia",
+        "model": "EV3",
+        "variant": "Long Range 78 kWh",
+        "usable_kwh": 78.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0125},
+        "charge_curve": [
+            [0, 57], [5, 128], [10, 135], [43, 135], [53, 103], [63, 78],
+            [73, 61], [83, 46], [93, 32], [100, 11],
+        ],
+        "max_dc_kw": 135.0,
+        "mass_kg": 2065.0,
+        "top_speed_kph": 170.0,
+        "source_note": "Kia EV3 (MY25-26): E-GMP underneath but a 400 V pack, so it charges "
+        "nothing like the 800 V EV6 above it — 135 kW and 33 minutes for "
+        "10-80%, against the EV6's 240 kW. Buyers routinely expect otherwise. "
+        "Curve fitted to the 10-80% time published by EV Database.",
     },
     {
         "slug": "byd-atto3-60",
