@@ -756,6 +756,26 @@ VEHICLES: list[dict] = [
         "Fastned model guide + P3 Charging Index style tests.",
     },
     {
+        "slug": "renault-scenic-87",
+        "nameplate_slug": "renault-scenic",
+        "make": "Renault",
+        "model": "Scenic E-Tech",
+        "variant": "EV87 87 kWh",
+        "usable_kwh": 87.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0134},
+        "charge_curve": [
+            [0, 63], [5, 142], [10, 150], [34, 150], [44, 114], [54, 87],
+            [64, 68], [74, 51], [84, 36], [94, 24], [100, 12],
+        ],
+        "max_dc_kw": 150.0,
+        "mass_kg": 2097.0,
+        "top_speed_kph": 170.0,
+        "source_note": "Renault Scenic E-Tech EV87 (2025 update): the biggest pack of the "
+        "French cars here at 87 kWh, but only 150 kW to fill it, so 10-80% is "
+        "forty minutes. It is a car that wants fewer, longer stops than its "
+        "range alone suggests. Curve fitted to EV Database's published time.",
+    },
+    {
         "slug": "hyundai-ioniq5-73",
         "nameplate_slug": "hyundai-ioniq-5",
         "make": "Hyundai",
@@ -868,6 +888,49 @@ VEHICLES: list[dict] = [
         "nothing like the 800 V EV6 above it — 135 kW and 33 minutes for "
         "10-80%, against the EV6's 240 kW. Buyers routinely expect otherwise. "
         "Curve fitted to the 10-80% time published by EV Database.",
+    },
+    {
+        "slug": "toyota-bz4x-71",
+        "nameplate_slug": "toyota-bz4x",
+        "make": "Toyota",
+        "model": "bZ4X",
+        "variant": "FWD 71 kWh (2026)",
+        "usable_kwh": 71.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 59.0, "b_wh_km_per_kph2": 0.0132},
+        "charge_curve": [
+            [0, 63], [5, 142], [10, 150], [39, 150], [49, 114], [59, 87],
+            [69, 68], [79, 51], [89, 36], [99, 24], [100, 12],
+        ],
+        "max_dc_kw": 150.0,
+        "mass_kg": 2155.0,
+        "top_speed_kph": 160.0,
+        "source_note": "Toyota bZ4X FWD (MY26 facelift), and the model year matters more here "
+        "than on any other car in this list. The 2022 car earned a reputation "
+        "for collapsing DC power on a second consecutive stop; the facelift "
+        "reworked the pack conditioning and reaches 10-80% in twenty-nine "
+        "minutes. These numbers describe the 2026 car and should not be read "
+        "as a defence of the original. Fitted to EV Database's figures.",
+    },
+    {
+        "slug": "nissan-ariya-87",
+        "nameplate_slug": "nissan-ariya",
+        "make": "Nissan",
+        "model": "Ariya",
+        "variant": "87 kWh",
+        "usable_kwh": 87.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 64.0, "b_wh_km_per_kph2": 0.0144},
+        "charge_curve": [
+            [0, 55], [5, 124], [10, 130], [33, 130], [43, 99], [53, 75],
+            [63, 58], [73, 44], [83, 31], [93, 21], [100, 10],
+        ],
+        "max_dc_kw": 130.0,
+        "mass_kg": 2301.0,
+        "top_speed_kph": 160.0,
+        "source_note": "Nissan Ariya 87 kWh (MY22-25): the slowest 10-80% in this catalog at "
+        "forty-eight minutes — 87 kWh behind a 130 kW peak that starts tapering "
+        "at a third full. Paired with the highest motorway consumption of the "
+        "European-market cars here, it is the entry where cruise speed costs "
+        "the most. Curve fitted to EV Database's published figures.",
     },
     {
         "slug": "byd-atto3-60",
