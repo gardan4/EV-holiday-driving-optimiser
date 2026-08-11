@@ -245,3 +245,19 @@ export function taperSoc(v: Vehicle, fraction = 0.5): number | null {
   }
   return null
 }
+
+
+/** Cable-side peak of the curve, which is what "peaks at N kW" means on the
+ *  catalog pages — the highest point the car actually reaches, not `max_dc_kw`,
+ *  which is the nameplate figure and is sometimes optimistic about it. */
+export function peakKw(v: Vehicle): number {
+  return Math.max(...v.charge_curve.map(([, kw]) => kw))
+}
+
+/** "58-77" across a nameplate's variants, or "77" when they all share a pack. */
+export function kwhRange(group: Vehicle[]): string {
+  const packs = group.map((v) => v.usable_kwh)
+  const lo = Math.min(...packs)
+  const hi = Math.max(...packs)
+  return lo === hi ? `${lo}` : `${lo}-${hi}`
+}
