@@ -14,6 +14,7 @@ import {
   cruiseSpeedsFor,
   fetchVehicles,
   groupByNameplate,
+  headlineVariant,
   nameplateKey,
   nameplateName,
   nameplateShortName,
@@ -97,9 +98,7 @@ export default async function VehiclePage({ params }: Params) {
 
   // The headline variant is the one most people mean: the biggest pack, and
   // among equals the one that charges fastest.
-  const v = [...variants].sort(
-    (a, b) => b.usable_kwh - a.usable_kwh || chargeMinutes(a, 10, 80) - chargeMinutes(b, 10, 80)
-  )[0]
+  const v = headlineVariant(variants)
   const name = nameplateName(variants)
   const solo = variants.length === 1
   const peak = Math.max(...variants.map(peakKw))

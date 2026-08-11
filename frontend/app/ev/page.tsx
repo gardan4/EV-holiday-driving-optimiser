@@ -10,6 +10,7 @@ import {
   consumptionWhKm,
   fetchVehicles,
   groupByNameplate,
+  headlineVariant,
   nameplateName,
   nameplateShortName,
   rangeKm,
@@ -116,7 +117,7 @@ export default async function VehicleIndexPage() {
                 // Ranges where the versions differ, a single figure where they
                 // agree — a card that says "58-77 kWh" is telling the reader
                 // something a card that silently picks one version is not.
-                const best = group.reduce((a, b) => (a.usable_kwh >= b.usable_kwh ? a : b))
+                const best = headlineVariant(group)
                 return (
                   <li key={slug}>
                     <Link

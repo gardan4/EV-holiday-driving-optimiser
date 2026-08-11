@@ -116,6 +116,25 @@ export function nameplateShortName(variants: Vehicle[]): string {
   return variants[0].model
 }
 
+/**
+ * The version a nameplate's headline figures should describe.
+ *
+ * Biggest pack, and among equal packs the one that charges fastest. The
+ * tiebreak is doing real work: two ID.4s share 77 kWh and are nine minutes
+ * apart on a 10-80% stop, so picking by pack alone silently credits the
+ * nameplate to whichever happens to sit first in the file — which was the
+ * older, slower car.
+ *
+ * Both `/ev` and `/ev/<nameplate>` call this, because a card and the page it
+ * links to quoting different versions of the same car is a bug the reader
+ * cannot see and cannot explain.
+ */
+export function headlineVariant(variants: Vehicle[]): Vehicle {
+  return [...variants].sort(
+    (a, b) => b.usable_kwh - a.usable_kwh || chargeMinutes(a, 10, 80) - chargeMinutes(b, 10, 80)
+  )[0]
+}
+
 // ---------------------------------------------------------------------------
 // Naming
 // ---------------------------------------------------------------------------
