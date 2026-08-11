@@ -67,7 +67,19 @@ export default function PrivacyPage() {
           follows you to another site. What a visit records is the page you
           opened, as a pattern like <em>/trip/…</em>, never which trip, and
           whether you planned a route or started a drive. If you arrived from a
-          link somewhere, we keep the site&apos;s name and not the page.
+          link somewhere, we keep the site and the page it was on — so we can
+          tell which post or thread sent you — but never the part of the address
+          after a <em>?</em>, which is where a link out of an inbox or a search
+          carries things that are nobody else&apos;s business.
+          <br />
+          <br />
+          A visit also records roughly what you are reading it on: your country,
+          whether it is a phone, tablet or computer, which browser, and how wide
+          the window is to the nearest band. That is stored as a handful of
+          words — <em>mobile</em>, <em>Safari</em>, <em>up to 640</em> — never
+          the long identifying string your browser actually sends. It tells us
+          whether the 3D map is worth its weight on the devices people really
+          have.
           <strong className="block pt-2 font-semibold text-ink-800">
             Telling two visitors apart without knowing who they are: your IP
             address and browser are scrambled into a code, using a secret that
@@ -76,6 +88,54 @@ export default function PrivacyPage() {
           </strong>
           If your browser sends Global Privacy Control or Do Not Track, none of
           this is sent at all. These counts are deleted after 90 days.
+        </Section>
+
+        <Section title="One thing that does remember you">
+          The code above forgets you every night, which means it cannot answer
+          whether anyone ever comes back — and that is the one thing worth
+          knowing about a tool like this. So your browser also makes up a random
+          number the first time you visit, keeps it, and sends it when you look
+          at a page or plan a trip. We store a scrambled version of it, so what
+          is in our database is not the number sitting in your browser.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            It is a random number and nothing else. It is not built from your IP
+            address, your device or anything about you, so clearing this
+            site&apos;s data in your browser really does end it — nothing can
+            work out what it used to be.
+          </strong>
+          It is never sent when you open a trip someone shared with you, only
+          when you plan one yourself, so a link you were forwarded records
+          nothing about you. If your browser sends Global Privacy Control or Do
+          Not Track, the number is never created in the first place. Attached to
+          usage counts it is deleted after 90 days; attached to the summary
+          below it is erased after 15 months, which is long enough to see
+          whether people come back for a second summer.
+        </Section>
+
+        <Section title="We also summarise where people drive">
+          Alongside your trip we keep a rounded-off summary of it, so we can see
+          which routes people plan and where the charging network makes a
+          journey painful. It is built from the trip you already planned, so it
+          is nothing extra about you — but it is deliberately blunter. Your
+          start and destination become a box roughly 20 by 25 kilometres, the
+          distance is rounded to the nearest 10 km, and the rest is the car, the
+          month you were travelling, and how many charging stops the best plan
+          needed.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            No address, street or postcode goes into that summary.
+          </strong>
+          It does carry the random number described above, so we can tell
+          whether someone plans one trip or ten. That is deliberately the only
+          place the two meet: the number sits on the rounded-off summary and
+          never on the trip itself, so nothing here puts a person next to an
+          exact address. It is erased from the summary after 15 months, and it
+          goes immediately if you delete the trip.
+          <br />
+          <br />
+          This summary is the one thing here we would ever consider showing
+          someone else, as a picture of where electric cars struggle to charge.
+          It is built to be blunt enough that doing so is safe, and the random
+          number would not be part of it.
         </Section>
 
         <Section title="Who else sees it">
@@ -96,10 +156,10 @@ export default function PrivacyPage() {
 
         <Section title="Getting something removed">
           Every trip page has a delete button. It removes the trip, any drives
-          on it and their location trails, immediately and for good. That is
-          the whole record, because a trip is all we have. It works for anyone
-          holding the link, since the link is the only key that exists, so treat
-          it the same way you would treat the trip itself.
+          on it and their location trails, and the rounded-off summary described
+          above, immediately and for good. That is the whole record. It works
+          for anyone holding the link, since the link is the only key that
+          exists, so treat it the same way you would treat the trip itself.
         </Section>
 
         <Section title="If you send feedback">

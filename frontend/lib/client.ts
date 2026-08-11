@@ -4,6 +4,7 @@
  */
 
 import { apiFetch, getErrorMessage } from "./api"
+import { clientIdHeaders } from "./analytics"
 
 // ---------------------------------------------------------------------------
 // Types (mirror src/app/api/schemas.py)
@@ -15,9 +16,9 @@ export interface Vehicle {
   make: string
   model: string
   variant: string | null
-  usable_kwh: number
   /** Which `/ev` page this variant belongs on; null means a page of its own. */
   nameplate_slug: string | null
+  usable_kwh: number
   consumption: { model: string; a_wh_km: number; b_wh_km_per_kph2: number }
   charge_curve: [number, number][]
   max_dc_kw: number
@@ -152,8 +153,21 @@ export async function geocode(q: string): Promise<GeocodeHit[]> {
   return unwrap<GeocodeHit[]>(await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}`))
 }
 
+/** Plan a trip and persist its permalink.
+ *
+ *  Carries the persistent pseudonym, and is the ONLY read/write here that
+ *  does. Not on `apiFetch`: `getTrip`, `geocode` and the run endpoints would
+ *  then attach it to every open of a shared link, which would turn the share
+ *  token into a record of who was sent it. Planning is the act of a person
+ *  using the app; opening a link someone forwarded you is not. */
 export async function planTrip(req: PlanRequest): Promise<Trip> {
-  return unwrap<Trip>(await apiFetch("/api/trips", { method: "POST", body: JSON.stringify(req) }))
+  return unwrap<Trip>(
+    await apiFetch("/api/trips", {
+      method: "POST",
+      body: JSON.stringify(req),
+      headers: clientIdHeaders(),
+    })
+  )
 }
 
 export async function getTrip(id: string): Promise<Trip> {

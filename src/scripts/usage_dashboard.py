@@ -113,6 +113,20 @@ tr:last-child td { border-bottom: 0; }
 .legend { display: flex; gap: 18px; margin-bottom: 6px; font-size: 13px; color: var(--ink-soft); }
 .key { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .empty { color: var(--ink-mute); font-size: 13.5px; font-style: italic; }
+/* Four short breakdowns side by side rather than four cards deep — they are
+   read together ("phones, in NL, on narrow screens"), not one at a time. */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 22px; }
+.split h3 {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--ink-soft); margin: 0 0 10px;
+}
+/* The retention pair: one number that means nothing without its denominator,
+   so they are set as a fraction rather than as two tiles. */
+.ratio { display: flex; align-items: baseline; gap: 10px; }
+.ratio .n { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; }
+.ratio .d { color: var(--ink-soft); font-size: 13.5px; }
+.bar-track { height: 8px; background: var(--s1-wash); border-radius: 4px; margin-top: 12px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 4px; }
 footer { color: var(--ink-mute); font-size: 12.5px; margin-top: 26px; line-height: 1.65; }
 svg { display: block; width: 100%; height: auto; overflow: visible; }
 """
@@ -275,6 +289,120 @@ def _hbars(rows: list[tuple[str, int]], *, empty: str) -> str:
     return "".join(out)
 
 
+def _corridor_table(rows, *, empty: str, gap_column: bool = False) -> str:
+    """Corridors as a table rather than bars.
+
+    Bars compare one number; a corridor carries three (how many planned it, how
+    far, how many stops), and the third only means anything against the second.
+    """
+    if not rows:
+        return f'<div class="empty">{_esc(empty)}</div>'
+    head = (
+        "<tr><th>Corridor</th><th>Trips</th><th>Distance</th>"
+        + ("<th>Stops/100&nbsp;km</th>" if gap_column else "<th>Stops</th>")
+        + "</tr>"
+    )
+    body = ""
+    for c in rows:
+        if gap_column:
+            last = f"{c.stops_per_100km:.2f}" if c.stops_per_100km is not None else "–"
+        else:
+            last = f"{c.avg_stops:.1f}" if c.avg_stops is not None else "–"
+        body += (
+            f"<tr><td>{_esc(c.label)}</td><td>{c.trips}</td>"
+            f"<td>{c.distance_km:,}&nbsp;km</td><td>{last}</td></tr>"
+        )
+    return f'<div class="scroll"><table><thead>{head}</thead><tbody>{body}</tbody></table></div>'
+
+
+def _quota_tiles(s: UsageStats) -> str:
+    """Today's spend against each free tier.
+
+    Today, not the window: the ceilings reset at midnight UTC, so a weekly
+    total cannot tell you whether tonight's post will run the tank dry — which
+    is the only question this section exists to answer.
+    """
+    if not s.providers:
+        return '<div class="empty">No external calls recorded yet.</div>'
+    out = ['<div class="tiles">']
+    for p in s.providers:
+        hit = f"{100.0 * p.hit_rate:.0f}% served from cache" if p.hit_rate is not None else "no traffic yet"
+        if p.headroom_pct is None:
+            head = f"{p.calls_today:,} calls today · no published daily cap"
+            bar = ""
+        else:
+            head = f"{p.calls_today:,} of {p.daily_quota:,} today"
+            used = 100.0 - p.headroom_pct
+            # Amber past 60%, red past 85% — a quota chart that stays one
+            # colour until it is too late is decoration.
+            colour = "var(--accent)" if used < 60 else ("var(--s2)" if used < 85 else "#d9534f")
+            bar = (
+                f'<div class="bar-track"><div class="bar-fill" '
+                f'style="width:{min(used, 100.0):.1f}%;background:{colour}"></div></div>'
+            )
+        fails = (
+            f'<div class="l" style="color:#d9534f">{p.failures_today} failed call(s) today</div>'
+            if p.failures_today else ""
+        )
+        out.append(
+            f'<div class="tile"><div class="v" style="font-size:22px">{_esc(p.provider.upper())}</div>'
+            f'<div class="l">{_esc(head)}</div>{bar}'
+            f'<div class="l" style="margin-top:8px">{_esc(hit)} · {p.avg_ms:.0f} ms avg</div>'
+            f"{fails}</div>"
+        )
+    out.append("</div>")
+    return "".join(out)
+
+
+def _campaigns(s: UsageStats) -> str:
+    if not s.campaigns:
+        return (
+            '<div class="empty">No tagged links yet. Put <code>?src=your-tag</code> '
+            "on the links you post — Reddit&rsquo;s app strips referrers, so an "
+            "untagged launch shows its best channel as &ldquo;direct&rdquo;.</div>"
+        )
+    body = ""
+    for c in s.campaigns:
+        conv = f"{c.conversion_pct:.0f}%" if c.conversion_pct is not None else "–"
+        body += (
+            f"<tr><td>{_esc(c.label)}</td><td>{c.page_views:,}</td>"
+            f"<td>{c.plans:,}</td><td>{conv}</td></tr>"
+        )
+    return (
+        '<div class="scroll"><table><thead><tr><th>Tag</th><th>Arrived</th>'
+        f"<th>Asked for a plan</th><th>Rate</th></tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+
+def _retention(s: UsageStats) -> str:
+    """The one number the daily pseudonym could never produce.
+
+    Rendered as a fraction because the denominator is doing real work: it counts
+    only browsers that kept an id, so opting out, private windows and cleared
+    storage are all outside it. A bare percentage here would be quoted, and it
+    would be quoted wrong.
+    """
+    if not s.identified_visitors:
+        return (
+            '<div class="empty">No browser in this window sent a persistent id, '
+            "so there is nothing to answer with yet.</div>"
+        )
+    pct = 100.0 * s.returning_visitors / s.identified_visitors
+    return f"""
+    <div class="ratio">
+      <span class="n">{pct:.0f}%</span>
+      <span class="d">{s.returning_visitors:,} of {s.identified_visitors:,} browsers
+      had been here before this window opened</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill" style="width:{min(pct, 100.0):.1f}%"></div></div>
+    <div class="note">
+      Counts only browsers that keep an id. Opting out, a private window and
+      cleared storage all read as new, so this is a <strong>floor</strong>, not
+      an estimate. &ldquo;Returning&rdquo; means seen before this window opened —
+      not seen twice inside it, which is just one visit reading two pages.
+    </div>"""
+
+
 def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> str:
     counts = {f.label: f.count for f in s.funnel}
     funnel_rows = [(nice, counts.get(key, 0)) for key, nice in FUNNEL_ORDER]
@@ -355,9 +483,145 @@ def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> s
   </div>
 
   <div class="card">
+    <h2>Why planning failed</h2>
+    {_hbars([(f.label, f.count) for f in s.failure_reasons],
+            empty="Nothing failed in this window.")}
+    <div class="note">
+      Recorded server-side, so this counts every failure rather than only the
+      ones a browser managed to report — and it is the reason the plan actually
+      failed for, not the message somebody read.
+      <strong>no_route</strong>, <strong>no_chargers</strong> and
+      <strong>corridor_cold</strong> are demand we could not serve, which is a
+      roadmap; <strong>upstream_error</strong> climbing is what a blown free-tier
+      quota looks like from inside.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Free-tier headroom, today</h2>
+    {_quota_tiles(s)}
+    <div class="note">
+      The one number here that can spoil a launch rather than merely
+      under-measure it. Both providers are free tiers on daily ceilings, and the
+      caches exist to stay under them — so the share served from cache is what
+      actually predicts whether a spike survives its own front page. Resets at
+      midnight UTC.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Which link worked</h2>
+    {_campaigns(s)}
+    <div class="note">
+      Ranked by arrivals, but read the rate: how many people a subreddit sends
+      is a fact about the subreddit, and how many of them went on to plan a trip
+      is a fact about whether this tool is for them.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Did they come back?</h2>
+    {_retention(s)}
+  </div>
+
+  <div class="card">
     <h2>Came from</h2>
-    {_hbars([(r.label, r.count) for r in s.top_referrers],
-            empty="Nothing but direct visits and internal links.")}
+    <div class="split">
+      <div>
+        <h3>Site</h3>
+        {_hbars([(r.label, r.count) for r in s.top_referrers],
+                empty="Nothing but direct visits and internal links.")}
+      </div>
+      <div>
+        <h3>Which page</h3>
+        {_hbars([(r.label, r.count) for r in s.top_referrer_paths],
+                empty="No external links yet.")}
+      </div>
+    </div>
+    <div class="note">
+      The path is kept, the query string never is — that is where a link out of
+      a webmail or a search carries somebody's token or address.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Who is using it</h2>
+    <div class="split">
+      <div><h3>Country</h3>{_hbars([(c.label, c.count) for c in s.countries],
+        empty="Not recorded — needs a CDN in front and TRUSTED_PROXY_HEADERS on.")}</div>
+      <div><h3>Device</h3>{_hbars([(c.label, c.count) for c in s.devices],
+        empty="Nothing recorded yet.")}</div>
+      <div><h3>Browser</h3>{_hbars([(c.label, c.count) for c in s.browsers],
+        empty="Nothing recorded yet.")}</div>
+      <div><h3>Screen width</h3>{_hbars([(c.label, c.count) for c in s.viewports],
+        empty="Nothing recorded yet.")}</div>
+    </div>
+    <div class="note">
+      Buckets, never the raw user agent — a full one is a fingerprint, and this
+      table has no business holding one. Device matters more here than it looks:
+      the journey scene is real 3D, so the phone/desktop split decides whether
+      it is the centrepiece or the reason the page struggles.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Where people drive</h2>
+    {_corridor_table(s.top_corridors, empty="No trips planned in this window.")}
+    <div class="note">
+      From <code>trip_stats</code>, which is derived from every trip ever
+      planned — so unlike the counts above, this reaches back to the first
+      deploy. Origins and destinations are rounded to a ~20&nbsp;&times;&nbsp;25&nbsp;km
+      box, which is why they read as coordinates rather than town names.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Where charging fails them</h2>
+    {_corridor_table(s.hardest_corridors,
+                     empty="No corridors with a feasible plan yet.", gap_column=True)}
+    {'<h3 style="margin-top:20px">No feasible plan at any speed</h3>'
+     + _corridor_table(s.infeasible_corridors, empty="")
+     if s.infeasible_corridors else ''}
+    <div class="note">
+      Ranked by stops per 100&nbsp;km, not raw stops — otherwise this is a list of
+      the longest routes, which is a fact about geography rather than about
+      charging. This is the one view here nobody else can build: real demand
+      against real charge curves, rather than an operator's coverage map.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Roads we don&rsquo;t model</h2>
+    {f'<div class="hero" style="font-size:34px">{s.unplaceable_trips:,}</div>'
+     f'<div class="hero-label">trip(s) start or end somewhere the app knows nothing about '
+     f'&mdash; no country, no real speed cap, just the generic fallback</div>'
+     if s.unplaceable_trips else ''}
+    {'<div style="margin-top:16px">' + _hbars(
+        [(c.label + ' (no real cap)', c.count) for c in s.unmodelled_countries],
+        empty="") + '</div>' if s.unmodelled_countries else ''}
+    {'<div class="empty">Every trip so far is inside the countries the simulator models.</div>'
+     if not s.unplaceable_trips and not s.unmodelled_countries else ''}
+    <div class="note">
+      An empty country list next to a large count above does <em>not</em> mean
+      &ldquo;no gap&rdquo;: <code>geo.country_at</code> only knows western Europe, so a US
+      or Japanese route cannot even be named and never reaches the list.
+    </div>
+  </div>
+
+  <div class="tiles" style="margin-top:18px">
+    <div class="card" style="margin-top:0">
+      <h2>Trips per planner</h2>
+      {_hbars([(r.label, r.count) for r in s.repeat_planners],
+              empty="Nobody has planned a trip with a persistent id yet.")}
+      <div class="note">
+        Backfilled history has no id, so &ldquo;1 trip&rdquo; is overstated and
+        repeat use is a floor.
+      </div>
+    </div>
+    <div class="card" style="margin-top:0">
+      <h2>Cars</h2>
+      {_hbars([(r.label, r.count) for r in s.top_cars], empty="No trips planned yet.")}
+    </div>
   </div>
 
   <div class="card">
@@ -375,6 +639,13 @@ def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> s
     between the two — that is the property that makes counting this way
     defensible, and it is the reason the daily column is the honest one.
     Rows are deleted after 90 days.
+    <br><br>
+    Retention and &ldquo;trips per planner&rdquo; come from the other pseudonym: a random
+    id the browser makes and can clear, which does not rotate. It exists because
+    the daily one cannot answer whether anyone returns. Everything drawn from it
+    is a floor — anyone opting out, in a private window, or with cleared storage
+    reads as new. It is erased from planned trips after 15 months, which is long
+    enough to see whether a holiday route comes back a second summer.
   </footer>
 
 </div></body></html>

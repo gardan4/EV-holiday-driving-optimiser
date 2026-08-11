@@ -37,7 +37,14 @@ from app.api.schemas import EventIn, UsageStats
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.core.visitor import request_visitor
+from app.core.client_context import (
+    classify_browser,
+    classify_device,
+    classify_os,
+    classify_viewport,
+    request_country,
+)
+from app.core.visitor import request_client_id, request_visitor
 from app.models import AppEvent
 from app.services.usage import ALLOWED_EVENTS, usage_stats
 
@@ -124,6 +131,73 @@ def normalize_referrer(raw: str | None) -> str | None:
     return host[:120]
 
 
+def normalize_referrer_path(raw: str | None) -> str | None:
+    """The path of the referring page, with the query string thrown away.
+
+    "reddit.com" tells you Reddit worked; "/r/electricvehicles/comments/1a2b3c/"
+    tells you which post did, which is the difference between knowing a channel
+    works and knowing which audience it was.
+
+    **The query string is always dropped, and that is the important part.** A
+    referrer arriving from a webmail, a search, a password reset or an intranet
+    tool carries tokens, addresses and search terms in its query — the single
+    most likely way for somebody else's secret to end up in this table. The path
+    alone is a far smaller surface, and it is all the question needs.
+
+    Returns None for the bare "/" of a site's front page: it adds nothing to the
+    host already stored, and would otherwise be the most common row here.
+    """
+    if not normalize_referrer(raw):
+        # Same gate as the host, so an internal navigation cannot leave a path
+        # behind after its host was deliberately discarded.
+        return None
+    path = urlsplit(raw.strip()).path or ""
+    if not path or path == "/":
+        return None
+    return path[:200]
+
+
+# Events the SERVER writes, which this public endpoint therefore refuses.
+#
+# `plan_failed` is recorded by `api.trips` with the reason it actually failed
+# for. Left acceptable here, anyone could post reasonless failures and inflate
+# the count — and the funnel total would stop matching the reason breakdown,
+# which is the one cross-check that says the failure numbers are real.
+SERVER_ONLY_EVENTS = frozenset({"plan_failed"})
+
+# A campaign tag: lowercase letters, digits and dashes. Deliberately narrow —
+# this arrives on a public endpoint and is written to the database, so the
+# pattern is what stops it becoming free-form storage.
+_CAMPAIGN_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+
+
+def normalize_campaign(raw: str | None) -> str | None:
+    """The `?src=` tag a visitor arrived with, or None.
+
+    This exists because the referrer cannot answer "which subreddit worked".
+    Reddit's mobile app — where most of that traffic is — sends no referrer at
+    all, so without a tag on the link the best channel of a launch reads as
+    "direct" alongside everyone who typed the URL.
+
+    Two gates, and the first is the one doing the work. The **pattern** is
+    always enforced: 32 characters of `[a-z0-9-]` cannot carry a payload, a
+    URL, or anybody's data. The **allowlist** (`CAMPAIGN_SOURCES`) is optional
+    on top, for when you want the stronger guarantee that only tags you posted
+    yourself appear in the numbers; left empty, any well-formed slug is kept,
+    which is the difference between remembering to edit a setting before a
+    launch and silently recording nothing.
+    """
+    if not raw:
+        return None
+    tag = raw.strip().lower()
+    if not _CAMPAIGN_RE.match(tag):
+        return None
+    allowed = {s.strip().lower() for s in settings.CAMPAIGN_SOURCES.split(",") if s.strip()}
+    if allowed and tag not in allowed:
+        return None
+    return tag
+
+
 @router.post("", status_code=204)
 @limiter.limit(settings.RATE_LIMIT_EVENTS)
 async def record_event(
@@ -131,15 +205,27 @@ async def record_event(
     body: EventIn,
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    if body.name not in ALLOWED_EVENTS:
+    if body.name not in ALLOWED_EVENTS or body.name in SERVER_ONLY_EVENTS:
         raise HTTPException(status_code=422, detail="Unknown event.")
 
+    ua = request.headers.get("user-agent", "")
     db.add(
         AppEvent(
             name=body.name,
             path=normalize_path(body.path),
             visitor=request_visitor(request),
+            # Read from a header, not the body: it is cross-cutting metadata
+            # rather than part of what happened, and a header keeps it out of
+            # any request-body logging that might get switched on later.
+            client_id=request_client_id(request),
             referrer=normalize_referrer(body.referrer),
+            referrer_path=normalize_referrer_path(body.referrer),
+            country=request_country(request),
+            device=classify_device(ua),
+            browser=classify_browser(ua),
+            os=classify_os(ua),
+            viewport=classify_viewport(body.viewport_w),
+            campaign=normalize_campaign(body.campaign),
         )
     )
     await db.commit()

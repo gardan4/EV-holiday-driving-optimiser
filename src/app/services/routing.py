@@ -21,7 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.failures import PlanError
 from app.models import RouteCache
+from app.services import quota
 from app.services.geo import RouteGeometry, country_at, geohash_encode
 from app.services.simulator import RouteSegment
 
@@ -41,7 +43,8 @@ def _http() -> httpx.AsyncClient:
 
 def _require_key() -> str:
     if not settings.ORS_API_KEY:
-        raise HTTPException(
+        raise PlanError(
+            "not_configured",
             status_code=503,
             detail="Routing is not configured (ORS_API_KEY missing). "
             "Get a free key at openrouteservice.org.",
@@ -249,12 +252,20 @@ async def _fetch_route_payload(
         resp.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            raise HTTPException(status_code=422, detail="No drivable route found between these points.")
+            raise PlanError(
+                "no_route",
+                status_code=422,
+                detail="No drivable route found between these points.",
+            )
         logger.warning("ORS directions failed: %s %s", exc.response.status_code, exc.response.text[:300])
-        raise HTTPException(status_code=503, detail="Routing is temporarily unavailable.")
+        raise PlanError(
+            "upstream_error", status_code=503, detail="Routing is temporarily unavailable."
+        )
     except httpx.HTTPError as exc:
         logger.warning("ORS directions failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Routing is temporarily unavailable.")
+        raise PlanError(
+            "upstream_error", status_code=503, detail="Routing is temporarily unavailable."
+        )
 
     feat = resp.json()["features"][0]
     raw_coords = feat["geometry"]["coordinates"]
@@ -287,10 +298,38 @@ async def get_route(
     ).scalar_one_or_none()
     if row is not None and row.fetched_at > cutoff:
         logger.info("route cache HIT %s", ck[:12])
+        # A hit is the interesting half: the cache hit rate is what decides
+        # whether a traffic spike stays inside the free tier.
+        await quota.record(db, provider="ors", kind="directions", cache_hits=1)
         return _payload_to_route(row.payload)
 
     logger.info("route cache MISS %s — fetching from ORS", ck[:12])
-    payload = await _fetch_route_payload(o_lat, o_lon, d_lat, d_lon)
+    started = time.perf_counter()
+    try:
+        payload = await _fetch_route_payload(o_lat, o_lon, d_lat, d_lon)
+    except Exception as exc:
+        # Counted before re-raising: a burst of failures is exactly what a
+        # blown quota looks like from in here, and it must not go unrecorded
+        # just because the request is about to fail.
+        #
+        # `ok` means "the provider failed us", NOT "the answer was negative".
+        # ORS answering "there is no road between these two points" is a
+        # successful call with a disappointing result — it still spends a
+        # request, so `calls=1` either way, but marking it a failure would make
+        # the upstream-health signal fire every time somebody picks an island,
+        # and an alarm that cries wolf on ordinary user error is one nobody
+        # reads on the night it matters.
+        await quota.record(
+            db, provider="ors", kind="directions", calls=1,
+            ok=getattr(exc, "reason", None) == "no_route",
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
+        await db.commit()
+        raise
+    await quota.record(
+        db, provider="ors", kind="directions", calls=1,
+        duration_ms=(time.perf_counter() - started) * 1000,
+    )
     if row is None:
         db.add(RouteCache(cache_key=ck, payload=payload, fetched_at=datetime.utcnow()))
     else:

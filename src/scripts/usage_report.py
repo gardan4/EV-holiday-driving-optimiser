@@ -96,6 +96,110 @@ def _format(s: UsageStats, source: str) -> str:
     else:
         lines += ["", "  Came from: nothing but direct visits and internal links."]
 
+    if s.identified_visitors:
+        pct = 100.0 * s.returning_visitors / s.identified_visitors
+        lines += [
+            "",
+            "  Did they come back?",
+            f"    {s.returning_visitors} of {s.identified_visitors} browsers "
+            f"({pct:.0f}%) had been here before this window",
+            "    (counts only browsers that keep an id — opting out, private",
+            "     windows and cleared storage all read as new, so this is a",
+            "     floor, not an estimate)",
+        ]
+    else:
+        lines += [
+            "",
+            "  Did they come back? No browser in this window sent a persistent",
+            "  id, so there is nothing to answer with yet.",
+        ]
+
+    def _block(title: str, rows, empty: str) -> None:
+        # `lines.append`, never `lines += […]` — an augmented assignment in here
+        # would rebind `lines` as a local and break the whole function.
+        lines.append("")
+        if not rows:
+            lines.append(f"  {title}: {empty}")
+            return
+        lines.append(f"  {title}:")
+        width = max(len(r.label) for r in rows)
+        for r in rows:
+            lines.append(f"    {r.label:<{width}}  {r.count:>6}")
+
+    if s.failure_reasons:
+        lines.append("")
+        lines.append("  Why planning failed:")
+        width = max(len(f.label) for f in s.failure_reasons)
+        for f in s.failure_reasons:
+            lines.append(f"    {f.label:<{width}}  {f.count:>5}")
+        lines.append("    (no_route / no_chargers / corridor_cold are demand we")
+        lines.append("     could not serve — a roadmap, not a bug list)")
+
+    if s.providers:
+        lines.append("")
+        lines.append("  Free-tier headroom today (resets midnight UTC):")
+        for p in s.providers:
+            hit = f"{100.0 * p.hit_rate:.0f}% cached" if p.hit_rate is not None else "no traffic"
+            cap = (
+                f"{p.calls_today}/{p.daily_quota} ({p.headroom_pct:.0f}% left)"
+                if p.headroom_pct is not None
+                else f"{p.calls_today} calls (no published cap)"
+            )
+            warn = f"  ** {p.failures_today} FAILED **" if p.failures_today else ""
+            lines.append(f"    {p.provider.upper():<5} {cap:<28} {hit}, {p.avg_ms:.0f} ms{warn}")
+
+    if s.campaigns:
+        lines.append("")
+        lines.append("  Which link worked:")
+        width = max(len(c.label) for c in s.campaigns)
+        for c in s.campaigns:
+            conv = f"{c.conversion_pct:.0f}%" if c.conversion_pct is not None else "–"
+            lines.append(
+                f"    {c.label:<{width}}  {c.page_views:>5} arrived, "
+                f"{c.plans:>4} asked for a plan ({conv})"
+            )
+    else:
+        lines.append("")
+        lines.append("  Which link worked: no tagged links yet — post with ?src=your-tag.")
+
+    _block("Where from", s.countries,
+           "nothing (needs TRUSTED_PROXY_HEADERS and a CDN in front)")
+    _block("On what", s.devices, "nothing recorded yet.")
+    _block("Browsers", s.browsers, "nothing recorded yet.")
+    _block("Screen width", s.viewports, "nothing recorded yet.")
+    _block("Which page sent them", s.top_referrer_paths, "no external links yet.")
+
+    if s.top_corridors:
+        lines += ["", "  Where people drive (all planned trips, back to launch):"]
+        for c in s.top_corridors:
+            stops = f"{c.avg_stops:.1f}" if c.avg_stops is not None else "–"
+            lines.append(f"    {c.trips:>4}×  {c.label:<34} {c.distance_km:>5} km  {stops} stops")
+
+    if s.hardest_corridors:
+        lines += ["", "  Hardest to charge (stops per 100 km):"]
+        for c in s.hardest_corridors:
+            lines.append(
+                f"    {c.stops_per_100km:>4.2f}  {c.label:<34} "
+                f"{c.avg_stops:.1f} stops over {c.distance_km} km"
+            )
+    if s.infeasible_corridors:
+        lines += ["", "  No feasible plan at any speed:"]
+        for c in s.infeasible_corridors:
+            lines.append(f"    {c.trips:>4}×  {c.label:<34} {c.distance_km:>5} km")
+
+    if s.unplaceable_trips or s.unmodelled_countries:
+        lines += ["", "  Roads we don't model:"]
+        if s.unplaceable_trips:
+            lines.append(
+                f"    {s.unplaceable_trips} trip(s) start or end somewhere we "
+                "model nothing about"
+            )
+        for lc in s.unmodelled_countries:
+            lines.append(f"    {lc.label:<4} crossed {lc.count}×, no real cap of its own")
+
+    _block("Trips per planner", s.repeat_planners,
+           "nobody has planned a trip with a persistent id yet.")
+
     lines += [
         "",
         "  From the trips table (real history, predates event counting):",

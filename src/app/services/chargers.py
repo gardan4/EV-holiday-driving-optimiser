@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import Charger, OcmTile
+from app.services import quota
 from app.services.geo import country_at, geohash_bbox, geohash_encode
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode
@@ -265,6 +267,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         if t.fetched_at > cutoff
     }
     stale = [t for t in tiles if t not in fresh]
+    fresh_count = len(fresh)
     corridor_incomplete.set(len(stale) > MAX_TILE_FETCHES)
     logger.info("corridor: %d tiles (%d fresh, %d to fetch)", len(tiles), len(fresh), len(stale))
     # Cap the upstream burst. Each tile is a sequential 20 s-timeout call, so an
@@ -288,8 +291,26 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         async with sem:
             return tile_key, await _fetch_tile_http(tile_key)
 
-    for tile_key, pois in await asyncio.gather(*(fetch(t) for t in stale)):
+    started = time.perf_counter()
+    results = await asyncio.gather(*(fetch(t) for t in stale))
+    for tile_key, pois in results:
         await _persist_tile(db, tile_key, pois)
+
+    # One row for the whole corridor rather than one per tile: the quota is
+    # counted in requests, so `calls` is the tile count, and a cold 170-tile
+    # corridor should not put 170 rows in the table measuring it. `cache_hits`
+    # is every tile this corridor did NOT have to fetch — the number that says
+    # whether the tile cache is doing its job.
+    if stale or fresh_count:
+        await quota.record(
+            db,
+            provider="ocm",
+            kind="chargers",
+            calls=len(stale),
+            cache_hits=fresh_count,
+            duration_ms=(time.perf_counter() - started) * 1000,
+            ok=all(pois is not None for _, pois in results),
+        )
 
     # 3. Pull cached chargers in the corridor bbox (coarse), then project.
     lats = [la for la, _ in geom.coords]

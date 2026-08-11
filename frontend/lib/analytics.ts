@@ -20,11 +20,15 @@
 
 import { API_URL } from "./api"
 
+/** What the browser is allowed to report.
+ *
+ *  `plan_failed` is deliberately absent: the server records it, with the
+ *  reason it actually failed for, and the events endpoint refuses it from a
+ *  client. Firing it from here too would double every failure. */
 export type EventName =
   | "page_view"
   | "plan_submitted"
   | "trip_planned"
-  | "plan_failed"
   | "drive_started"
 
 /** GPC is the one with legal weight in some jurisdictions; DNT is honoured on
@@ -33,6 +37,107 @@ function optedOut(): boolean {
   if (typeof navigator === "undefined") return true
   const nav = navigator as Navigator & { globalPrivacyControl?: boolean; doNotTrack?: string }
   return nav.globalPrivacyControl === true || nav.doNotTrack === "1"
+}
+
+const CLIENT_ID_KEY = "evtrip.cid"
+const CAMPAIGN_KEY = "evtrip.src"
+
+/**
+ * The `?src=` tag the visit started with, remembered for the session.
+ *
+ * Put `?src=r-electricvehicles` on the link you post and this reports it back
+ * on every event of that visit — not just the landing page. That is the whole
+ * point: the interesting number is not how many people a subreddit sent, it is
+ * how many of them went on to plan a trip, and that happens two pages later.
+ *
+ * Needed because the referrer cannot answer it. Reddit's mobile app, where
+ * most of that traffic lives, sends no referrer at all, so an untagged launch
+ * shows its best channel as "direct".
+ *
+ * `sessionStorage`, not `localStorage`: the tag describes how *this visit*
+ * started. Kept forever it would attribute a trip planned next month to a link
+ * clicked today, which is a different and much less true claim.
+ *
+ * `utm_source` is read as a fallback so a link pasted from anywhere else still
+ * lands somewhere, but the server keeps only well-formed short slugs.
+ */
+function campaign(): string | undefined {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const fresh = params.get("src") || params.get("utm_source")
+    if (fresh) {
+      window.sessionStorage.setItem(CAMPAIGN_KEY, fresh)
+      return fresh
+    }
+    return window.sessionStorage.getItem(CAMPAIGN_KEY) || undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * A random id for this browser, so "did anyone come back?" has an answer.
+ *
+ * The server used to be the only thing telling two visitors apart, by hashing
+ * the IP with a salt that changed at midnight — which counts a day's visitors
+ * honestly and makes retention structurally unanswerable. This is the other
+ * half: a v4 UUID that the browser generates, keeps, and can throw away.
+ *
+ * It is generated HERE rather than derived from anything about you, which is
+ * what makes it clearable: the privacy page can honestly say that clearing
+ * site data ends it, and that is only true because nothing regenerates it from
+ * your IP or your user agent. The server stores a hash of it, never this value.
+ *
+ * Never created for someone who has opted out — `track()` returns before this
+ * is reached, so GPC and DNT mean no id is minted at all, not merely unsent.
+ *
+ * Returns null rather than throwing when storage is unavailable (private
+ * windows, storage disabled, quota). Retention is a nice thing to know; it is
+ * not worth a broken page.
+ */
+function clientId(): string | null {
+  try {
+    const existing = window.localStorage.getItem(CLIENT_ID_KEY)
+    if (existing) return existing
+    // `randomUUID` needs a secure context and is missing on older Safari. The
+    // fallback is not a security boundary — this id only has to be unlikely to
+    // collide, and it is checked against a strict v4 pattern server-side.
+    const fresh =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : fallbackUuid()
+    window.localStorage.setItem(CLIENT_ID_KEY, fresh)
+    return fresh
+  } catch {
+    return null
+  }
+}
+
+/** RFC-4122 v4 shape from `crypto.getRandomValues`, for browsers without
+ *  `randomUUID`. Falls back to `Math.random` only if even that is missing. */
+function fallbackUuid(): string {
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10xx
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
+    16,
+    20
+  )}-${hex.slice(20)}`
+}
+
+/** The header every counted request carries, when there is one to carry.
+ *  Exported so the trip planner sends the same id the events do — two
+ *  different ids would split one person across both tables. */
+export function clientIdHeaders(): Record<string, string> {
+  if (typeof window === "undefined" || optedOut()) return {}
+  const id = clientId()
+  return id ? { "X-Client-Id": id } : {}
 }
 
 /** Strip the query string and replace ids with `:id`, so a trip's share token
@@ -67,10 +172,16 @@ export function track(name: EventName, pathname?: string): void {
 
   // keepalive: a page_view fired as the user navigates away would otherwise be
   // cancelled with the document.
+  // Width only, and only on a page view — the server bands it to a breakpoint
+  // before storing, so what lands in the table is "641–768" and not a number
+  // narrow enough to recognise a window by. Height adds nothing: the question
+  // is whether the layout has room across, not down.
+  const viewport_w = name === "page_view" ? Math.round(window.innerWidth) : undefined
+
   fetch(`${API_URL}/api/events`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, path, referrer }),
+    headers: { "Content-Type": "application/json", ...clientIdHeaders() },
+    body: JSON.stringify({ name, path, referrer, viewport_w, campaign: campaign() }),
     keepalive: true,
   }).catch(() => {
     /* counting is best-effort by design */

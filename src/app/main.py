@@ -110,6 +110,8 @@ async def _purge_loop() -> None:
     from scripts.purge_old_events import DEFAULT_RETENTION_DAYS as EVENT_RETENTION_DAYS
     from scripts.purge_old_events import purge as purge_events
     from scripts.purge_old_runs import DEFAULT_RETENTION_DAYS, purge
+    from scripts.purge_old_trip_stat_ids import RETENTION_DAYS as STAT_ID_RETENTION_DAYS
+    from scripts.purge_old_trip_stat_ids import purge as purge_stat_ids
 
     # Let the cold start finish first — nothing here is urgent to the second.
     await asyncio.sleep(300)
@@ -136,6 +138,18 @@ async def _purge_loop() -> None:
             raise
         except Exception:
             logger.exception("Usage-event purge failed; retrying in 24h")
+
+        # Not a delete: this clears the planner's pseudonym off old corridor
+        # rows and keeps the rows. On a much longer clock than the two above —
+        # a holiday app's cycle is a year, so retention needs to see one.
+        try:
+            n = await purge_stat_ids(days=STAT_ID_RETENTION_DAYS, apply=True)
+            if n:
+                logger.info("Retention purge cleared the planner id on %d trip stat(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Trip-stat id purge failed; retrying in 24h")
 
         await asyncio.sleep(24 * 60 * 60)
 

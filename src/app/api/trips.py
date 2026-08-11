@@ -26,8 +26,10 @@ from app.api.schemas import (
 )
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.failures import PlanError, reason_of
 from app.core.rate_limit import limiter
-from app.models import Trip, TripEvent, TripRun, Vehicle
+from app.core.visitor import request_client_id, request_visitor
+from app.models import AppEvent, Trip, TripEvent, TripRun, TripStat, Vehicle
 from app.services import chargers as chargers_svc
 from app.services import routing
 from app.services.geo import polyline_encode
@@ -42,6 +44,7 @@ from app.services.simulator import (
     payload_extra_kg,
     sweep,
 )
+from app.services.trip_stats import build_trip_stat
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +69,9 @@ def _vehicle_out(v: Vehicle) -> VehicleOut:
         make=v.make,
         model=v.model,
         variant=v.variant,
+        nameplate_slug=v.nameplate_slug,
         usable_kwh=v.usable_kwh,
         consumption=v.consumption,
-        nameplate_slug=v.nameplate_slug,
         charge_curve=v.charge_curve,
         max_dc_kw=v.max_dc_kw,
         mass_kg=v.mass_kg,
@@ -113,41 +116,96 @@ def _result_out(r: SpeedResult) -> SpeedResultOut:
     )
 
 
+async def _record_plan_failure(db: AsyncSession, request: Request, reason: str) -> None:
+    """Write the `plan_failed` row, server-side, with the reason attached.
+
+    Recorded HERE rather than in the browser's catch block for two reasons. The
+    server is the only party that knows *why* — the client sees a message
+    written for a human. And an event fired from a page can be blocked, so the
+    old client-side count was measured against a different population than the
+    trips table it was compared with.
+
+    Rolls back first: the request is failing, whatever partial work the session
+    is holding is being discarded anyway, and a session left in a failed state
+    cannot write this row.
+
+    Never raises. A missing telemetry row is worth less than a clean error
+    response, and turning a 422 into a 500 because the counter broke would be
+    the counter causing the outage it exists to warn about.
+    """
+    try:
+        await db.rollback()
+        db.add(
+            AppEvent(
+                name="plan_failed",
+                # No path: this is an API call, not a page, and `KNOWN_PATHS`
+                # is an allowlist of pages. Leaving it null keeps the page
+                # breakdown honest instead of inventing a "/api/trips" entry.
+                path=None,
+                visitor=request_visitor(request),
+                client_id=request_client_id(request),
+                reason=reason,
+            )
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001 — never turn a handled failure into a 500
+        logger.warning("could not record plan failure (%s)", reason, exc_info=True)
+
+
 @router.post("", response_model=TripOut)
 @limiter.limit(settings.RATE_LIMIT_PLAN)
 async def plan_trip(
     request: Request, plan: PlanRequest, db: AsyncSession = Depends(get_db)
 ) -> TripOut:
+    """Plan a trip, and count it if it fails.
+
+    A thin wrapper so every exit path through `_plan` is recorded from one
+    place — eight raise sites each remembering to log for themselves is eight
+    chances to forget, and the one that gets forgotten is always the new one.
+    """
+    try:
+        return await _plan(request, plan, db)
+    except HTTPException as exc:
+        await _record_plan_failure(db, request, reason_of(exc))
+        raise
+    except Exception:
+        # An unhandled error is still a failed plan, and it is the kind most
+        # worth noticing — `server_error` climbing is the signal that something
+        # broke in a way nobody anticipated.
+        await _record_plan_failure(db, request, "server_error")
+        raise
+
+
+async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOut:
     if plan.speed_max < plan.speed_min:
-        raise HTTPException(status_code=422, detail="speed_max must be ≥ speed_min.")
+        raise PlanError("bad_speed_range", 422, "speed_max must be ≥ speed_min.")
     n_points = int((plan.speed_max - plan.speed_min) / plan.speed_step) + 1
     if n_points > MAX_SWEEP_POINTS:
-        raise HTTPException(
-            status_code=422, detail=f"Speed sweep too large (max {MAX_SWEEP_POINTS} points)."
+        raise PlanError(
+            "sweep_too_large", 422, f"Speed sweep too large (max {MAX_SWEEP_POINTS} points)."
         )
     if plan.depart_soc < plan.target_soc:
-        raise HTTPException(
-            status_code=422, detail="Departure charge must be at least the arrival target."
+        raise PlanError(
+            "bad_soc", 422, "Departure charge must be at least the arrival target."
         )
 
     try:
         vehicle_uuid = uuid.UUID(plan.vehicle_id)
     except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid vehicle id.")
+        raise PlanError("bad_vehicle", 422, "Invalid vehicle id.")
     vehicle = await db.get(Vehicle, vehicle_uuid)
     if vehicle is None:
-        raise HTTPException(status_code=404, detail="Unknown vehicle.")
+        raise PlanError("unknown_vehicle", 404, "Unknown vehicle.")
 
     route = await routing.get_route(
         db, plan.origin.lat, plan.origin.lon, plan.dest.lat, plan.dest.lon
     )
     if route.total_dist_m > MAX_ROUTE_M:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"That route is {route.total_dist_m / 1000:.0f} km. This plans "
-                f"trips up to {MAX_ROUTE_M / 1000:.0f} km."
-            ),
+        raise PlanError(
+            "route_too_long",
+            422,
+            f"That route is {route.total_dist_m / 1000:.0f} km. This plans "
+            f"trips up to {MAX_ROUTE_M / 1000:.0f} km.",
         )
     charger_nodes = await chargers_svc.chargers_for_route(db, route)
 
@@ -205,14 +263,16 @@ async def plan_trip(
         # the common case the moment routes stopped being confined to Europe,
         # where the tiles were already warm.
         if chargers_svc.corridor_incomplete.get():
-            raise HTTPException(
-                status_code=503,
-                detail="Still gathering charger data for this route — "
+            raise PlanError(
+                "corridor_cold",
+                503,
+                "Still gathering charger data for this route — "
                 "give it a moment and try again.",
             )
-        raise HTTPException(
-            status_code=422,
-            detail="No feasible plan at any speed — no fast chargers found along "
+        raise PlanError(
+            "no_chargers",
+            422,
+            "No feasible plan at any speed — no fast chargers found along "
             "this route for the selected car and charge settings.",
         )
 
@@ -239,14 +299,39 @@ async def plan_trip(
         countries=list(dict.fromkeys(s.country for s in route.segments if s.country)),
     )
 
+    request_json = plan.model_dump(mode="json")
+    result_json = result.model_dump(mode="json")
     trip = Trip(
         vehicle_id=vehicle.id,
-        request=plan.model_dump(mode="json"),
-        result=result.model_dump(mode="json"),
+        request=request_json,
+        result=result_json,
         result_version=1,
         created_at=datetime.utcnow(),
     )
     db.add(trip)
+    # Flush rather than commit: the trip's id is a Python-side default assigned
+    # here, and the stat needs it. One commit still covers both, so a trip can
+    # never exist without its stat row.
+    await db.flush()
+
+    # Derived from what was just stored, never from the local variables — the
+    # backfill reads those same JSON columns, and one shared input is what
+    # stops live rows and historical rows from meaning subtly different things.
+    stat = build_trip_stat(
+        trip_id=trip.id,
+        vehicle_id=vehicle.id,
+        request=request_json,
+        result=result_json,
+        created_at=trip.created_at,
+        # Deliberately NOT part of `PlanRequest`: that model is persisted whole
+        # into `Trip.request`, so a field there would write the person onto the
+        # row holding their exact coordinates — the one join this design exists
+        # to avoid. A header reaches the coarsened row and nothing else.
+        client_id=request_client_id(request),
+    )
+    if stat is not None:
+        db.add(stat)
+
     await db.commit()
     await db.refresh(trip)
 
@@ -302,6 +387,14 @@ async def delete_trip(
     Deliberately deletes the location trail too: a trip's drives are the most
     sensitive thing here, and leaving them behind after the trip is gone would
     orphan a GPS trace with no way left to reach it.
+
+    The derived `TripStat` goes with it, for the same reason and one more. The
+    privacy page promises this removes "the whole record", and names the
+    coarsened summary in that list — so the moment a second table derives from
+    trips, that sentence is only true if the delete follows it. A coarsened row
+    is still a row about a journey somebody asked us to forget, and a derived
+    table nobody deletes from is exactly how a promise becomes a policy that
+    isn't kept.
     """
     try:
         tid = uuid.UUID(trip_id)
@@ -320,6 +413,7 @@ async def delete_trip(
         # Events first: the FK has no cascade, by design.
         await db.execute(delete(TripEvent).where(TripEvent.run_id.in_(run_ids)))
         await db.execute(delete(TripRun).where(TripRun.id.in_(run_ids)))
+    await db.execute(delete(TripStat).where(TripStat.trip_id == tid))
     await db.delete(trip)
     await db.commit()
     logger.info("deleted trip %s… and %d drive(s)", str(tid)[:8], len(run_ids))

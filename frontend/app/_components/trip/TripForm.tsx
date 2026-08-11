@@ -101,7 +101,15 @@ export default function TripForm() {
       track("trip_planned")
       router.push(`/trip/${trip.id}`)
     } catch (err) {
-      track("plan_failed")
+      // Deliberately not counted here. The server records `plan_failed` with
+      // the reason it actually failed for — which this side cannot know, and
+      // which an ad blocker cannot suppress. Counting it in both places would
+      // double every failure and make the funnel wrong.
+      //
+      // A request that never reaches the server is therefore not in the
+      // failure count. It shows up as the gap between `plan_submitted` and
+      // `trip_planned + plan_failed`, which is where it belongs: nothing
+      // server-side happened, so nothing server-side can explain it.
       toast.error(err instanceof Error ? err.message : "Planning failed")
       setSubmitting(false)
     }

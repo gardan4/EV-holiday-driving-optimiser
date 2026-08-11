@@ -367,6 +367,14 @@ class EventIn(BaseModel):
     name: str = Field(min_length=1, max_length=32)
     path: str | None = Field(default=None, max_length=300)
     referrer: str | None = Field(default=None, max_length=300)
+    # CSS-pixel width, banded to a breakpoint before storage. Bounded here so a
+    # nonsense number is rejected with the body rather than reasoned about
+    # later; `classify_viewport` discards anything left over.
+    viewport_w: int | None = Field(default=None, ge=0, le=20_000)
+    # The `?src=` tag the visit started with, carried for the whole session so
+    # a plan two pages later is still attributable to the link that brought
+    # them. Bounded here; shape-checked in `events.normalize_campaign`.
+    campaign: str | None = Field(default=None, max_length=64)
 
 
 class DayCount(BaseModel):
@@ -378,6 +386,54 @@ class DayCount(BaseModel):
 class LabelCount(BaseModel):
     label: str
     count: int
+
+
+class CampaignOut(BaseModel):
+    """One `?src=` tag, and what the people who arrived through it did.
+
+    `page_views` alone ranks channels by how loud they are; the pair is what
+    says which audience the tool is actually for.
+    """
+
+    label: str
+    page_views: int
+    plans: int
+
+    @property
+    def conversion_pct(self) -> float | None:
+        return (100.0 * self.plans / self.page_views) if self.page_views else None
+
+
+class ProviderOut(BaseModel):
+    """Today's spend against one external free tier.
+
+    `headroom_pct` is None when the provider publishes no daily ceiling —
+    withheld rather than invented, because a reassuring bar with no denominator
+    behind it is worse than an empty space.
+    """
+
+    provider: str
+    calls_today: int
+    cache_hits_today: int
+    failures_today: int
+    avg_ms: float
+    calls_window: int
+    daily_quota: int
+    hit_rate: Optional[float] = None
+    headroom_pct: Optional[float] = None
+
+
+class CorridorOut(BaseModel):
+    """One coarsened origin→destination pair. `label` is already rendered
+    ("NL 52.1,5.1 → AT 47.2,11.4") because the geohash it comes from is not
+    something a reader can place, and turning it into a name would cost an
+    ORS call per row against the quota the planner depends on."""
+
+    label: str
+    trips: int
+    distance_km: int
+    avg_stops: Optional[float] = None
+    stops_per_100km: Optional[float] = None
 
 
 class UsageStats(BaseModel):
@@ -399,3 +455,37 @@ class UsageStats(BaseModel):
     trips_planned: int
     drives_started: int
     trips_planned_since_launch: int
+    # Retention. `identified_visitors` is the denominator — browsers that sent
+    # a persistent id at all — and is smaller than `visitors` above, because
+    # opting out, private windows and cleared storage all land outside it.
+    # Quote the ratio, never `returning_visitors` on its own.
+    identified_visitors: int = 0
+    returning_visitors: int = 0
+
+    # Who and what, coarsely (`core.client_context`). `countries` is empty
+    # unless something trustworthy sits in front setting `CF-IPCountry`, so on
+    # a local run it is expected to be blank rather than broken.
+    countries: list[LabelCount] = []
+    devices: list[LabelCount] = []
+    browsers: list[LabelCount] = []
+    operating_systems: list[LabelCount] = []
+    viewports: list[LabelCount] = []
+    top_referrer_paths: list[LabelCount] = []
+
+    # Where people drive, from `trip_stats` — so these reach back to the first
+    # deploy, like the trip totals and unlike anything counted from events.
+    top_corridors: list[CorridorOut] = []
+    hardest_corridors: list[CorridorOut] = []
+    infeasible_corridors: list[CorridorOut] = []
+    unmodelled_countries: list[LabelCount] = []
+    unplaceable_trips: int = 0
+    repeat_planners: list[LabelCount] = []
+    top_cars: list[LabelCount] = []
+
+    # Which posted link worked, and whether the free tiers will survive it.
+    campaigns: list[CampaignOut] = []
+    providers: list[ProviderOut] = []
+    # Why planning failed, from `core.failures.PLAN_FAILURE_REASONS`. Recorded
+    # server-side, so this counts every failure rather than only the ones a
+    # browser was able to report.
+    failure_reasons: list[LabelCount] = []

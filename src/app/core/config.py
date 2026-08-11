@@ -141,6 +141,21 @@ class Settings(BaseSettings):
     # per request and every IP-keyed limit below becomes decorative.
     TRUSTED_PROXY_HEADERS: bool = False
 
+    # ----- Free-tier ceilings, for the headroom figure on the dashboard -----
+    # What the provider allows per day. 0 = no published daily limit, which
+    # withholds the headroom percentage rather than inventing a denominator —
+    # the calls are still counted and the cache hit rate still computed.
+    ORS_DAILY_QUOTA: int = 2000   # openrouteservice free tier, directions/day
+    OCM_DAILY_QUOTA: int = 0      # OpenChargeMap publishes no hard daily cap
+
+    # Campaign tags accepted on `?src=`, comma-separated (e.g.
+    # "r-electricvehicles,r-evcharging,hn"). Empty means any well-formed slug
+    # is accepted — the strict pattern in `events.normalize_campaign` is doing
+    # the safety work either way, and this list only exists for when you want
+    # the tighter guarantee that nothing you did not post shows up in the
+    # numbers. Set it before a launch, leave it empty for zero friction.
+    CAMPAIGN_SOURCES: str = ""
+
     # Discord webhook posted to when feedback arrives. Empty = no notifications.
     #
     # Unlike an ntfy topic (public to anyone who guesses the name), a webhook
