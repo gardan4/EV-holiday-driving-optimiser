@@ -644,6 +644,28 @@ VEHICLES: list[dict] = [
         "than the pack sizes imply. Curve fitted to EV Database's figures.",
     },
     {
+        "slug": "bmw-i5-edrive40",
+        "nameplate_slug": "bmw-i5",
+        "make": "BMW",
+        "model": "i5",
+        "variant": "eDrive40 81 kWh",
+        "usable_kwh": 81.2,
+        "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0114},
+        "charge_curve": [
+            [0, 87], [5, 196], [10, 206], [32, 206], [42, 157], [52, 119],
+            [62, 93], [72, 70], [82, 49], [92, 33], [100, 16],
+        ],
+        "max_dc_kw": 206.0,
+        "mass_kg": 2375.0,
+        "top_speed_kph": 193.0,
+        "source_note": "BMW i5 eDrive40 Sedan (MY25), and the interesting thing about it is how "
+        "little separates it from the i4 above: 81 kWh against 81, 206 kW "
+        "against 205, both about half an hour for 10-80%. What differs is the "
+        "car around them, and at 130 km/h the bigger i5 uses about 9% more per "
+        "kilometre. Same pack, same stop, less range. Curve fitted to EV "
+        "Database's published figures.",
+    },
+    {
         "slug": "mercedes-eqa-250-plus",
         "nameplate_slug": "mercedes-eqa",
         "make": "Mercedes-Benz",
@@ -766,6 +788,27 @@ VEHICLES: list[dict] = [
         "fastback roof worth a few percent of drag.",
     },
     {
+        "slug": "volvo-ex90-88",
+        "nameplate_slug": "volvo-ex90",
+        "make": "Volvo",
+        "model": "EX90",
+        "variant": "Single Motor 88 kWh",
+        "usable_kwh": 88.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 68.0, "b_wh_km_per_kph2": 0.0156},
+        "charge_curve": [
+            [0, 108], [5, 285], [10, 310], [29, 310], [39, 248], [49, 186],
+            [59, 136], [69, 96], [79, 62], [89, 37], [100, 19],
+        ],
+        "max_dc_kw": 310.0,
+        "mass_kg": 2736.0,
+        "top_speed_kph": 180.0,
+        "source_note": "Volvo EX90 Single Motor (MY26-27): an 800 V car, and nothing like the "
+        "CMA-platform EX40 and EC40 above it — 310 kW against their 200, and "
+        "23 minutes for 10-80% on a pack half again as big. At 2.7 tonnes it "
+        "is the heaviest car Volvo makes. Like every Volvo it is limited "
+        "to 180 km/h. Curve fitted to EV Database's published 10-80% time.",
+    },
+    {
         "slug": "polestar-2-lr-sm",
         "nameplate_slug": "polestar-2",
         "make": "Polestar",
@@ -783,6 +826,27 @@ VEHICLES: list[dict] = [
         "source_note": "2024 rear-motor 82 kWh car: 205 kW peak, taper from ~25% SoC. "
         "Shares the EX40's platform but is far lower and slipperier. "
         "Curated from Fastned model guide + P3 Charging Index style tests.",
+    },
+    {
+        "slug": "polestar-4-94",
+        "nameplate_slug": "polestar-4",
+        "make": "Polestar",
+        "model": "4",
+        "variant": "Long Range Single Motor 94 kWh",
+        "usable_kwh": 94.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 62.0, "b_wh_km_per_kph2": 0.0141},
+        "charge_curve": [
+            [0, 84], [5, 190], [10, 200], [36, 200], [46, 152], [56, 116],
+            [66, 90], [76, 68], [86, 48], [96, 32], [100, 16],
+        ],
+        "max_dc_kw": 200.0,
+        "mass_kg": 2485.0,
+        "top_speed_kph": 200.0,
+        "source_note": "Polestar 4 Long Range Single Motor (MY24-26): the biggest pack of the "
+        "Nordic cars at 94 kWh, on a 400 V system that peaks at 200 kW, so "
+        "10-80% is 31 minutes. It goes further between stops than the EX90 and "
+        "takes longer at each one — the trade this app exists to price. Curve "
+        "fitted to EV Database's published time.",
     },
     {
         "slug": "renault-megane-60",
