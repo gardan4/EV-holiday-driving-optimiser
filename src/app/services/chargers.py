@@ -59,8 +59,26 @@ OPERATIONAL_STATUS = 50
 # filter was already fixed.
 OCM_QUERY_VERSION = 2
 MAX_PERP_M = 3_000.0          # ≤ 3 km off-route
-MIN_OFFSET_M = 50_000.0       # no stops in the first 50 km (battery still full)
+# Stops are excluded near both ends of a route: the first 50 km because the
+# battery is still full, the last 10 because you may as well arrive.
+#
+# Both have to SCALE on a short route, or there is no eligible window at all.
+# Flat 50 km + 10 km means anything under 60 km can never hold a stop, so a
+# 26 km hop with a low battery came back as "no fast chargers found along this
+# route" — in the middle of the Netherlands, which is false and reads like the
+# charger data is broken. The fractions below keep the flat values on any real
+# road trip (they bind above 200 km) and open a sensible window below that.
+MIN_OFFSET_M = 50_000.0
 END_MARGIN_M = 10_000.0
+START_FRACTION = 0.25
+END_FRACTION = 0.10
+
+
+def stop_window(total_m: float) -> tuple[float, float]:
+    """The offsets a charging stop may be placed between, for this route."""
+    start = min(MIN_OFFSET_M, total_m * START_FRACTION)
+    end = total_m - min(END_MARGIN_M, total_m * END_FRACTION)
+    return start, end
 DEDUP_RADIUS_M = 500.0
 # Candidate chargers handed to the DP. A flat 60 is generous over 500 km and
 # starvation over 4000, so it scales with the route — the DP is bounded by this
@@ -350,6 +368,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         # nearest sample) plus the perpendicular limit we'd accept anyway.
         reach_m = SAMPLE_SPACING_M / 2.0 + MAX_PERP_M
         reach_deg_lat = reach_m / 111_320.0
+        window_start, window_end = stop_window(geom.total_m)
         out: list[ChargerNode] = []
         for c in rows:
             # Longitude degrees shrink with latitude; use the charger's own.
@@ -369,7 +388,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
             offset_m, perp_m = geom.project(c.lat, c.lon)
             if perp_m > MAX_PERP_M:
                 continue
-            if offset_m < MIN_OFFSET_M or offset_m > geom.total_m - END_MARGIN_M:
+            if offset_m < window_start or offset_m > window_end:
                 continue
             out.append(
                 ChargerNode(

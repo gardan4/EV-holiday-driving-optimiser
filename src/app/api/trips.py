@@ -61,6 +61,11 @@ MAX_SWEEP_POINTS = 40
 # 5000 km is about the longest drive any single landmass offers.
 MAX_ROUTE_M = 5_000_000.0
 
+# Below this, an infeasible plan with no candidate chargers means the hop is
+# too short to put a stop into, not that the corridor has none. See the
+# scaled `chargers.stop_window`.
+SHORT_ROUTE_M = 60_000.0
+
 
 def _vehicle_out(v: Vehicle) -> VehicleOut:
     return VehicleOut(
@@ -269,11 +274,34 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
                 "Still gathering charger data for this route — "
                 "give it a moment and try again.",
             )
+        # A short hop that cannot be completed is not a charging desert, and
+        # saying so was actively misleading — the first version of this told
+        # people in the Netherlands there were no fast chargers on a 26 km
+        # drive. On a route this short the binding constraint is always the
+        # charge you left with: either nothing is far enough along to stop at,
+        # or you cannot reach what is. Both mean "charge before you go", so
+        # deliberately NOT conditioned on whether candidates were found.
+        if route.total_dist_m < SHORT_ROUTE_M:
+            raise PlanError(
+                "route_too_short",
+                422,
+                f"That route is only {route.total_dist_m / 1000:.0f} km, and no plan "
+                f"works starting from {plan.depart_soc:.0f}%. On a hop this short "
+                "there is no room to charge on the way — you would need to set off "
+                "with more.",
+            )
+        # Same reason either way (both are a charging gap, and splitting them
+        # would split the number that measures it), but not the same sentence:
+        # "no fast chargers found" is simply false when we found some and the
+        # car could not reach them.
         raise PlanError(
             "no_chargers",
             422,
-            "No feasible plan at any speed — no fast chargers found along "
-            "this route for the selected car and charge settings.",
+            "No feasible plan at any speed — no fast chargers found along this "
+            "route for the selected car and charge settings."
+            if not charger_nodes
+            else "No feasible plan at any speed — the fast chargers on this route "
+            "are too far apart for this car at this starting charge.",
         )
 
     # If the fastest plan is the fastest speed we were allowed to simulate, the

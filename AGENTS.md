@@ -119,6 +119,15 @@ the pipeline is green before infra exists. Infra deploy is manual
   western-European countries and everywhere else falls back to
   `default_country_cap_kph` (130), which is too high for most of the world.
   The assumptions panel says so — keep it saying so until real caps exist.
+- **The stop window scales with the route** (`chargers.stop_window`). Stops are
+  excluded from the first 50 km and last 10 km, which is right for a holiday
+  drive and nonsense below 60 km: flat values leave NO eligible window there, so
+  a 26 km hop returned zero candidate chargers and the app told people in the
+  Netherlands there were "no fast chargers along this route". The fractions
+  (25% / 10%) bind only under ~200 km, so no real road trip changes. Failing on
+  a short hop is now `route_too_short` and says the true thing — set off with
+  more charge — because on that length the binding constraint is always the
+  charge you left with, never the charger data.
 - **OCM connector ids are regional** (`chargers.DC_CONNECTION_TYPES`). CCS Type 2
   alone is Europe; North America is CCS Type 1 + NACS, Japan CHAdeMO, China
   GB/T. Filtering to one plug is why a US route once found zero chargers.
