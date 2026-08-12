@@ -1005,11 +1005,34 @@ VEHICLES: list[dict] = [
         "later than on the Ioniq 5 it shares a pack with.",
     },
     {
+        "slug": "hyundai-kona-64",
+        "nameplate_slug": "hyundai-kona",
+        "make": "Hyundai",
+        "model": "Kona Electric",
+        "variant": "64 kWh (2018-2023)",
+        "usable_kwh": 64.0,
+        "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0120},
+        "charge_curve": [
+            [0, 34], [5, 70], [10, 77], [40, 77], [50, 58], [62, 50],
+            [72, 41], [80, 34], [90, 23], [100, 8],
+        ],
+        "max_dc_kw": 77.0,
+        "mass_kg": 1940.0,
+        "top_speed_kph": 167.0,
+        "source_note": "Hyundai Kona Electric, first generation (2018-2023): the same name as "
+        "the 2024 car and a different one to plan around — 77 kW peak against "
+        "105, so 10-80% takes forty-six minutes instead of thirty-seven, and a "
+        "long day out needs one more stop or one longer one. Marginally the "
+        "more efficient of the two at a cruise. Charging hardware did not change "
+        "across MY19, MY21 and MY22 facelifts, so one curve covers the "
+        "generation; fitted to EV Database's published figures.",
+    },
+    {
         "slug": "hyundai-kona-65",
         "nameplate_slug": "hyundai-kona",
         "make": "Hyundai",
         "model": "Kona Electric",
-        "variant": "65 kWh",
+        "variant": "65 kWh (2024 on)",
         "usable_kwh": 65.4,
         "consumption": {"model": "quadratic", "a_wh_km": 57.0, "b_wh_km_per_kph2": 0.0123},
         "charge_curve": [
@@ -1019,10 +1042,11 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 105.0,
         "mass_kg": 1953.0,
         "top_speed_kph": 172.0,
-        "source_note": "Hyundai Kona Electric (MY24-25): a 400 V car on its own platform, not "
-        "E-GMP, and the slowest charger of the Koreans here at 105 kW. Thirty-"
-        "seven minutes for 10-80% is the number that decides its long trips, "
-        "not the pack size. Curve fitted to EV Database's published figures.",
+        "source_note": "Hyundai Kona Electric, second generation (MY24-25): a 400 V car on its "
+        "own platform, not E-GMP, and the slowest charger of the Koreans here at "
+        "105 kW. Thirty-seven minutes for 10-80% is the number that decides its "
+        "long trips, not the pack size. Curve fitted to EV Database's published "
+        "figures.",
     },
     {
         "slug": "kia-ev6-74-rwd",
