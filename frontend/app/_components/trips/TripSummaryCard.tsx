@@ -9,20 +9,35 @@
  * The place labels arrive already reduced to a locality by the API. Nothing
  * here truncates anything: a summary that looked short because the CSS clipped
  * it would still have shipped the address to every reader.
+ *
+ * `action` is an escape hatch for the owner's own list, which carries a delete
+ * control. It is a slot rather than a prop like `onDelete` so this component
+ * stays hook-free and server-renderable — the interactive part is passed in
+ * already built. The public page passes nothing, which is why a stranger's
+ * profile has no controls on it.
  */
 
+import type { ReactNode } from "react"
 import Link from "next/link"
 import { fmtDeparture } from "@/lib/format"
 import type { TripSummary } from "@/lib/client"
 
-export default function TripSummaryCard({ trip }: { trip: TripSummary }) {
+export default function TripSummaryCard({
+  trip,
+  action,
+}: {
+  trip: TripSummary
+  action?: ReactNode
+}) {
   return (
-    <li>
+    <li className="relative">
       <Link
         href={`/trip/${trip.id}`}
         className="block rounded-2xl border border-ink-100 bg-white p-4 shadow-sm transition hover:border-brand-300 hover:shadow-md"
       >
-        <p className="font-display text-base font-semibold leading-snug text-ink-900">
+        {/* Padded so a long "Origin → Destination" cannot run under the action
+            sitting in the corner above it. */}
+        <p className={`font-display text-base font-semibold leading-snug text-ink-900 ${action ? "pr-8" : ""}`}>
           {trip.origin_label} <span className="text-brand-500">→</span>{" "}
           {trip.dest_label}
         </p>
@@ -46,6 +61,10 @@ export default function TripSummaryCard({ trip }: { trip: TripSummary }) {
         </dl>
         <p className="mt-2 truncate text-xs text-ink-400">{trip.vehicle_label}</p>
       </Link>
+
+      {/* Outside the Link, not inside it: a button nested in an anchor still
+          navigates, so deleting would open the trip it just deleted. */}
+      {action && <div className="absolute right-2 top-2">{action}</div>}
     </li>
   )
 }

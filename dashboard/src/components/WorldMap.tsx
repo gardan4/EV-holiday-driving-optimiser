@@ -170,6 +170,27 @@ function toAspect(b: Box): Box {
   return { ...b, y: b.y - (h - b.h) / 2, h }
 }
 
+/** Keep the view's centre somewhere on the planet.
+ *
+ * Without this a pan has no end: you can flick the map into empty projection
+ * space and be left with a blank rectangle whose only way back is the reset
+ * chip. The centre — not the edges — is what is clamped, so you can still put
+ * any coastline against the middle of the frame at any zoom, and the constraint
+ * is always satisfiable even when the view is wider than the world.
+ */
+function clampBox(b: Box): Box {
+  const cx = Math.min(Math.max(b.x + b.w / 2, WORLD_BOX.x), WORLD_BOX.x + WORLD_BOX.w)
+  const cy = Math.min(Math.max(b.y + b.h / 2, WORLD_BOX.y), WORLD_BOX.y + WORLD_BOX.h)
+  return { x: cx - b.w / 2, y: cy - b.h / 2, w: b.w, h: b.h }
+}
+
+/** Below this many pixels a pointer gesture is a click, not a pan.
+ *
+ * A click that moves one pixel used to commit a manual view: the caption
+ * changed, the "reset view" chip appeared, and both preset buttons went dim —
+ * all from a gesture that moved the map by nothing anyone could see. */
+const DRAG_SLOP = 3
+
 export function WorldMap({
   corridors,
   transitCountries,
@@ -186,9 +207,8 @@ export function WorldMap({
   const [hover, setHover] = useState<string | null>(null)
   const [whole, setWhole] = useState(false)
   const [dragging, setDragging] = useState(false)
-  const [focused, setFocused] = useState(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const drag = useRef<{ x: number; y: number; box: Box } | null>(null)
+  const drag = useRef<{ x: number; y: number; box: Box; moved: boolean } | null>(null)
 
   // The frame's real rendered width. `max-w-[940px]` means it is narrower than
   // that on a small screen, and pan/zoom maths that assumed the constant would
@@ -317,20 +337,42 @@ export function WorldMap({
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     // Ignore secondary buttons so a right-click context menu still works.
     if (e.button !== 0) return
+    // Suppress the browser's own mousedown default — text selection and native
+    // element dragging. `user-select: none` on the svg stops a selection being
+    // *started* here, but a drag that leaves the frame can still extend the
+    // document selection over the panels around it, which is what makes the
+    // whole dashboard flash blue mid-pan. preventDefault is what stops that;
+    // it also drops the implicit focus, so focus is taken explicitly.
+    e.preventDefault()
+    e.currentTarget.focus({ preventScroll: true })
     e.currentTarget.setPointerCapture(e.pointerId)
-    drag.current = { x: e.clientX, y: e.clientY, box }
+    drag.current = { x: e.clientX, y: e.clientY, box, moved: false }
     setDragging(true)
+    // The country under the cursor at grab time is not the one under it when
+    // the drag ends, and the legend would keep naming it either way.
+    setHover(null)
   }
 
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     const d = drag.current
     if (!d) return
+    const dx = e.clientX - d.x
+    const dy = e.clientY - d.y
+    // Below the slop this is still a click. Committing a view here is what
+    // turned every click on the map into a "manual view" the presets no longer
+    // appeared to control.
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < DRAG_SLOP) return
+      d.moved = true
+    }
     // The map follows the cursor, so the view moves the opposite way.
-    setView({
-      ...d.box,
-      x: d.box.x - (e.clientX - d.x) * unitsPerPx,
-      y: d.box.y - (e.clientY - d.y) * unitsPerPx,
-    })
+    setView(
+      clampBox({
+        ...d.box,
+        x: d.box.x - dx * unitsPerPx,
+        y: d.box.y - dy * unitsPerPx,
+      })
+    )
   }
 
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -352,14 +394,14 @@ export function WorldMap({
     const nudge = (dx: number, dy: number) =>
       setView((c) => {
         const b = c ?? baseRef.current
-        return { ...b, x: b.x + dx, y: b.y + dy }
+        return clampBox({ ...b, x: b.x + dx, y: b.y + dy })
       })
     const scale = (factor: number) =>
       setView((c) => {
         const b = c ?? baseRef.current
         const w = Math.min(Math.max(b.w * factor, MIN_SPAN), MAX_SPAN)
         const h = w / ASPECT
-        return { x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h }
+        return clampBox({ x: b.x + (b.w - w) / 2, y: b.y + (b.h - h) / 2, w, h })
       })
 
     const actions: Record<string, () => void> = {
@@ -400,12 +442,12 @@ export function WorldMap({
         const w = Math.min(Math.max(b.w * factor, MIN_SPAN), MAX_SPAN)
         const h = w / ASPECT
         // Keep the projected point under the cursor fixed.
-        return {
+        return clampBox({
           x: b.x + (b.w - w) * fx,
           y: b.y + (b.h - h) * fy,
           w,
           h,
-        }
+        })
       })
     }
     el.addEventListener("wheel", onWheel, { passive: false })
@@ -469,7 +511,7 @@ export function WorldMap({
         ref={svgRef}
         viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
         preserveAspectRatio="xMidYMid meet"
-        className="mx-auto block h-auto w-full max-w-[940px] rounded-lg focus:outline-none"
+        className="mx-auto block h-auto w-full max-w-[940px] rounded-lg outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#43c389]"
         style={{
           aspectRatio: "16 / 10",
           background: "#0d1523",
@@ -478,17 +520,27 @@ export function WorldMap({
           // the map only moves once the browser decides the gesture was not a
           // scroll — which reads as the map being broken.
           touchAction: "none",
-          outline: focused ? "1px solid #43c389" : undefined,
+          // A pan is not a text selection. Without this the drag highlights the
+          // country tooltips and the legend in selection blue, and the browser
+          // treats the gesture as selecting rather than as dragging.
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          // Safari/Chrome on touch otherwise flash a grey box over the whole
+          // frame on every tap.
+          WebkitTapHighlightColor: "transparent",
         }}
         role="img"
         aria-label="Planned corridors on a world map. Drag to pan, scroll to zoom. When focused, arrow keys pan and + / - zoom."
         tabIndex={0}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        // Capture can be lost without a pointerup — another element taking it,
+        // or the browser dropping it when the window loses focus mid-drag.
+        // Without this the map stays stuck in `grabbing` and keeps panning on
+        // the next stray move.
+        onLostPointerCapture={endDrag}
         onKeyDown={onKeyDown}
         onDoubleClick={() => setView(null)}
       >
@@ -520,7 +572,10 @@ export function WorldMap({
         <path d={SPHERE_PATH} fill="none" stroke="#1b2637" strokeWidth={px(1.5)} />
         <path d={GRATICULE_PATH} fill="none" stroke="#141d2b" strokeWidth={px(1)} />
 
-        <g>
+        {/* Hit-testing is off while panning: the cursor sweeps a dozen
+            countries during one drag, and each one re-strokes itself and pops a
+            tooltip on the way past. */}
+        <g pointerEvents={dragging ? "none" : undefined}>
           {COUNTRY_PATHS.map((c) => {
             const isModelled = modelled.has(c.iso)
             const trips = traffic.m.get(c.iso) ?? 0
@@ -558,7 +613,7 @@ export function WorldMap({
           })}
         </g>
 
-        <g fill="none" strokeLinecap="round">
+        <g fill="none" strokeLinecap="round" pointerEvents={dragging ? "none" : undefined}>
           {arcs.map((a, i) => (
             <g key={a.label}>
               <title>

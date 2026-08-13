@@ -128,7 +128,10 @@ export default function ResultsView({
               {result.vehicle.variant} · leaves {clockAt(trip.request.departure_iso, 0)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          {/* Wraps, and the secondary labels collapse to icons on a phone.
+              Four side-by-side controls in a non-wrapping row is how "Drive
+              this" and "New trip" ended up broken across two lines each. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {/* A drive already under way replaces the invitation to start one —
                 the banner below is the way in. */}
             {live?.status !== "active" && (
@@ -142,14 +145,16 @@ export default function ResultsView({
               className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
             >
               {copied ? <Check className="h-4 w-4 text-brand-600" /> : <Link2 className="h-4 w-4" />}
-              Share
+              <span className="sr-only sm:not-sr-only">Share</span>
             </button>
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300"
+              title="Plan a new trip"
+              aria-label="Plan a new trip"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-ink-300 sm:px-3.5"
             >
               <RotateCcw className="h-4 w-4" />
-              New trip
+              <span className="sr-only sm:not-sr-only">New trip</span>
             </Link>
             <DeleteTrip tripId={trip.id} />
           </div>

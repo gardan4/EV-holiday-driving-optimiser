@@ -56,6 +56,7 @@ import {
   whoAmI,
   type TripSummary,
 } from "@/lib/client"
+import DeleteTrip from "../trip/DeleteTrip"
 import TripSummaryCard from "./TripSummaryCard"
 
 const OPEN_KEY = "evtrip.drawer"
@@ -232,7 +233,26 @@ export default function TripsDrawer() {
           ) : trips && trips.length > 0 ? (
             <ul className="grid gap-3">
               {trips.map((t) => (
-                <TripSummaryCard key={t.id} trip={t} />
+                <TripSummaryCard
+                  key={t.id}
+                  trip={t}
+                  // Deleting from the list rather than only from the trip page:
+                  // this panel exists because people lose track of what they
+                  // planned, and tidying up is the other half of that. Dropped
+                  // from local state rather than refetched — the row is gone,
+                  // and a round trip to prove it would only make it flicker.
+                  action={
+                    <DeleteTrip
+                      tripId={t.id}
+                      compact
+                      onDeleted={() =>
+                        setTrips((cur) =>
+                          (cur ?? []).filter((x) => x.id !== t.id)
+                        )
+                      }
+                    />
+                  }
+                />
               ))}
             </ul>
           ) : (
