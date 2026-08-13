@@ -63,6 +63,11 @@ class TestPathScrubbing:
             (f"/trip/{TRIP_ID}/runs/a1b2c3d4e5f6a7b8", "/trip/:id/runs/:id"),
             ("/ev", "/ev"),
             ("/ev/", "/ev"),
+            # A username is the one handle here that could be a real name, so
+            # it must never land in a row next to a visitor pseudonym.
+            ("/u/marc", "/u/:username"),
+            ("/u/marc-2026", "/u/:username"),
+            ("/u/marc/", "/u/:username"),
             # Unknown shapes collapse rather than being stored verbatim.
             ("/admin/whatever", "/other"),
             ("relative/path", "/other"),

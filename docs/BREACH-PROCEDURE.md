@@ -56,7 +56,8 @@ somebody lives and when they are away from it.
 
 **The people affected, without undue delay**, if the risk to them is high.
 There are no accounts and no email addresses for visitors, so individual
-notification is usually impossible. Art 34(3)(c) allows a public communication
+notification is usually impossible — a claimed username is a public handle with
+no contact channel behind it, so it does not change this. Art 34(3)(c) allows a public communication
 instead: a prominent notice on the site, on the landing page and on `/privacy`,
 saying what happened, what it means for them, and what to do about it. For
 feedback senders who supplied an address, email them directly.

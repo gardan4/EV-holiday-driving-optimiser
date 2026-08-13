@@ -145,6 +145,10 @@ async def _purge_loop() -> None:
         DEFAULT_RETENTION_DAYS as FEEDBACK_RETENTION_DAYS,
     )
     from scripts.purge_old_feedback import purge as purge_feedback
+    from scripts.purge_old_profiles import (
+        DEFAULT_RETENTION_DAYS as PROFILE_RETENTION_DAYS,
+    )
+    from scripts.purge_old_profiles import purge as purge_profiles
     from scripts.purge_old_runs import DEFAULT_RETENTION_DAYS, purge
     from scripts.purge_old_trip_stat_ids import RETENTION_DAYS as STAT_ID_RETENTION_DAYS
     from scripts.purge_old_trip_stat_ids import purge as purge_stat_ids
@@ -211,6 +215,18 @@ async def _purge_loop() -> None:
             raise
         except Exception:
             logger.exception("Feedback purge failed; retrying in 24h")
+
+        # After the trip purge above, deliberately: a username is only
+        # collectable once nothing is published under it, and the trips have to
+        # go first for that to ever become true.
+        try:
+            n = await purge_profiles(days=PROFILE_RETENTION_DAYS, apply=True)
+            if n:
+                logger.info("Retention purge deleted %d dormant username(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Username purge failed; retrying in 24h")
 
         await asyncio.sleep(24 * 60 * 60)
 
@@ -311,13 +327,14 @@ def create_app() -> FastAPI:
     # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only /
     # and /health below, so health probes pass without exposing the API surface.
     if _serves_api():
-        from app.api import events, feedback, geocode, runs, trips, vehicles
+        from app.api import events, feedback, geocode, runs, trips, users, vehicles
 
         app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
         app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
         app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
         app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
         app.include_router(events.router, prefix="/api/events", tags=["events"])
+        app.include_router(users.router, prefix="/api/users", tags=["users"])
         # Live runs own routes under both /api/trips/{id}/… and /api/runs/{id}/…,
         # so they mount at /api rather than under either one.
         app.include_router(runs.router, prefix="/api", tags=["live"])

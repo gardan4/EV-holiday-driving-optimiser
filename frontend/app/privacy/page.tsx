@@ -31,13 +31,16 @@ export default function PrivacyPage() {
         <p className="mt-2 text-sm text-ink-500">
           Short version: there are no accounts, we don&apos;t know who you are,
           location data is deleted after 90 days, and you can switch off the
-          counting further down this page.
+          counting further down this page. If you pick a username, the trips you
+          plan after that get a public page — that one is worth reading.
         </p>
 
         <Section title="There is no sign-in">
-          No accounts, no email addresses, nothing tied to a name. Your IP
-          address is used to rate-limit abuse and appears in server logs, which
-          are kept for 30 days.
+          No accounts, no passwords, no email addresses. You can pick a username
+          if you want your trips kept in one place, and that is described just
+          below — it is still not an account, and nothing about it is tied to a
+          name we asked you for. Your IP address is used to rate-limit abuse and
+          appears in server logs, which are kept for 30 days.
         </Section>
 
         <Section title="Trips are unlisted, not private">
@@ -45,6 +48,40 @@ export default function PrivacyPage() {
           and the settings you chose, under a long random link. Anyone with that
           link can see the trip, so treat it like a password. Trip pages are
           excluded from search engines.
+        </Section>
+
+        <Section title="A username, if you pick one" id="username">
+          By default a trip is only reachable through its link, and nothing
+          connects the trips you plan to each other. Picking a username in the
+          &ldquo;Your trips&rdquo; panel changes that on purpose: it gives you a
+          page at <em>/u/yourname</em> listing what you have planned.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            That page is public. Anyone who knows or guesses the username can
+            read it, without an account and without being asked.
+          </strong>
+          It shows the town you set off from, the town you were going to, the
+          distance, the car, the date and how many charging stops the best plan
+          needed. It does not show your exact start or destination — those are
+          cut back to the nearest place name before they ever leave the server —
+          and it does not show the route. The trip page behind each entry does,
+          and that still needs the link.
+          <br />
+          <br />
+          Choosing the name is the moment you opt in, so it only applies going
+          forward: trips you planned before are not added to it, ever. Your
+          browser makes up a second random number to prove the name is yours. It
+          is not sent when you read anything, only when you plan a trip or
+          change the username itself.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            Releasing the username removes the page immediately and detaches
+            every trip from it permanently.
+          </strong>
+          Your trips and their links survive that — releasing a name is not the
+          same as deleting your journeys, and the delete button on each trip is
+          still how you do that. A username nobody has released and nothing is
+          published under is deleted automatically after two years. If you lose
+          the browser that holds the number, email us and we will release the
+          name for you.
         </Section>
 
         <Section title="Following a drive stores where you were">
@@ -66,7 +103,9 @@ export default function PrivacyPage() {
           does not sit on a server forever. A planned trip has no location
           trail, but it does hold the start and destination you typed, their
           coordinates, and the route between them. Feedback is deleted after two
-          years. Usage counts go at 90 days. Server logs go at 30 days.
+          years. Usage counts go at 90 days. Server logs go at 30 days. A
+          username lasts until you release it, or is removed automatically two
+          years after you claimed it if nothing is published under it any more.
         </Section>
 
         <Section title="What we count">
@@ -89,11 +128,11 @@ export default function PrivacyPage() {
           it to today&apos;s. These counts are deleted after 90 days.
         </Section>
 
-        <Section title="One thing that does remember you" id="counting">
-          Your browser also makes up a random number the first time you visit,
-          keeps it, and sends it when you look at a page or plan a trip, so we
-          can tell whether anyone comes back. We store a scrambled version of
-          it.
+        <Section title="Something that does remember you" id="counting">
+          For the counting, your browser also makes up a random number the first
+          time you visit, keeps it, and sends it when you look at a page or plan
+          a trip, so we can tell whether anyone comes back. We store a scrambled
+          version of it.
           <strong className="block pt-2 font-semibold text-ink-800">
             It is a random number and nothing else. It is not built from your IP
             address, your device or anything about you, so clearing this
@@ -108,6 +147,12 @@ export default function PrivacyPage() {
           You can turn all of the counting off here. It takes effect straight
           away, on this browser, and it sticks until you change it back.
           <CountingToggle />
+          <span className="block pt-3">
+            If you picked a username, that uses a second random number of its
+            own, described further up. This switch does not touch it, because it
+            is a key to something you asked for rather than a way of counting
+            you — releasing the username is how you end that one.
+          </span>
         </Section>
 
         <Section title="If your browser asks us not to">
@@ -164,7 +209,9 @@ export default function PrivacyPage() {
           <br />
           <br />
           Planning a trip and keeping it alive at its link is us doing the thing
-          you asked for, which is Article 6(1)(b). Following a drive runs on
+          you asked for, which is Article 6(1)(b). So is the username and the
+          public page it creates: you asked for it by claiming the name, and
+          releasing it is how you take it back. Following a drive runs on
           your consent, given when you press start and withdrawn when you stop
           sharing or delete the trip, which is Article 6(1)(a). Counting usage,
           the rounded-off summary and the random number run on our own
@@ -199,7 +246,13 @@ export default function PrivacyPage() {
           Every trip page has a delete button. It removes the trip, any drives
           on it and their location trails, and the rounded-off summary,
           immediately and for good. It works for anyone holding the link, since
-          the link is the only key that exists.
+          the link is the only key that exists. A deleted trip also disappears
+          from your public page, if you have one.
+          <br />
+          <br />
+          If you picked a username, the &ldquo;Your trips&rdquo; panel has a
+          release button. It takes the public page down at once and unlinks
+          every trip from the name for good.
         </Section>
 
         <Section title="If you send feedback">

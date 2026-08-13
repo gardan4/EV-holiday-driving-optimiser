@@ -4,6 +4,7 @@
  */
 
 import { apiFetch, getErrorMessage } from "./api"
+import { ownerHeaders } from "./account"
 import { clientIdHeaders } from "./analytics"
 
 // ---------------------------------------------------------------------------
@@ -155,17 +156,25 @@ export async function geocode(q: string): Promise<GeocodeHit[]> {
 
 /** Plan a trip and persist its permalink.
  *
- *  Carries the persistent pseudonym, and is the ONLY read/write here that
- *  does. Not on `apiFetch`: `getTrip`, `geocode` and the run endpoints would
- *  then attach it to every open of a shared link, which would turn the share
- *  token into a record of who was sent it. Planning is the act of a person
- *  using the app; opening a link someone forwarded you is not. */
+ *  Carries both identifiers this app has, and is the ONLY read/write here that
+ *  carries either. Not on `apiFetch`: `getTrip`, `geocode` and the run
+ *  endpoints would then attach them to every open of a shared link, which
+ *  would turn the share token into a record of who was sent it. Planning is the
+ *  act of a person using the app; opening a link someone forwarded you is not.
+ *
+ *  The owner secret rides along so the trip is published under the planner's
+ *  username — if they have claimed one. The server ignores it otherwise, so
+ *  sending it unconditionally here is safe and keeps the rule simple: the
+ *  planner is recorded, the reader is not.
+ *
+ *  Neither goes in the body. `PlanRequest` is persisted whole into
+ *  `Trip.request`, exact coordinates and all. */
 export async function planTrip(req: PlanRequest): Promise<Trip> {
   return unwrap<Trip>(
     await apiFetch("/api/trips", {
       method: "POST",
       body: JSON.stringify(req),
-      headers: clientIdHeaders(),
+      headers: { ...clientIdHeaders(), ...ownerHeaders() },
     })
   )
 }
@@ -182,6 +191,85 @@ export async function deleteTrip(id: string): Promise<void> {
   if (!resp.ok && resp.status !== 404) {
     const data = await resp.json().catch(() => ({}))
     throw new Error(getErrorMessage(data.detail, "Could not delete this trip"))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Usernames — a public handle over a secret this browser holds
+//
+// Writing takes the secret; reading takes only the name. That asymmetry is the
+// feature: you can hand somebody your username and it works for them with no
+// account, no secret and no state of their own.
+// ---------------------------------------------------------------------------
+
+export interface Profile {
+  username: string
+  created_at: string
+}
+
+/** One trip as it appears on a PUBLIC list. Deliberately not a `Trip`: no
+ *  coordinates, no polyline, and the place labels are already reduced to their
+ *  locality server-side. */
+export interface TripSummary {
+  id: string
+  created_at: string
+  origin_label: string
+  dest_label: string
+  distance_km: number
+  vehicle_label: string
+  departure_iso: string | null
+  optimum_speed_kph: number | null
+  n_stops: number | null
+}
+
+export interface UserTrips {
+  username: string
+  created_at: string
+  trips: TripSummary[]
+}
+
+/** Bind a username to this browser's secret. The opt-in moment: from here on,
+ *  trips planned by this browser are published under the name. */
+export async function claimUsername(username: string): Promise<Profile> {
+  return unwrap<Profile>(
+    await apiFetch("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ username }),
+      headers: ownerHeaders(),
+    })
+  )
+}
+
+/** Which username this browser's secret holds.
+ *
+ *  The one read in this app that sends an identifier, and it is narrow on
+ *  purpose: it exists for the second-device flow, where the owner has just
+ *  pasted their own code and is asking about their own name. It records
+ *  nothing. */
+export async function whoAmI(): Promise<Profile | null> {
+  const resp = await apiFetch("/api/users/me", { headers: ownerHeaders() })
+  if (resp.status === 401 || resp.status === 404) return null
+  return unwrap<Profile>(resp)
+}
+
+/** Everything published under a name. Sends no secret — anyone can read this,
+ *  which is the point of having a username at all. */
+export async function getUserTrips(username: string): Promise<UserTrips> {
+  return unwrap<UserTrips>(
+    await apiFetch(`/api/users/${encodeURIComponent(username)}/trips`)
+  )
+}
+
+/** Give up a name and unpublish everything under it. The trips themselves and
+ *  their share links survive — deleting a journey is a separate control. */
+export async function releaseUsername(username: string): Promise<void> {
+  const resp = await apiFetch(`/api/users/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+    headers: ownerHeaders(),
+  })
+  if (!resp.ok && resp.status !== 404) {
+    const data = await resp.json().catch(() => ({}))
+    throw new Error(getErrorMessage(data.detail, "Could not release this username"))
   }
 }
 

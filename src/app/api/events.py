@@ -65,6 +65,7 @@ KNOWN_PATHS = frozenset(
         "/trip/:id/live",
         "/trip/:id/drive",
         "/trip/:id/runs/:id",
+        "/u/:username",
     }
 )
 
@@ -85,6 +86,15 @@ _OPAQUE_RE = re.compile(r"^(?=.*\d)[A-Za-z0-9_-]{12,}$")
 # on "/ev/:slug" and the other half on "/other". One rule, one bucket.
 _EV_SLUG_RE = re.compile(r"^/ev/[a-z0-9-]+$")
 
+# Public username pages, collapsed for the same reason as the catalog slugs and
+# one stronger one. A username is a name somebody chose for themselves, and it
+# is the only handle in this app that could plausibly be a real one — storing it
+# next to a visitor pseudonym would build precisely the "who looked at whose"
+# row this table is designed not to hold. Collapsed here, before `_OPAQUE_RE`
+# gets a look in, so that "marc" and "marc-2026" land in the same bucket rather
+# than splitting across "/other" and ":id" on whether the name has a digit.
+_USERNAME_PATH_RE = re.compile(r"^/u/[a-z0-9-]+$")
+
 
 def normalize_path(raw: str | None) -> str | None:
     """Reduce a URL path to one of `KNOWN_PATHS`, or "/other"."""
@@ -100,6 +110,8 @@ def normalize_path(raw: str | None) -> str | None:
 
     if _EV_SLUG_RE.match(path):
         return "/ev/:slug"
+    if _USERNAME_PATH_RE.match(path):
+        return "/u/:username"
 
     parts = [
         ":id" if (_UUID_RE.match(seg) or _OPAQUE_RE.match(seg)) else seg

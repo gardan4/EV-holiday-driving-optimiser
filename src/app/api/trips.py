@@ -28,8 +28,8 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.failures import PlanError, reason_of
 from app.core.rate_limit import limiter
-from app.core.visitor import request_client_id, request_visitor
-from app.models import AppEvent, Trip, TripEvent, TripRun, TripStat, Vehicle
+from app.core.visitor import request_client_id, request_owner_hash, request_visitor
+from app.models import AppEvent, Profile, Trip, TripEvent, TripRun, TripStat, Vehicle
 from app.services import chargers as chargers_svc
 from app.services import routing
 from app.services.geo import polyline_encode
@@ -329,11 +329,32 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
 
     request_json = plan.model_dump(mode="json")
     result_json = result.model_dump(mode="json")
+
+    # Publish this trip under the planner's username, if they have one.
+    #
+    # Only when the secret ALREADY belongs to a claimed name: claiming is the
+    # consent moment, so an unclaimed secret must leave no trace on any row and
+    # trips planned before the claim must not be swept up by it. That is why
+    # this is a lookup rather than an unconditional write.
+    #
+    # A header, never `PlanRequest` — that model is persisted whole into
+    # `Trip.request` alongside exact coordinates, and the same reasoning as the
+    # client id below applies with more force here, because this identifier is
+    # attached to a name a person chose.
+    owner = request_owner_hash(request)
+    if owner is not None:
+        claimed = (
+            await db.execute(select(Profile.id).where(Profile.owner_hash == owner))
+        ).scalar_one_or_none()
+        if claimed is None:
+            owner = None
+
     trip = Trip(
         vehicle_id=vehicle.id,
         request=request_json,
         result=result_json,
         result_version=1,
+        owner_hash=owner,
         created_at=datetime.utcnow(),
     )
     db.add(trip)

@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_GEOCODE: str = "30/minute"       # geocode autocomplete proxy per IP
     RATE_LIMIT_DEFAULT: str = "60/minute"       # general API per IP
     RATE_LIMIT_FEEDBACK: str = "5/hour"         # per IP: writing free text is rare and abusable
+    # Claiming a username. Rare by nature — you do it once — and the abuse mode
+    # is squatting a namespace, so this is tighter than the general limit.
+    RATE_LIMIT_CLAIM: str = "10/hour"           # per IP
     # Usage events. Has to cover a real session — a page view per navigation
     # plus the funnel — without leaving a public write endpoint someone can
     # pour rows into. A busy visitor sees ~20 in an hour; a script hitting the

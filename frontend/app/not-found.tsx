@@ -21,10 +21,10 @@ export default function NotFound() {
             Back to home
           </Link>
           <Link
-            href="/dashboard"
+            href="/ev"
             className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-sm font-semibold transition-colors"
           >
-            Go to dashboard
+            Browse the EV catalog
           </Link>
         </div>
       </div>

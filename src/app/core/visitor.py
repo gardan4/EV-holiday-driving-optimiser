@@ -107,3 +107,43 @@ def request_client_id(request: Request) -> str | None:
     if not _CLIENT_ID_RE.match(raw):
         return None
     return client_hash(raw)
+
+
+# ---------------------------------------------------------------------------
+# The owner secret — a capability, not a third pseudonym
+# ---------------------------------------------------------------------------
+
+OWNER_SECRET_HEADER = "x-owner-secret"
+
+
+def owner_hash(raw: str) -> str:
+    """The stored form of the secret behind a claimed username.
+
+    Same recipe as `client_hash` with one deliberate difference: the label is
+    `:owner:` rather than `:client:`. Domain separation, so that even if a
+    browser ever sent the same UUID as both headers, the two pseudonym spaces
+    could not be joined — one counts returning visitors, the other authorises
+    writes, and a value from one must never be usable as a value in the other.
+
+    Hashed for the same reason as `client_hash`, and here it matters more: this
+    one is a *capability*. Anybody holding the raw secret can publish trips
+    under the username and release it. Storing only the hash means a leaked
+    database is not a set of working keys.
+    """
+    return hashlib.sha256(
+        f"{settings.SECRET_KEY}:owner:{raw}".encode("utf-8")
+    ).hexdigest()[:32]
+
+
+def request_owner_hash(request: Request) -> str | None:
+    """The caller's owner hash, or None if they sent no usable secret.
+
+    Deliberately the same strict v4 gate as the client id: this arrives on a
+    public endpoint, and anything not matching exactly is discarded rather than
+    stored or compared. None means "anonymous" everywhere it is read — planning
+    a trip without a secret is the normal case, not an error.
+    """
+    raw = (request.headers.get(OWNER_SECRET_HEADER) or "").strip().lower()
+    if not _CLIENT_ID_RE.match(raw):
+        return None
+    return owner_hash(raw)

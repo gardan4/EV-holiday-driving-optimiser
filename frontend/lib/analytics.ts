@@ -26,6 +26,7 @@
  */
 
 import { API_URL } from "./api"
+import { uuidV4 } from "./uuid"
 
 /** What the browser is allowed to report.
  *
@@ -157,36 +158,12 @@ function clientId(): string | null {
   try {
     const existing = window.localStorage.getItem(CLIENT_ID_KEY)
     if (existing) return existing
-    // `randomUUID` needs a secure context and is missing on older Safari. The
-    // fallback is not a security boundary — this id only has to be unlikely to
-    // collide, and it is checked against a strict v4 pattern server-side.
-    const fresh =
-      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : fallbackUuid()
+    const fresh = uuidV4()
     window.localStorage.setItem(CLIENT_ID_KEY, fresh)
     return fresh
   } catch {
     return null
   }
-}
-
-/** RFC-4122 v4 shape from `crypto.getRandomValues`, for browsers without
- *  `randomUUID`. Falls back to `Math.random` only if even that is missing. */
-function fallbackUuid(): string {
-  const bytes = new Uint8Array(16)
-  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
-    crypto.getRandomValues(bytes)
-  } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
-  }
-  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
-  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10xx
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
-    16,
-    20
-  )}-${hex.slice(20)}`
 }
 
 /** The header every counted request carries, when there is one to carry.
@@ -202,6 +179,10 @@ export function clientIdHeaders(): Record<string, string> {
  *  never leaves the browser inside an analytics call. */
 export function routePattern(pathname: string): string {
   const clean = pathname.split(/[?#]/)[0] || "/"
+  // A public username page. Collapsed before the id rules, exactly as the
+  // server does it — a username is the one handle here that could be somebody's
+  // real name, and it has no business travelling to the events endpoint.
+  if (/^\/u\/[a-z0-9-]+\/?$/i.test(clean)) return "/u/:username"
   const parts = clean.split("/").map((seg) => {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)
     const isOpaque = /^(?=.*\d)[A-Za-z0-9_-]{12,}$/.test(seg)

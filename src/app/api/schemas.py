@@ -337,6 +337,53 @@ class ReviewOut(BaseModel):
 
 
 # ── Feedback ────────────────────────────────────────────────────────────────
+# ── Usernames ───────────────────────────────────────────────────────────────
+class ClaimUsernameIn(BaseModel):
+    """The name somebody wants. Shape is re-checked in the route against
+    `users.USERNAME_RE` — the bounds here only reject an oversized body before
+    the real validation runs."""
+
+    username: str = Field(min_length=3, max_length=24)
+
+
+class ProfileOut(BaseModel):
+    username: str
+    created_at: datetime
+
+
+class TripSummaryOut(BaseModel):
+    """One trip as it appears on a PUBLIC list.
+
+    Deliberately not a `TripOut`. Two reasons, and both are load-bearing:
+
+    * **Coordinates never appear here.** A trip's origin is usually somebody's
+      house, and this list is readable by anyone who knows the username. The
+      labels are truncated to their locality (`users.locality`) server-side, so
+      the API cannot emit a street address even if a caller asks for the list of
+      a name they guessed. The full label stays on the trip page, which is
+      reachable only with the share link.
+    * **It is small.** A full `PlanResult` carries the polyline and every
+      speed's timeline — around a megabyte on a long route. A hundred of those
+      would make "show me my trips" the heaviest request in the app.
+    """
+
+    id: str
+    created_at: datetime
+    origin_label: str
+    dest_label: str
+    distance_km: int
+    vehicle_label: str
+    departure_iso: Optional[datetime] = None
+    optimum_speed_kph: Optional[float] = None
+    n_stops: Optional[int] = None
+
+
+class UserTripsOut(BaseModel):
+    username: str
+    created_at: datetime
+    trips: list[TripSummaryOut] = []
+
+
 class FeedbackIn(BaseModel):
     """Bounded on every field: this is the one endpoint that stores free text a
     stranger typed, so the caps are the whole validation story."""

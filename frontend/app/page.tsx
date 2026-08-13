@@ -2,6 +2,7 @@ import Link from "next/link"
 import JsonLd from "./_components/JsonLd"
 import SiteFooter from "./_components/SiteFooter"
 import TripForm from "./_components/trip/TripForm"
+import TripsDrawer from "./_components/trips/TripsDrawer"
 import { FAQ } from "@/lib/faq"
 import { faqLd, graph, organizationLd, webApplicationLd, websiteLd } from "@/lib/seo"
 
@@ -15,6 +16,10 @@ export default function Home() {
       <JsonLd
         data={graph(organizationLd(), websiteLd(), webApplicationLd(), faqLd())}
       />
+
+      {/* The list of what you already planned, right where you would otherwise
+          plan it again. */}
+      <TripsDrawer />
 
       {/* Soft alpine backdrop */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>

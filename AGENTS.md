@@ -14,7 +14,9 @@ arrival charge; the backend fetches the real route, simulates every cruise speed
 (90–160 km/h) against the car's consumption + DC charge curves, and returns a
 total-time-vs-speed sweep, a stop-by-stop itinerary, and a low-poly 3D "journey
 scene" with animated playback and a race mode. Trips persist under unguessable
-UUIDs (the share link). **There is no auth** — fully public by design.
+UUIDs (the share link). **There is no auth** — fully public by design; the one
+handle a visitor can have is an opt-in public username over a browser-generated
+secret (see the design decision below), which is not a sign-in.
 
 Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
 (App Router, React 19, Tailwind 4, React Three Fiber), deployed as containers to
@@ -40,7 +42,8 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   codec, point→route projection, coarse EU country boxes.
 - **Routers** `src/app/api/` — `vehicles.py`, `geocode.py`, `trips.py`
   (`POST /api/trips` = plan + persist permalink; sweep runs via
-  `asyncio.to_thread`), `feedback.py`, `events.py`. Schemas in `api/schemas.py`
+  `asyncio.to_thread`), `feedback.py`, `events.py`, `users.py` (claim/release a
+  public username; the trips list under one). Schemas in `api/schemas.py`
   mirror `frontend/lib/client.ts`.
 - **Usage counting** `src/app/api/events.py` + `src/app/core/visitor.py` +
   `src/app/services/usage.py` — first-party, no third-party script, no CSP
@@ -65,7 +68,8 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   consumption/charge-curve JSON), `Charger`/`OcmTile`/`RouteCache` (caches),
   `Trip` (request+result JSON, id = share token), `TripRun`/`TripEvent` (live
   drives), `Feedback`, `AppEvent` (usage counts), `TripStat` (coarsened trip
-  analytics), and the `GUID` type.
+  analytics), `Profile` (an opt-in public username bound to a hashed browser
+  secret; `Trip.owner_hash` is its stamp), and the `GUID` type.
 - **Seed data** `src/scripts/seed_vehicles.py` — the curated EV catalog;
   idempotent upsert-by-slug, re-run by `db_bootstrap` on **every** boot, so the
   file is the catalog. Curves are hand-curated from public fast-charge tests —
@@ -202,8 +206,34 @@ the pipeline is green before infra exists. Infra deploy is manual
 
 ## Key design decisions (do not re-litigate casually)
 
-- **No auth, no user table.** Share links are unguessable UUIDs; `/trip/*` is
-  noindexed. Adding accounts later is additive, not a refactor.
+- **No auth, and one opt-in public handle.** Share links are unguessable UUIDs;
+  `/trip/*` is noindexed. There is still no sign-in, no password and no session:
+  `Profile` (`api/users.py`) binds a username to `hash(secret)` where the secret
+  is a v4 UUID **the browser generates** and sends as `X-Owner-Secret`. Writing
+  needs the secret; **reading needs only the name**, because handing somebody
+  your username and having it work for them is the entire feature. Five things
+  hold it together and none is optional. **Claiming is the consent moment** —
+  `_plan` stamps a trip only when the secret ALREADY holds a name, so an
+  unclaimed secret leaves no trace and a claim never publishes history
+  retroactively; anything that stamped first and matched later would publish
+  somebody's back catalogue on the day they picked a name. **The public list is
+  coarsened server-side** (`users.locality`): a geocoded origin is usually a
+  front door and this endpoint is readable by anyone who guesses a name, so the
+  labels are cut to their locality before they leave the server — a truncation
+  done in the browser is one a caller can decline to do. **The secret is a
+  capability, so it is stored hashed** with a `:owner:` label distinct from
+  `client_hash`'s `:client:`, keeping the two pseudonym spaces unjoinable.
+  **Release is complete**: it deletes the profile AND nulls the stamp on every
+  trip, so a re-claim of the same name starts empty rather than resurrecting a
+  list somebody took down — while the trips and their share links survive,
+  because releasing a name is not asking us to delete journeys. **The username
+  is `[a-z0-9-]{3,24}` plus a reserved list** (`me` most of all — it would
+  shadow `GET /api/users/me`); it is a public write endpoint, and the pattern is
+  what stops it becoming free-form storage. Squatting is unbounded beyond
+  `RATE_LIMIT_CLAIM`, which is accepted for a PoC. The counting toggle is
+  deliberately **independent**: `evtrip.cid` is deleted when somebody opts out
+  of counting, and deleting the owner secret alongside it would silently take
+  away a username they asked for.
 - **No in-app map.** The 3D journey scene is the visualization; per-stop
   Google Maps deep links cover navigation. Keeps CSP self-hosted.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,

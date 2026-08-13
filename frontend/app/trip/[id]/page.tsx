@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import SiteFooter from "@/app/_components/SiteFooter"
 import AppHeader from "@/app/_components/AppHeader"
 import ResultsView from "@/app/_components/trip/ResultsView"
+import TripsDrawer from "@/app/_components/trips/TripsDrawer"
 import { LiveRun, Trip } from "@/lib/client"
 import { fmtDuration, fmtHm } from "@/lib/format"
 
@@ -63,6 +64,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   if (!trip) notFound()
   return (
     <main className="min-h-screen">
+      <TripsDrawer />
       <AppHeader />
       <ResultsView trip={trip} live={live} />
       <SiteFooter />

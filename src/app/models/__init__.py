@@ -3,7 +3,12 @@
 Domain: curated `Vehicle` catalog (consumption + DC charge curves), cached
 external data (`Charger` from OpenChargeMap, `RouteCache` from OpenRouteService,
 `OcmTile` cache bookkeeping), and `Trip` — a persisted plan result whose UUID id
-doubles as the unguessable share token. There is no auth and no user table.
+doubles as the unguessable share token.
+
+There is no auth. `Profile` is not an exception to that: it is a public handle
+bound to the hash of a secret the browser made up, with no email, no password
+and nothing to sign in to. Holding the secret authorises publishing under the
+name; knowing the name is enough to read the list. See its docstring.
 
 MSSQL note: UUID primary keys use the `GUID` TypeDecorator (CHAR(36)); a plain
 `uuid` column type has no portable MSSQL mapping. Keep it for every id/FK.
@@ -165,6 +170,49 @@ class RouteCache(Base):
 # ---------------------------------------------------------------------------
 
 
+class Profile(Base):
+    """A public username, bound to the hash of a browser-generated secret.
+
+    The smallest thing that answers "where are my trips?" without becoming an
+    account. There is no email, no password and no session: the browser makes up
+    a v4 UUID, keeps it, and sends it as `X-Owner-Secret` when it writes. We
+    store only `owner_hash` (`core.visitor.owner_hash`), so a copy of this table
+    is a list of names and unusable hashes rather than a set of working keys.
+
+    Reading is public and stateless — anybody who knows the username can list
+    the trips under it, with no secret and no state of their own. That is the
+    feature, and it is why **claiming a username is the consent moment**: a trip
+    is stamped only when the secret that planned it already belongs to a claimed
+    name, so trips planned before the claim are not retroactively published and
+    an unclaimed secret leaves no trace on any row.
+
+    Two unique constraints carry the semantics. `username` unique is
+    first-come-first-served. `owner_hash` unique is one name per secret — which
+    is what makes "release, then claim again" the only way to rename, and keeps
+    a single browser from quietly accumulating handles.
+
+    Releasing (`DELETE /api/users/{username}`) deletes this row and nulls the
+    stamp on every trip that carried it. The trips and their share links
+    survive; the public page and the link between them do not.
+    """
+
+    __tablename__ = "profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
+    # Pattern-validated in `api/users.py` to `[a-z0-9-]`, so ASCII — `String`
+    # (VARCHAR on MSSQL) is correct here, unlike the catalog's `Unicode` text.
+    username: Mapped[str] = mapped_column(
+        String(24), unique=True, index=True, nullable=False
+    )
+    # 32 hex chars = 128 bits, matching the other pseudonyms in this schema.
+    owner_hash: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, index=True
+    )
+
+
 class Trip(Base):
     """A computed trip plan. Created on every successful plan request; the
     unguessable UUID4 id is the permalink token (no auth, no ownership)."""
@@ -174,6 +222,22 @@ class Trip(Base):
     id: Mapped[uuid.UUID] = mapped_column(GUID(), primary_key=True, default=uuid.uuid4)
     vehicle_id: Mapped[uuid.UUID] = mapped_column(
         GUID(), ForeignKey("vehicles.id"), nullable=False, index=True
+    )
+    # The `Profile` this trip is published under, or NULL — which is what almost
+    # every row is. Written only when the planner sent a secret that ALREADY
+    # belongs to a claimed username, so opting in publishes what you plan next
+    # rather than what you planned before.
+    #
+    # Deliberately not a foreign key. Releasing a username is `UPDATE trips SET
+    # owner_hash = NULL` followed by deleting the profile, and an FK would drag
+    # `delete_trip` and the purge scripts into a relationship that buys nothing.
+    #
+    # It arrives as a HEADER and lands here. Never in `request` — that column
+    # stores the submitted `PlanRequest` whole, exact coordinates included, and
+    # an identifier in there would write the person onto the one row this design
+    # works hardest to keep them off.
+    owner_hash: Mapped[Optional[str]] = mapped_column(
+        String(32), nullable=True, index=True
     )
     # The validated PlanRequest as submitted (origin/dest, departure, SoC params,
     # speed range, conditions factor) — enough to re-run the plan.

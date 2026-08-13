@@ -64,4 +64,13 @@ consider a DPIA rather than a threshold that mandates one.
 - Continuous or higher frequency location tracking is introduced.
 - Location data is combined with any other dataset, or shared with a third party.
 - Accounts are added, which would turn every pseudonym into an identified person.
+  Opt-in usernames (ROPA activity 6) are deliberately **not** that: there is no
+  sign-in, no email and no password, the handle is bound to a secret the browser
+  invented, and it attaches only to trips planned after the claim. Reassess if a
+  username ever becomes required, gets an email address attached for recovery,
+  or is joined to the analytics pseudonyms — any of those makes it an account.
+- The public profile list is widened beyond locality-level place names, or a
+  directory, search or listing of usernames is added. Today a profile is only
+  findable by someone told the name, which is the assumption the screening rests
+  on.
 - Corridor statistics are sold or handed to a charging operator in any form richer than the current geohash-4 aggregate.
