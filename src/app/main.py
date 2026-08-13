@@ -117,17 +117,22 @@ async def _run_common_startup():
 
 
 async def _purge_loop() -> None:
-    """Delete expired location traces and usage events once a day, forever.
+    """Enforce every retention window on the privacy page, once a day, forever.
 
     The privacy page promises drives are deleted after 90 days. `purge_old_runs`
     implemented that promise correctly and then nothing ever called it outside
     the tests, which made the promise false — the worst kind of privacy bug,
     because it reads as a policy. This is what makes it true.
 
-    `purge_old_events` is on the same loop for the same reason: an analytics
-    table nobody expires stops being a count of last week and becomes a
-    permanent record. Its failure is caught separately so a broken query in one
-    purge cannot stop the other from running.
+    Everything else is on the same loop for the same reason. Usage events at 90
+    days, so an analytics table does not quietly become a permanent record.
+    Trips and feedback at two years, because "kept indefinitely" is not a
+    retention period and `Trip.request` holds the coordinates of somebody's
+    house. The planner pseudonym on old corridor rows at 15 months.
+
+    Each purge has its own try/except so a broken query in one cannot stop the
+    others. That matters more here than it looks: these are the only things
+    standing between the privacy page and being wrong.
 
     Deliberately in-process rather than a scheduled workflow: Azure SQL sits
     behind a firewall that a GitHub runner would have to be let through, and
@@ -136,9 +141,15 @@ async def _purge_loop() -> None:
     """
     from scripts.purge_old_events import DEFAULT_RETENTION_DAYS as EVENT_RETENTION_DAYS
     from scripts.purge_old_events import purge as purge_events
+    from scripts.purge_old_feedback import (
+        DEFAULT_RETENTION_DAYS as FEEDBACK_RETENTION_DAYS,
+    )
+    from scripts.purge_old_feedback import purge as purge_feedback
     from scripts.purge_old_runs import DEFAULT_RETENTION_DAYS, purge
     from scripts.purge_old_trip_stat_ids import RETENTION_DAYS as STAT_ID_RETENTION_DAYS
     from scripts.purge_old_trip_stat_ids import purge as purge_stat_ids
+    from scripts.purge_old_trips import DEFAULT_RETENTION_DAYS as TRIP_RETENTION_DAYS
+    from scripts.purge_old_trips import purge as purge_trips
 
     # Let the cold start finish first — nothing here is urgent to the second.
     await asyncio.sleep(300)
@@ -177,6 +188,29 @@ async def _purge_loop() -> None:
             raise
         except Exception:
             logger.exception("Trip-stat id purge failed; retrying in 24h")
+
+        # Trips carry exact coordinates, so this one deletes the most sensitive
+        # thing that used to have no expiry at all. It cascades to the drives,
+        # the location trail and the coarsened stat row.
+        try:
+            trips, runs = await purge_trips(days=TRIP_RETENTION_DAYS, apply=True)
+            if trips:
+                logger.info(
+                    "Retention purge deleted %d trip(s) and %d drive(s)", trips, runs
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Trip purge failed; retrying in 24h")
+
+        try:
+            n = await purge_feedback(days=FEEDBACK_RETENTION_DAYS, apply=True)
+            if n:
+                logger.info("Retention purge deleted %d feedback item(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Feedback purge failed; retrying in 24h")
 
         await asyncio.sleep(24 * 60 * 60)
 

@@ -446,6 +446,8 @@ uv run python -m scripts.dev_seed_trip  # keyless demo trip for frontend dev
 uv run python -m scripts.backfill_trip_stats        # dry run; --apply to write
 uv run python -m scripts.corridor_report            # where people drive + charging gaps
 uv run python -m scripts.purge_old_trip_stat_ids    # dry run; --apply to clear old ids
+uv run python -m scripts.purge_old_trips            # dry run; --apply to delete >24mo trips
+uv run python -m scripts.purge_old_feedback         # dry run; --apply to delete >24mo feedback
 uv run python -m scripts.usage_dashboard            # local HTML snapshot; --remote for prod
 
 # Admin dashboard — live, filterable mission control on :8101. Local only.
@@ -578,6 +580,23 @@ docker compose -f docker-compose.local-db.yml up -d
   and the left-most hop are only honoured behind `TRUSTED_PROXY_HEADERS`, which
   is only true once something that overwrites those headers is genuinely in
   front. Getting this wrong voids every IP limit and the ORS/OCM quota with it.
+- **Nothing on the site is kept indefinitely any more, and the legal paperwork
+  lives in `docs/`.** Trips used to be kept forever so share links would keep
+  working, which is a fine goal and was not a retention period: `Trip.request`
+  holds the exact coordinates of a start and a destination, and one of those is
+  usually somebody's house. Two years (`scripts/purge_old_trips.py`) clears a
+  holiday app's annual cycle with room and still ends; feedback matches it,
+  because `Feedback.contact` is the one field where somebody hands over an
+  address. Both are on `main._purge_loop`, because a purge nothing calls is how
+  `purge_old_runs` made the privacy page false for months.
+  `docs/ROPA.md` (Art 30), `docs/DPIA-SCREENING.md` (Art 35),
+  `docs/BREACH-PROCEDURE.md` (Art 33) and `docs/LIA-CLIENT-ID.md` are the
+  written record. Read the LIA before touching `evtrip.cid`: keeping it is a
+  **deliberately accepted** gap against ePrivacy Art 5(3), which wants opt-in
+  consent for device storage that is not strictly necessary, and the whole
+  argument rests on the mitigations listed there. The `/privacy#counting`
+  toggle is one of them, not a nicety, and it must keep deleting the id rather
+  than merely declining to send it.
 - **`frontend/app/privacy/page.tsx` is a promise, not prose.** Every claim on it
   has to be true of the code — "deleted after 90 days" was false for as long as
   nothing called the purge. Change the page and the behaviour together.

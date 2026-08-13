@@ -63,7 +63,7 @@ _MEB_2025_NOTE = (
 )
 
 _EGMP_NOTE = (
-    "Hyundai/Kia E-GMP 800 V platform — peak power held nearly flat to ~45-50% "
+    "Hyundai/Kia E-GMP 800 V platform: peak power held nearly flat to ~45-50% "
     "SoC, then a steep taper, so these cars want short stops taken low. "
     "Curated from Fastned model guides + P3 Charging Index style tests."
 )
@@ -76,14 +76,14 @@ _EGMP_NOTE = (
 _CHINA_CAVEAT = (
     "Approximated from published fast-charge and motorway-consumption tests. "
     "Fewer independent runs exist for this model than for the European cars "
-    "here, so treat the curve — especially above 70% SoC — as indicative."
+    "here, so treat the curve, especially above 70% SoC, as indicative."
 )
 
 _US_NOTE = (
     "Approximated from published EPA figures and fast-charge tests. American "
     "cars are rated on the EPA cycle rather than WLTP, and the consumption fit "
-    "here is a motorway fit, so it will not reproduce an EPA range figure — "
-    "that is the point, since EPA combined understates a 120 km/h cruise badly."
+    "here is a motorway fit, so it will not reproduce an EPA range figure. "
+    "That is the point, since EPA combined understates a 120 km/h cruise badly."
 )
 
 _TRUCK_NOTE = (
@@ -196,7 +196,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2350.0,
         "top_speed_kph": 180.0,
         "source_note": _MEB_NOTE
-        + " Cd 0.23 saloon — a big car that is genuinely efficient at motorway speed.",
+        + " Cd 0.23 saloon, a big car that is genuinely efficient at motorway speed.",
     },
     {
         "slug": "vw-id7-pro-s-86",
@@ -235,7 +235,7 @@ VEHICLES: list[dict] = [
         "top_speed_kph": 160.0,
         "source_note": _MEB_2025_NOTE
         + " Fitted to the LWB Pro, which shares the ID.7 Pro S's 86 kWh pack,"
-        + " 200 kW peak and 26-minute 10-80% exactly — and then has to push a"
+        + " 200 kW peak and 26-minute 10-80% exactly, and then has to push a"
         + " van through the air. Its quadratic term is the highest of any"
         + " European car here, so this is the entry where cruise speed costs"
         + " the most and the sweep has the most to say.",
@@ -398,7 +398,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 269.0,
         "mass_kg": 2455.0,
         "top_speed_kph": 209.0,
-        "source_note": "Audi Q6 e-tron performance (MY24) on the 800 V PPE platform — a "
+        "source_note": "Audi Q6 e-tron performance (MY24) on the 800 V PPE platform, a "
         "different machine from the MEB Q4 above it: 269 kW held to nearly 40% "
         "SoC, 23 minutes for 10-80% on a 95 kWh pack. It is also one of the "
         "few cars here whose 209 km/h limiter is above the top of the sweep. "
@@ -419,7 +419,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 170.0,
         "mass_kg": 1940.0,
         "top_speed_kph": 201.0,
-        "source_note": "LFP pack — relatively flat mid-SoC curve; very low consumption. "
+        "source_note": "LFP pack, so a relatively flat mid-SoC curve; very low consumption. "
         "Curated from Fastned/InsideEVs tests.",
     },
     {
@@ -455,7 +455,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 1980.0,
         "top_speed_kph": 262.0,
-        "source_note": "Long Range pack, stickier tyres and more mass — the same "
+        "source_note": "Long Range pack, stickier tyres and more mass: the same "
         "charging with a consumption penalty that grows with speed. Curated from Fastned/InsideEVs tests.",
     },
     {
@@ -474,7 +474,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 1910.0,
         "top_speed_kph": 217.0,
         "source_note": "The volume Model Y: LFP pack, flat mid-SoC curve, and the "
-        "smallest battery of any Tesla here — it stops often. Curated from Fastned/InsideEVs tests.",
+        "smallest battery of any Tesla here, so it stops often. Curated from Fastned/InsideEVs tests.",
     },
     {
         "slug": "tesla-modely-lr",
@@ -491,7 +491,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 2180.0,
         "top_speed_kph": 217.0,
-        "source_note": "Model 3 Long Range pack and curve in a taller body — same "
+        "source_note": "Model 3 Long Range pack and curve in a taller body: same "
         "charging, noticeably more drag. Curated from Fastned/InsideEVs tests.",
     },
     {
@@ -546,7 +546,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 2190.0,
         "top_speed_kph": 262.0,
-        "source_note": "Fast enough to run off the top of the sweep — the answer is "
+        "source_note": "Fast enough to run off the top of the sweep, so the answer is "
         "usually still a long way below what it will do. Curated from Fastned/InsideEVs tests.",
     },
     {
@@ -564,7 +564,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 250.0,
         "mass_kg": 2455.0,
         "top_speed_kph": 250.0,
-        "source_note": "Model S pack in a much bigger body — the drag difference is "
+        "source_note": "Model S pack in a much bigger body, and the drag difference is "
         "the whole story between the two. Curated from Fastned/InsideEVs tests.",
     },
     {
@@ -602,7 +602,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 3100.0,
         "top_speed_kph": 180.0,
         "source_note": _TRUCK_NOTE
-        + " An 800 V pack on a truck-shaped brick — fast charging fighting bad "
+        + " An 800 V pack on a truck-shaped brick: fast charging fighting bad "
         "aerodynamics.",
     },
     {
@@ -620,7 +620,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 205.0,
         "mass_kg": 2305.0,
         "top_speed_kph": 190.0,
-        "source_note": "Big 81 kWh usable pack with a broad 205 kW plateau — long legs "
+        "source_note": "Big 81 kWh usable pack with a broad 205 kW plateau, so long legs "
         "and few stops. Curated from Fastned model guide + P3 Charging Index style tests.",
     },
     {
@@ -725,9 +725,9 @@ VEHICLES: list[dict] = [
         "source_note": "Mercedes CLA Shooting Brake 250+ (2025-2026) on the 800 V MMA platform: "
         "the fastest-charging and most efficient car in this catalog, at 18 "
         "minutes for 10-80% and a Cd that puts its quadratic term below every "
-        "European entry bar the Ioniq 6. Sources disagree on the peak — "
-        "Mercedes markets \"up to 320 kW\" and EV Database measures 353 — and "
-        "the higher figure is used here, so treat the very top of the curve as "
+        "European entry bar the Ioniq 6. Sources disagree on the peak: "
+        "Mercedes markets \"up to 320 kW\" and EV Database measures 353. The "
+        "higher figure is used here, so treat the very top of the curve as "
         "the least certain part of it. Fitted to the published 10-80% time.",
     },
     {
@@ -784,7 +784,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2230.0,
         "top_speed_kph": 180.0,
         "source_note": _VOLVO_CMA_NOTE
-        + " Formerly the C40 Recharge — same pack and curve as the EX40, with a "
+        + " Formerly the C40 Recharge: same pack and curve as the EX40, with a "
         "fastback roof worth a few percent of drag.",
     },
     {
@@ -803,7 +803,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2736.0,
         "top_speed_kph": 180.0,
         "source_note": "Volvo EX90 Single Motor (MY26-27): an 800 V car, and nothing like the "
-        "CMA-platform EX40 and EC40 above it — 310 kW against their 200, and "
+        "CMA-platform EX40 and EC40 above it: 310 kW against their 200, and "
         "23 minutes for 10-80% on a pack half again as big. At 2.7 tonnes it "
         "is the heaviest car Volvo makes. Like every Volvo it is limited "
         "to 180 km/h. Curve fitted to EV Database's published 10-80% time.",
@@ -845,7 +845,7 @@ VEHICLES: list[dict] = [
         "source_note": "Polestar 4 Long Range Single Motor (MY24-26): the biggest pack of the "
         "Nordic cars at 94 kWh, on a 400 V system that peaks at 200 kW, so "
         "10-80% is 31 minutes. It goes further between stops than the EX90 and "
-        "takes longer at each one — the trade this app exists to price. Curve "
+        "takes longer at each one, which is the trade this app exists to price. Curve "
         "fitted to EV Database's published time.",
     },
     {
@@ -881,7 +881,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 1630.0,
         "top_speed_kph": 150.0,
         "source_note": "Light (~1.45 t) but not slippery, and only 100 kW peak on a "
-        "52 kWh pack — the small-battery, modest-charging case this tool is most "
+        "52 kWh pack: the small-battery, modest-charging case this tool is most "
         "worth running. Limited to 150 km/h, so the sweep stops there. Curated from "
         "Fastned model guide + P3 Charging Index style tests.",
     },
@@ -922,8 +922,8 @@ VEHICLES: list[dict] = [
         "top_speed_kph": 170.0,
         "source_note": "Peugeot e-3008 73 kWh (2024-2026) on Stellantis' STLA Medium platform, "
         "the first entry here from a group that sells more cars in Europe than "
-        "anyone else. A tall 160 kW peak that gives up early — the taper "
-        "starts under 30% SoC — so 10-80% still takes thirty-six minutes. "
+        "anyone else. A tall 160 kW peak that gives up early: the taper "
+        "starts under 30% SoC, so 10-80% still takes thirty-six minutes. "
         "Curve fitted to EV Database's published time.",
     },
     {
@@ -962,7 +962,7 @@ VEHICLES: list[dict] = [
         "max_dc_kw": 220.0,
         "mass_kg": 2280.0,
         "top_speed_kph": 185.0,
-        "source_note": "800 V platform — ~220 kW held nearly flat to ~45-50% SoC, then "
+        "source_note": "800 V platform: ~220 kW held nearly flat to ~45-50% SoC, then "
         "steep taper. Curated from Fastned/P3 tests.",
     },
     {
@@ -1001,7 +1001,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2110.0,
         "top_speed_kph": 185.0,
         "source_note": _EGMP_NOTE
-        + " Cd 0.21 — the slipperiest car in this list, so the speed penalty bites "
+        + " Cd 0.21, the slipperiest car in this list, so the speed penalty bites "
         "later than on the Ioniq 5 it shares a pack with.",
     },
     {
@@ -1020,7 +1020,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 1940.0,
         "top_speed_kph": 167.0,
         "source_note": "Hyundai Kona Electric, first generation (2018-2023): the same name as "
-        "the 2024 car and a different one to plan around — 77 kW peak against "
+        "the 2024 car and a different one to plan around: 77 kW peak against "
         "105, so 10-80% takes forty-six minutes instead of thirty-seven, and a "
         "long day out needs one more stop or one longer one. Marginally the "
         "more efficient of the two at a cruise. Charging hardware did not change "
@@ -1081,7 +1081,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2065.0,
         "top_speed_kph": 170.0,
         "source_note": "Kia EV3 (MY25-26): E-GMP underneath but a 400 V pack, so it charges "
-        "nothing like the 800 V EV6 above it — 135 kW and 33 minutes for "
+        "nothing like the 800 V EV6 above it: 135 kW and 33 minutes for "
         "10-80%, against the EV6's 240 kW. Buyers routinely expect otherwise. "
         "Curve fitted to the 10-80% time published by EV Database.",
     },
@@ -1123,7 +1123,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2301.0,
         "top_speed_kph": 160.0,
         "source_note": "Nissan Ariya 87 kWh (MY22-25): the slowest 10-80% in this catalog at "
-        "forty-eight minutes — 87 kWh behind a 130 kW peak that starts tapering "
+        "forty-eight minutes, with 87 kWh behind a 130 kW peak that starts tapering "
         "at a third full. Paired with the highest motorway consumption of the "
         "European-market cars here, it is the entry where cruise speed costs "
         "the most. Curve fitted to EV Database's published figures.",
@@ -1144,8 +1144,8 @@ VEHICLES: list[dict] = [
         "mass_kg": 1930.0,
         "top_speed_kph": 160.0,
         "source_note": _BYD_BLADE_NOTE
-        + " Boxy for an SUV of its size, so motorway consumption climbs fast — "
-        "the combination this tool exists to price.",
+        + " Boxy for an SUV of its size, so motorway consumption climbs fast. "
+        "That is the combination this tool exists to price.",
     },
     {
         "slug": "byd-dolphin-60",
@@ -1220,7 +1220,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2405.0,
         "top_speed_kph": 190.0,
         "source_note": _BYD_BLADE_NOTE
-        + " Seal running gear in a heavier coupé-SUV body — same charge ceiling, "
+        + " Seal running gear in a heavier coupé-SUV body: same charge ceiling, "
         "noticeably more energy per kilometre.",
     },
     {
@@ -1258,7 +1258,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2180.0,
         "top_speed_kph": 200.0,
         "source_note": _CHINA_CAVEAT
-        + " 800 V pack and the fastest charger in this catalog — the case where "
+        + " 800 V pack and the fastest charger in this catalog: the case where "
         "driving hard genuinely pays, because the stops are short enough to absorb "
         "the extra energy.",
     },
@@ -1279,7 +1279,7 @@ VEHICLES: list[dict] = [
         "top_speed_kph": 200.0,
         "source_note": _CHINA_CAVEAT
         + " Slippery (Cd ~0.24) but heavy, on a middling 140 kW ceiling. Battery "
-        "swapping is NOT modelled — this is the plug-in-and-wait answer.",
+        "swapping is NOT modelled, so this is the plug-in-and-wait answer.",
     },
     {
         "slug": "zeekr-x-64",
@@ -1297,7 +1297,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 2170.0,
         "top_speed_kph": 190.0,
         "source_note": _CHINA_CAVEAT
-        + " Geely SEA platform, same family as the Volvo EX30 already in this list — "
+        + " Geely SEA platform, same family as the Volvo EX30 already in this list, "
         "a useful side-by-side.",
     },
     {
@@ -1394,7 +1394,7 @@ VEHICLES: list[dict] = [
         "mass_kg": 1680.0,
         "top_speed_kph": 145.0,
         "source_note": _US_NOTE
-        + " The slowest DC charging in this catalog by a wide margin — 55 kW flat. "
+        + " The slowest DC charging in this catalog by a wide margin, at 55 kW flat. "
         "On a long route it is the extreme case of the whole thesis: driving "
         "faster buys stops it can never win back.",
     },

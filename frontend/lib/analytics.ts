@@ -16,6 +16,13 @@
  *  - It never blocks. No await on the way to anything the user is waiting for.
  *  - It honours Global Privacy Control and Do Not Track. Someone who has said
  *    "don't count me" is not counted, and that is worth more than the row.
+ *
+ * Counting runs on legitimate interest rather than a consent banner, which is
+ * only defensible if saying no is easy and actually works. GPC and DNT were the
+ * whole of that for a while, and they are settings most people have never heard
+ * of. `setCounting` is the explicit control: it stops the events, deletes the
+ * persistent id on the spot rather than merely leaving it unsent, and survives
+ * a reload. See docs/LIA-CLIENT-ID.md.
  */
 
 import { API_URL } from "./api"
@@ -31,16 +38,66 @@ export type EventName =
   | "trip_planned"
   | "drive_started"
 
+const CLIENT_ID_KEY = "evtrip.cid"
+const CAMPAIGN_KEY = "evtrip.src"
+const OPTOUT_KEY = "evtrip.optout"
+
 /** GPC is the one with legal weight in some jurisdictions; DNT is honoured on
  *  the same principle even though most sites stopped bothering. */
-function optedOut(): boolean {
+function browserOptOut(): boolean {
   if (typeof navigator === "undefined") return true
   const nav = navigator as Navigator & { globalPrivacyControl?: boolean; doNotTrack?: string }
   return nav.globalPrivacyControl === true || nav.doNotTrack === "1"
 }
 
-const CLIENT_ID_KEY = "evtrip.cid"
-const CAMPAIGN_KEY = "evtrip.src"
+/** The choice made on this site, as opposed to the one made in browser settings.
+ *  Storage throws in some private windows, and a browser that will not tell us
+ *  what was chosen is one we should not be counting. */
+function storedOptOut(): boolean {
+  try {
+    return window.localStorage.getItem(OPTOUT_KEY) === "1"
+  } catch {
+    return true
+  }
+}
+
+function optedOut(): boolean {
+  return browserOptOut() || storedOptOut()
+}
+
+/** Why counting is off, when it is off. The toggle needs the difference: a
+ *  visitor whose browser sends GPC cannot be talked out of it by a switch on
+ *  our page, so the control says so instead of pretending to work. */
+export type CountingState = "on" | "off" | "browser"
+
+export function countingState(): CountingState {
+  if (typeof window === "undefined") return "off"
+  if (browserOptOut()) return "browser"
+  return storedOptOut() ? "off" : "on"
+}
+
+/**
+ * Turn counting on or off for this browser.
+ *
+ * Switching off deletes the persistent id immediately. Leaving it in place and
+ * merely declining to send it would mean the opt-out could be undone by a bug,
+ * and it would make the privacy page's claim about clearing site data narrower
+ * than it reads.
+ */
+export function setCounting(on: boolean): void {
+  try {
+    if (on) {
+      window.localStorage.removeItem(OPTOUT_KEY)
+      return
+    }
+    window.localStorage.setItem(OPTOUT_KEY, "1")
+    window.localStorage.removeItem(CLIENT_ID_KEY)
+    window.sessionStorage.removeItem(CAMPAIGN_KEY)
+  } catch {
+    /* nothing to do: a browser that cannot store the choice is already treated
+       as opted out by `storedOptOut` */
+  }
+}
 
 /**
  * The `?src=` tag the visit started with, remembered for the session.
@@ -88,8 +145,9 @@ function campaign(): string | undefined {
  * site data ends it, and that is only true because nothing regenerates it from
  * your IP or your user agent. The server stores a hash of it, never this value.
  *
- * Never created for someone who has opted out — `track()` returns before this
- * is reached, so GPC and DNT mean no id is minted at all, not merely unsent.
+ * Never created for someone who has opted out — `track()` and
+ * `clientIdHeaders()` both return before this is reached, so GPC, DNT and the
+ * on-page toggle all mean no id is minted at all, not merely unsent.
  *
  * Returns null rather than throwing when storage is unavailable (private
  * windows, storage disabled, quota). Retention is a nice thing to know; it is

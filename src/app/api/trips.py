@@ -271,8 +271,8 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
             raise PlanError(
                 "corridor_cold",
                 503,
-                "Still gathering charger data for this route — "
-                "give it a moment and try again.",
+                "Still gathering charger data for this route. "
+                "Give it a moment and try again.",
             )
         # A short hop that cannot be completed is not a charging desert, and
         # saying so was actively misleading — the first version of this told
@@ -287,8 +287,8 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
                 422,
                 f"That route is only {route.total_dist_m / 1000:.0f} km, and no plan "
                 f"works starting from {plan.depart_soc:.0f}%. On a hop this short "
-                "there is no room to charge on the way — you would need to set off "
-                "with more.",
+                "there is no room to charge on the way, so you would need to set "
+                "off with more.",
             )
         # Same reason either way (both are a charging gap, and splitting them
         # would split the number that measures it), but not the same sentence:
@@ -297,10 +297,10 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
         raise PlanError(
             "no_chargers",
             422,
-            "No feasible plan at any speed — no fast chargers found along this "
+            "No feasible plan at any speed: no fast chargers found along this "
             "route for the selected car and charge settings."
             if not charger_nodes
-            else "No feasible plan at any speed — the fast chargers on this route "
+            else "No feasible plan at any speed: the fast chargers on this route "
             "are too far apart for this car at this starting charge.",
         )
 

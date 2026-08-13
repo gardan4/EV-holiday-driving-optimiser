@@ -318,7 +318,7 @@ def needs_replan(
     plain-language reasons — which are what the driver is actually shown."""
     reasons: list[str] = []
     if stale:
-        return (False, ["off the planned route — position and battery are unknown"])
+        return (False, ["off the planned route, so position and battery are unknown"])
     if delta_min >= BEHIND_MIN_TO_REPLAN:
         reasons.append(f"{delta_min:.0f} min behind the plan")
     shortfall = soc_planned - soc_now

@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import AppHeader from "@/app/_components/AppHeader"
+import CountingToggle from "@/app/_components/CountingToggle"
 
 export const metadata: Metadata = {
   title: "Privacy",
@@ -11,6 +12,15 @@ export const metadata: Metadata = {
  * Written because live mode started storing location traces, and a route
  * between two places one of which is usually "home" is the kind of data that
  * deserves a straight answer rather than a policy.
+ *
+ * It also has to carry what Article 13 requires: who the controller is, how to
+ * reach them, what the legal basis is for each thing, and what you can ask for.
+ * Those sections are last on the page because nobody arrives wanting them, and
+ * plain in tone because a notice written in legal register is one nobody reads.
+ *
+ * Every claim here has to be true of the code. "Deleted after 90 days" was
+ * false for as long as nothing called the purge. Change the page and the
+ * behaviour together.
  */
 export default function PrivacyPage() {
   return (
@@ -20,7 +30,8 @@ export default function PrivacyPage() {
         <h1 className="font-display text-3xl font-bold text-ink-900">Privacy</h1>
         <p className="mt-2 text-sm text-ink-500">
           Short version: there are no accounts, we don&apos;t know who you are,
-          and location data is deleted after 90 days.
+          location data is deleted after 90 days, and you can switch off the
+          counting further down this page.
         </p>
 
         <Section title="There is no sign-in">
@@ -50,10 +61,12 @@ export default function PrivacyPage() {
 
         <Section title="How long it's kept">
           Drives and their location trails are deleted 90 days after they
-          started. Planned trips are kept indefinitely so old links keep
-          working. A planned trip has no location trail, but it does hold the
-          start and destination you typed, their coordinates, and the route
-          between them.
+          started. Planned trips and their summaries are deleted after two
+          years, so a link you shared last summer still works this summer but
+          does not sit on a server forever. A planned trip has no location
+          trail, but it does hold the start and destination you typed, their
+          coordinates, and the route between them. Feedback is deleted after two
+          years. Usage counts go at 90 days. Server logs go at 30 days.
         </Section>
 
         <Section title="What we count">
@@ -76,7 +89,7 @@ export default function PrivacyPage() {
           it to today&apos;s. These counts are deleted after 90 days.
         </Section>
 
-        <Section title="One thing that does remember you">
+        <Section title="One thing that does remember you" id="counting">
           Your browser also makes up a random number the first time you visit,
           keeps it, and sends it when you look at a page or plan a trip, so we
           can tell whether anyone comes back. We store a scrambled version of
@@ -90,6 +103,11 @@ export default function PrivacyPage() {
           when you plan one yourself. Attached to usage counts it is deleted
           after 90 days; attached to the summary below it is erased after 15
           months.
+          <br />
+          <br />
+          You can turn all of the counting off here. It takes effect straight
+          away, on this browser, and it sticks until you change it back.
+          <CountingToggle />
         </Section>
 
         <Section title="If your browser asks us not to">
@@ -116,18 +134,65 @@ export default function PrivacyPage() {
         </Section>
 
         <Section title="Who else sees it">
+          Cloudflare sits in front of this app and handles every request before
+          it reaches us, so it sees your IP address and which page you asked
+          for, including the random part of a trip link. Its network is
+          worldwide, so a request can pass through a server outside the EU. The
+          app itself and its database run on Microsoft Azure.
+          <br />
+          <br />
           Your start and destination are sent to OpenRouteService to get a route
           and to OpenChargeMap to find chargers along it, both third-party
-          services with their own terms. The app is hosted on Microsoft Azure.
-          Beyond those, nothing: no advertising, no trackers, and the page loads
-          no third-party scripts.
+          services with their own terms. Feedback, and the email address you
+          type in if you add one, is forwarded to a private Discord channel.
+          Discord is a company in the United States, so that one leaves the EU.
+          Microsoft, Cloudflare and Discord all offer the standard contractual
+          clauses the GDPR asks for when data goes to another country, and we
+          rely on those.
           <strong className="block pt-2 font-semibold text-ink-800">
             Pasting a trip link into WhatsApp, Slack or LinkedIn makes that
             platform fetch the page to build a preview, and the preview names
             your start and destination.
           </strong>
-          Per-stop navigation links point at Google Maps, and only open if you
-          tap one.
+          Beyond those, nothing: no advertising, no trackers, and the page loads
+          no third-party scripts. Per-stop navigation links point at Google
+          Maps, and only open if you tap one.
+        </Section>
+
+        <Section title="Why we're allowed to keep any of it">
+          The law wants a reason for each thing, so here they are.
+          <br />
+          <br />
+          Planning a trip and keeping it alive at its link is us doing the thing
+          you asked for, which is Article 6(1)(b). Following a drive runs on
+          your consent, given when you press start and withdrawn when you stop
+          sharing or delete the trip, which is Article 6(1)(a). Counting usage,
+          the rounded-off summary and the random number run on our own
+          legitimate interest in knowing whether this app works and whether
+          anyone uses it, which is Article 6(1)(f), and the switch above is how
+          you say no. Rate limits and server logs run on the same legitimate
+          interest in keeping the app standing up.
+        </Section>
+
+        <Section title="What you can ask for">
+          You can ask for a copy of what we hold about you, ask us to correct
+          it, ask us to delete it, ask us to stop using it or hold it still, ask
+          for it in a form you can take elsewhere, and object to anything we do
+          on legitimate interest. Email the address at the bottom of this page.
+          <br />
+          <br />
+          For a trip, the link is the only identifier there is, so send it to us
+          or press the delete button, which does the same job immediately.
+          <strong className="block pt-2 font-semibold text-ink-800">
+            For the counting, there is genuinely nothing to look up.
+          </strong>
+          We hold a scrambled code and no name, no email and no account, and we
+          cannot work backwards from it to you. Sending us the number out of
+          your own browser storage would not help either, because what we keep
+          is a hash of it made with a key. That is not us being difficult. It is
+          the reason those tables were built this way, and it means the law does
+          not require us to go looking. If you can show us how to find your
+          rows, we will.
         </Section>
 
         <Section title="Getting something removed">
@@ -144,14 +209,28 @@ export default function PrivacyPage() {
           record of which trips were yours. What you write is also forwarded to
           a private Discord channel so it gets read, including your email
           address if you added one. Leave that field empty if you would rather
-          not.
+          not. It is deleted after two years.
         </Section>
 
         <Section title="Who runs this">
           A personal project, run by an individual in the Netherlands, not a
-          company. The source is public. If you are in the EU you have the right
-          to complain to your data protection authority; in the Netherlands that
-          is the Autoriteit Persoonsgegevens.
+          company. The source is public. For anything on this page, including
+          the requests above, the person responsible for the data is:
+          <span className="mt-2 block font-semibold text-ink-800">
+            Marc Meijers
+            <br />
+            <a
+              className="underline underline-offset-2"
+              href="mailto:Marcmeijers@foundworks.ai"
+            >
+              Marcmeijers@foundworks.ai
+            </a>
+          </span>
+          <span className="block pt-2">
+            If you are in the EU you also have the right to complain to your
+            data protection authority. In the Netherlands that is the Autoriteit
+            Persoonsgegevens.
+          </span>
         </Section>
 
         <Link
@@ -167,13 +246,17 @@ export default function PrivacyPage() {
 
 function Section({
   title,
+  id,
   children,
 }: {
   title: string
+  id?: string
   children: React.ReactNode
 }) {
   return (
-    <section className="mt-7">
+    // `scroll-mt` so the footer's "Counting: on" link lands with the heading
+    // clear of the sticky header rather than tucked underneath it.
+    <section id={id} className="mt-7 scroll-mt-24">
       <h2 className="font-display text-lg font-semibold text-ink-900">{title}</h2>
       <p className="mt-1.5 text-sm leading-relaxed text-ink-600">{children}</p>
     </section>

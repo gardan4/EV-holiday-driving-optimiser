@@ -1,4 +1,5 @@
 import Link from "next/link"
+import CountingLink from "./CountingLink"
 import FeedbackLink from "./FeedbackLink"
 
 /**
@@ -34,9 +35,28 @@ export default function SiteFooter() {
           Source
         </a>
         <FeedbackLink />
+        <CountingLink />
+        {/* ODbL asks for OpenStreetMap contributors by name, not just for the
+            router built on top of them. OpenChargeMap asks for the same. */}
         <span className="ml-auto text-xs text-ink-400">
-          Routes by OpenRouteService · chargers by OpenChargeMap
-        </span>
+          Routes by OpenRouteService, from{" "}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-ink-600"
+          >
+            © OpenStreetMap contributors
+          </a>{" "}
+          · chargers by{" "}
+          <a
+            href="https://openchargemap.org/"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-ink-600"
+          >
+            OpenChargeMap contributors
+          </a></span>
       </div>
     </footer>
   )

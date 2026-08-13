@@ -569,7 +569,7 @@ async def replan(
     if st.get("stale"):
         raise HTTPException(
             status_code=409,
-            detail="You're off the planned route — rejoin it before re-planning.",
+            detail="You're off the planned route. Rejoin it before re-planning.",
         )
 
     snapshot = run.route_snapshot
@@ -623,8 +623,8 @@ async def replan(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"No plan reaches the destination from {soc_now:.0f}% here — "
-                "charge at the nearest available point first."
+                f"No plan reaches the destination from {soc_now:.0f}% here. "
+                "Charge at the nearest available point first."
             ),
         )
 
