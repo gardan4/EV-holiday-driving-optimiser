@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { BatteryCharging, Gauge, Search, Zap } from "lucide-react"
 import { Vehicle } from "@/lib/client"
+import { InfoTip } from "./fields"
 
 interface VehiclePickerProps {
   vehicles: Vehicle[]
@@ -82,24 +83,15 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
     <div>
       <span className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500">
         Your car
-        <span className="group/tip relative inline-flex align-middle">
-          <button
-            type="button"
-            aria-label="What does this mean?"
-            onClick={(e) => e.preventDefault()}
-            className="grid h-4 w-4 place-items-center rounded-full border border-ink-300 text-[9px] font-bold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400"
-          >
-            i
-          </button>
-          <span
-            role="tooltip"
-            className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 opacity-0 shadow-xl shadow-ink-900/10 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100"
-          >
-            Sets the battery size, how quickly it charges (the taper matters more than the
-            peak), how much it uses at speed, and its top speed. The plan never simulates
-            faster than the car can actually go.
-          </span>
-        </span>
+        {/* The shared control, not a copy of it. This was a verbatim
+            duplicate of `InfoTip`, which is precisely what `fields.tsx` exists
+            to prevent — and it showed: the tips got a touch behaviour and this
+            one silently kept the hover-only version. */}
+        <InfoTip>
+          Sets the battery size, how quickly it charges (the taper matters more than the
+          peak), how much it uses at speed, and its top speed. The plan never simulates
+          faster than the car can actually go.
+        </InfoTip>
       </span>
       {vehicles.length === 0 && (
         <div className="rounded-xl border border-dashed border-ink-200 px-3 py-4 text-center text-xs text-ink-400">

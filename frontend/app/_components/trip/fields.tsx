@@ -1,29 +1,113 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 
 /**
  * Shared form controls. Used by the planner form and by the editable
  * assumptions panel on a trip, so the two can never drift apart.
  */
 
+/**
+ * The "i" beside a label, and the explanation behind it.
+ *
+ * Two behaviours, because a tooltip is a hover idiom and a phone has no hover.
+ *
+ * **Pointer devices** keep the hover tooltip: anchored under the icon, shown on
+ * hover or keyboard focus, gone when you leave. Nothing to dismiss.
+ *
+ * **Touch** gets an explicit sheet at the bottom of the screen instead. The
+ * anchored version was not merely awkward there, it was clipped: a fixed 256px
+ * box centred on an icon sitting near a screen edge ran up to 27px off the left
+ * of a 375px viewport and 66px off the right, so a third of the tips on the
+ * planner form were partly unreadable. A sheet is full-width by construction,
+ * lands under the thumb, and can be dismissed deliberately rather than by
+ * hoping a tap lands somewhere that removes focus.
+ *
+ * The sheet is PORTALLED to the body. `animate-fade-in-up` finishes on
+ * `transform: translateY(0)` with `fill-mode: both`, so the form card keeps a
+ * transform forever — which makes it the containing block for any `fixed`
+ * descendant. Rendered in place, the sheet would be positioned against the card
+ * rather than the viewport, which is the same clipping problem wearing a hat.
+ */
 export function InfoTip({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const [peek, setPeek] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => setMounted(true), [])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [open])
+
   return (
-    <span className="group/tip relative inline-flex align-middle">
+    <span
+      className="relative inline-flex align-middle"
+      onMouseEnter={() => setPeek(true)}
+      onMouseLeave={() => setPeek(false)}
+    >
       <button
         type="button"
         aria-label="What does this mean?"
-        onClick={(e) => e.preventDefault()}
+        aria-expanded={open}
+        onFocus={() => setPeek(true)}
+        onBlur={() => setPeek(false)}
+        onClick={(e) => {
+          // Inside a <label> on some fields, where a click would otherwise
+          // focus the input and scroll the sheet out from under the thumb.
+          e.preventDefault()
+          setOpen((o) => !o)
+        }}
         className="grid h-4 w-4 place-items-center rounded-full border border-ink-300 text-[9px] font-bold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-400"
       >
         i
       </button>
+
+      {/* Pointer devices only, hidden below `sm` where the sheet takes over.
+          Visibility comes from state rather than a `group-hover/group-focus-
+          within` pair: those stopped applying here and cost an hour to not
+          explain, and one boolean is both simpler and testable. */}
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 top-full z-40 mt-2 w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 opacity-0 shadow-xl shadow-ink-900/10 transition-opacity duration-150 group-hover/tip:opacity-100 group-focus-within/tip:opacity-100"
+        className={`pointer-events-none absolute left-1/2 top-full z-40 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-xl shadow-ink-900/10 transition-opacity duration-150 sm:block ${
+          peek ? "opacity-100" : "opacity-0"
+        }`}
       >
         {children}
       </span>
+
+      {mounted &&
+        open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-end bg-ink-900/30 backdrop-blur-[1px] sm:hidden"
+            onClick={() => setOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="What does this mean?"
+          >
+            <div
+              className="w-full rounded-t-2xl border-t border-ink-100 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-left text-sm font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {children}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="mt-4 w-full rounded-xl border border-ink-200 py-3 text-sm font-semibold text-ink-700"
+              >
+                Got it
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </span>
   )
 }
