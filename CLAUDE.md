@@ -342,6 +342,26 @@ the pipeline is green before infra exists. Infra deploy is manual
   telemetry row is worth strictly less than the trip plan it is counting.
   Headroom is withheld (None) when a provider publishes no daily cap rather
   than invented against a made-up denominator.
+  **Counted per SERVICE, not per provider** (`quota.SERVICES`), because that is
+  how the ceilings are enforced: ORS meters directions and geocoding against
+  separate allowances. A single provider-level gauge reported 96% headroom on
+  the afternoon geocoding was returning 403 to every visitor, which is the
+  precise failure this table exists to prevent. Autocomplete was also the one
+  caller that never recorded anything — every row came from `get_route` — so
+  the biggest consumer of the free tier was invisible to its own meter; it now
+  takes a session purely so it can be counted.
+- **ORS lives at `api.heigit.org`, and the two services sit under different
+  prefixes.** HeiGIT retired `api.openrouteservice.org` (announced 2026-04-28,
+  shut off 2026-08-24): directions moved to
+  `api.heigit.org/openrouteservice/v2/…` and geocoding to
+  `api.heigit.org/pelias/v1/…`, hence two constants in `routing.py` rather than
+  one base. Same key, same request and response shapes, no regeneration. This
+  arrived as an outage rather than as housekeeping because quota on the OLD
+  host is throttled: geocoding there began returning 403 "Quota exceeded" while
+  the account's real allowance was untouched and the same key worked instantly
+  against the new host — and directions kept working, so the app half-failed.
+  No trailing slash on either base: a double slash answers 405 "Method 'GET' is
+  not supported", which reads like an auth or endpoint fault and is neither.
 - **Campaign tags exist because the referrer cannot answer the question.**
   Reddit's mobile app strips referrers, so an untagged launch reports its best
   channel as "direct". `?src=<slug>` is stashed in **sessionStorage** — not

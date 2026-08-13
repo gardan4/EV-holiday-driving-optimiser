@@ -184,6 +184,7 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     providers = [
         ProviderOut(
             provider=p.provider,
+            kind=p.kind,
             calls_today=p.calls_today,
             cache_hits_today=p.cache_hits_today,
             failures_today=p.failures_today,

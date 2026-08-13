@@ -35,11 +35,24 @@ logger = logging.getLogger(__name__)
 # 0 means "no published daily ceiling": the calls are still counted and the hit
 # rate still computed, only the headroom percentage is withheld. Inventing a
 # denominator would produce a reassuring bar with nothing behind it.
-def _quota(provider: str) -> int:
+def _quota(provider: str, kind: str) -> int:
     return {
-        "ors": settings.ORS_DAILY_QUOTA,
-        "ocm": settings.OCM_DAILY_QUOTA,
-    }.get(provider, 0)
+        ("ors", "directions"): settings.ORS_DAILY_QUOTA,
+        ("ors", "geocode"): settings.ORS_GEOCODE_DAILY_QUOTA,
+        ("ocm", "chargers"): settings.OCM_DAILY_QUOTA,
+    }.get((provider, kind), 0)
+
+
+# One row per service we can exhaust, because that is the unit the providers
+# actually meter. Reported separately rather than summed into a provider total:
+# adding geocoding to directions and dividing by one ceiling is precisely the
+# arithmetic that showed healthy headroom on the afternoon autocomplete was
+# returning 403 to every visitor.
+SERVICES: tuple[tuple[str, str], ...] = (
+    ("ors", "directions"),
+    ("ors", "geocode"),
+    ("ocm", "chargers"),
+)
 
 
 async def record(
@@ -74,19 +87,20 @@ async def record(
 
 
 class ProviderUsage:
-    """What one provider cost today, and how much room is left."""
+    """What one SERVICE cost today, and how much room is left."""
 
     def __init__(
-        self, provider: str, calls_today: int, cache_hits_today: int,
+        self, provider: str, kind: str, calls_today: int, cache_hits_today: int,
         failures_today: int, avg_ms: float, calls_window: int,
     ):
         self.provider = provider
+        self.kind = kind
         self.calls_today = calls_today
         self.cache_hits_today = cache_hits_today
         self.failures_today = failures_today
         self.avg_ms = avg_ms
         self.calls_window = calls_window
-        self.daily_quota = _quota(provider)
+        self.daily_quota = _quota(provider, kind)
 
     @property
     def hit_rate(self) -> float | None:
@@ -103,18 +117,23 @@ class ProviderUsage:
 
 
 async def quota_report(db: AsyncSession, days: int = 7) -> list[ProviderUsage]:
-    """Today's spend per provider, plus the window total for context.
+    """Today's spend per SERVICE, plus the window total for context.
 
     "Today" is the unit that matters because the ceilings are daily and reset
     at midnight UTC — a weekly total cannot tell you whether tonight's post
     will run the tank dry.
+
+    Per service rather than per provider, because that is how the ceilings are
+    enforced. One provider row hides the case this app has actually hit: a
+    provider where one service is dead and the other is fine.
     """
     now = datetime.utcnow()
     midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
     window_start = now - timedelta(days=max(1, days))
 
     out: list[ProviderUsage] = []
-    for provider in ("ors", "ocm"):
+    for provider, kind in SERVICES:
+        scope = (UpstreamCall.provider == provider, UpstreamCall.kind == kind)
         today = (
             await db.execute(
                 select(
@@ -125,14 +144,14 @@ async def quota_report(db: AsyncSession, days: int = 7) -> list[ProviderUsage]:
                     # does integer division on MSSQL and returns a float on
                     # SQLite, so the two engines would disagree.
                     func.coalesce(func.avg(cast(UpstreamCall.duration_ms, Float)), 0.0),
-                ).where(UpstreamCall.at >= midnight, UpstreamCall.provider == provider)
+                ).where(UpstreamCall.at >= midnight, *scope)
             )
         ).one()
         failures = (
             await db.execute(
                 select(func.count()).where(
                     UpstreamCall.at >= midnight,
-                    UpstreamCall.provider == provider,
+                    *scope,
                     UpstreamCall.ok == False,  # noqa: E712 — `.is_(False)` is a T-SQL syntax error
                 )
             )
@@ -140,7 +159,7 @@ async def quota_report(db: AsyncSession, days: int = 7) -> list[ProviderUsage]:
         window = (
             await db.execute(
                 select(func.coalesce(func.sum(UpstreamCall.calls), 0)).where(
-                    UpstreamCall.at >= window_start, UpstreamCall.provider == provider
+                    UpstreamCall.at >= window_start, *scope
                 )
             )
         ).scalar_one()
@@ -148,6 +167,7 @@ async def quota_report(db: AsyncSession, days: int = 7) -> list[ProviderUsage]:
         out.append(
             ProviderUsage(
                 provider=provider,
+                kind=kind,
                 calls_today=int(today[0]),
                 cache_hits_today=int(today[1]),
                 failures_today=int(failures),

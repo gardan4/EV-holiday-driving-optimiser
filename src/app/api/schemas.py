@@ -454,12 +454,17 @@ class CampaignOut(BaseModel):
 class ProviderOut(BaseModel):
     """Today's spend against one external free tier.
 
+    One row per SERVICE (`provider` + `kind`), not per provider: ORS meters
+    directions and geocoding against separate ceilings, and a combined gauge
+    reads healthy while one of them is refusing every request.
+
     `headroom_pct` is None when the provider publishes no daily ceiling —
     withheld rather than invented, because a reassuring bar with no denominator
     behind it is worse than an empty space.
     """
 
     provider: str
+    kind: str = ""
     calls_today: int
     cache_hits_today: int
     failures_today: int

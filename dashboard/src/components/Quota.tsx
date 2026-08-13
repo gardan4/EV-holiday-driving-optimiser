@@ -30,10 +30,14 @@ export function Quota({ providers }: { providers: Provider[] }) {
                 ? "#b8842a"
                 : "#d9534f"
         return (
-          <div key={p.provider}>
+          <div key={`${p.provider}-${p.kind}`}>
             <div className="mb-1.5 flex items-baseline justify-between gap-3">
               <span className="text-[12.5px] text-ink-soft">
                 {NAME[p.provider] ?? p.provider}
+                {/* The service is named because the ceiling belongs to it, not
+                    to the provider. One gauge per provider once showed 96%
+                    headroom while geocoding was refusing every request. */}
+                {p.kind ? <span className="text-ink-mute"> · {p.kind}</span> : null}
               </span>
               <span className="figure text-[12px] text-ink-mute">
                 {group(p.calls_today)}

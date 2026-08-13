@@ -28,6 +28,10 @@ export type Delta = { value: number; previous: number; change: number | null }
 
 export type Provider = {
   provider: string
+  /** The service within that provider — "directions", "geocode", "chargers".
+   *  Ceilings are enforced per service, so this is part of the identity of a
+   *  row rather than a detail. */
+  kind: string
   calls_today: number
   cache_hits_today: number
   failures_today: number

@@ -140,13 +140,29 @@ class TestCampaignAttribution:
         assert row.campaign is None
 
 
+async def _svc(db, provider: str, kind: str, days: int = 7):
+    """One service's row out of the report.
+
+    Provider alone stopped identifying a row when the report went per service —
+    which it did because ORS meters directions and geocoding separately, and a
+    combined gauge reported 96% headroom on an afternoon geocoding was refusing
+    every request.
+    """
+    (row,) = [
+        p
+        for p in await quota.quota_report(db, days=days)
+        if p.provider == provider and p.kind == kind
+    ]
+    return row
+
+
 class TestQuota:
     async def test_a_cache_hit_costs_nothing_and_is_still_counted(self, db_session):
         """The hit rate is the number that predicts whether a spike survives,
         so the cheap half has to be recorded too."""
         await quota.record(db_session, provider="ors", kind="directions", cache_hits=1)
         await db_session.commit()
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ors"]
+        p = await _svc(db_session, "ors", "directions")
         assert p.calls_today == 0
         assert p.cache_hits_today == 1
         assert p.hit_rate == 1.0
@@ -156,7 +172,7 @@ class TestQuota:
         for _ in range(25):
             await quota.record(db_session, provider="ors", kind="directions", calls=1)
         await db_session.commit()
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ors"]
+        p = await _svc(db_session, "ors", "directions")
         assert p.calls_today == 25
         assert p.headroom_pct == pytest.approx(75.0)
 
@@ -171,7 +187,7 @@ class TestQuota:
         assert (
             await db_session.execute(select(func.count()).select_from(UpstreamCall))
         ).scalar_one() == 1
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ocm"]
+        p = await _svc(db_session, "ocm", "chargers")
         assert p.calls_today == 35
 
     async def test_no_published_cap_withholds_headroom_rather_than_inventing_it(
@@ -180,7 +196,7 @@ class TestQuota:
         monkeypatch.setattr(settings, "OCM_DAILY_QUOTA", 0)
         await quota.record(db_session, provider="ocm", kind="chargers", calls=10)
         await db_session.commit()
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ocm"]
+        p = await _svc(db_session, "ocm", "chargers")
         assert p.calls_today == 10
         assert p.headroom_pct is None
 
@@ -194,7 +210,7 @@ class TestQuota:
         old.at = datetime.utcnow() - timedelta(days=1)
         await db_session.commit()
 
-        (p,) = [p for p in await quota.quota_report(db_session, days=7) if p.provider == "ors"]
+        p = await _svc(db_session, "ors", "directions", days=7)
         assert p.calls_today == 0
         assert p.headroom_pct == 100.0
         assert p.calls_window == 40  # still visible in the week
@@ -203,7 +219,7 @@ class TestQuota:
         """A burst of failures is what a blown quota looks like from in here."""
         await quota.record(db_session, provider="ors", kind="directions", calls=1, ok=False)
         await db_session.commit()
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ors"]
+        p = await _svc(db_session, "ors", "directions")
         assert p.failures_today == 1
 
     async def test_no_route_spends_a_call_but_is_not_a_provider_failure(
@@ -227,9 +243,113 @@ class TestQuota:
         with pytest.raises(PlanError):
             await routing.get_route(db_session, 0.0, 0.0, 1.0, 1.0)
 
-        (p,) = [p for p in await quota.quota_report(db_session) if p.provider == "ors"]
+        p = await _svc(db_session, "ors", "directions")
         assert p.calls_today == 1, "the request was still spent"
         assert p.failures_today == 0, "a negative answer is not a provider failure"
+
+    async def test_geocode_spend_is_counted(self, db_session, monkeypatch):
+        """Autocomplete used to be invisible here.
+
+        Every row this table held was written by `get_route`, so the largest
+        consumer of the ORS free tier — the one call with no durable cache in
+        front of it — contributed nothing to the gauge built to watch it.
+        """
+        monkeypatch.setattr(settings, "ORS_GEOCODE_DAILY_QUOTA", 100)
+        await quota.record(db_session, provider="ors", kind="geocode", calls=1)
+        await db_session.commit()
+        p = await _svc(db_session, "ors", "geocode")
+        assert p.calls_today == 1
+        assert p.headroom_pct == pytest.approx(99.0)
+
+    async def test_one_service_dying_is_not_hidden_by_the_other(
+        self, db_session, monkeypatch
+    ):
+        """The exact failure this split exists for.
+
+        Geocoding was exhausted while directions were untouched. Measured
+        against a single provider-level ceiling the gauge read healthy, so the
+        one instrument that should have said "your search box is down" said
+        96% headroom instead.
+        """
+        monkeypatch.setattr(settings, "ORS_DAILY_QUOTA", 1000)
+        monkeypatch.setattr(settings, "ORS_GEOCODE_DAILY_QUOTA", 10)
+        await quota.record(db_session, provider="ors", kind="directions", calls=20)
+        for _ in range(10):
+            await quota.record(db_session, provider="ors", kind="geocode", calls=1)
+        await db_session.commit()
+
+        directions = await _svc(db_session, "ors", "directions")
+        geocode = await _svc(db_session, "ors", "geocode")
+        assert directions.headroom_pct == pytest.approx(98.0), "routing is fine"
+        assert geocode.headroom_pct == 0.0, "and the search box is dead"
+
+    async def test_each_service_has_its_own_ceiling(self):
+        """Sharing one number between them is how the two get conflated again."""
+        assert quota._quota("ors", "directions") == settings.ORS_DAILY_QUOTA
+        assert quota._quota("ors", "geocode") == settings.ORS_GEOCODE_DAILY_QUOTA
+        # An unknown pairing withholds headroom rather than borrowing a
+        # denominator from its provider.
+        assert quota._quota("ors", "something-new") == 0
+
+    async def test_the_geocode_ENDPOINT_records_what_it_spent(
+        self, client, db_session, monkeypatch
+    ):
+        """The wiring, not just the counter.
+
+        `routing.geocode` had no database session for as long as it existed,
+        which is the mundane reason its spend went unrecorded — so the session
+        reaching it from the route is the thing worth pinning. A counter nobody
+        passes a session to counts nothing.
+        """
+        from app.services import routing
+
+        monkeypatch.setattr(settings, "ORS_API_KEY", "test-key")
+        routing._geocode_cache.clear()
+
+        class _Resp:
+            @staticmethod
+            def raise_for_status() -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return {
+                    "features": [
+                        {
+                            "geometry": {"coordinates": [5.12, 52.09]},
+                            "properties": {"label": "Utrecht, Netherlands", "country_a": "NLD"},
+                        }
+                    ]
+                }
+
+        async def fake_get(*a, **k):
+            return _Resp()
+
+        monkeypatch.setattr(routing._http(), "get", fake_get)
+
+        resp = await client.get("/api/geocode?q=Utrecht")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()[0]["label"] == "Utrecht, Netherlands"
+
+        p = await _svc(db_session, "ors", "geocode")
+        assert p.calls_today == 1
+
+        # And the second, identical search is served from cache — counted as a
+        # hit, so the rate that predicts whether a spike survives stays honest.
+        assert (await client.get("/api/geocode?q=Utrecht")).status_code == 200
+        p = await _svc(db_session, "ors", "geocode")
+        assert p.calls_today == 1, "a cache hit must not spend a request"
+        assert p.cache_hits_today == 1
+        routing._geocode_cache.clear()
+
+    async def test_a_two_letter_query_never_reaches_the_provider(self, client, db_session):
+        """Autocomplete is the biggest consumer of the free tier and two-letter
+        prefixes are its highest-volume, least-useful bucket. Rejecting them at
+        the edge is the cheapest quota saving available."""
+        resp = await client.get("/api/geocode?q=ut")
+        assert resp.status_code == 422
+        assert (
+            await db_session.execute(select(func.count()).select_from(UpstreamCall))
+        ).scalar_one() == 0
 
     async def test_recording_never_raises(self, db_session):
         """A telemetry row is worth strictly less than the request it measures."""

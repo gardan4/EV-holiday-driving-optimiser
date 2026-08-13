@@ -34,7 +34,13 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
     setText(next)
     onChange(null) // typing invalidates the previous selection
     if (timer.current) clearTimeout(timer.current)
-    if (next.trim().length < 2) {
+    // Three, matching the server's `min_length`. Autocomplete is by far this
+    // app's largest consumer of the ORS free tier — it fires while somebody is
+    // still typing, so unlike a route it cannot be cached before the fact — and
+    // two-letter prefixes are the highest-volume, least-useful bucket: "ut"
+    // matches half of Europe. Asking the server anyway would spend a request to
+    // be told the query was too short.
+    if (next.trim().length < 3) {
       setHits([])
       setOpen(false)
       return
@@ -56,7 +62,12 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
       } finally {
         setLoading(false)
       }
-    }, 400)
+      // 650ms rather than 400. Long enough that an ordinary typing rhythm
+      // produces one request for a word instead of three or four, short enough
+      // that the list still feels like it is keeping up. This is the cheapest
+      // lever there is on the quota: it multiplies down every search anyone
+      // makes, without changing what they can find.
+    }, 650)
   }
 
   function select(hit: GeocodeHit) {

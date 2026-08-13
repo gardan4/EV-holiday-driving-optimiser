@@ -146,7 +146,10 @@ def _format(s: UsageStats, source: str) -> str:
                 else f"{p.calls_today} calls (no published cap)"
             )
             warn = f"  ** {p.failures_today} FAILED **" if p.failures_today else ""
-            lines.append(f"    {p.provider.upper():<5} {cap:<28} {hit}, {p.avg_ms:.0f} ms{warn}")
+            # Provider AND service: the ceilings are per service, and printing
+            # only "ORS" is how a dead autocomplete hides behind healthy routing.
+            label = f"{p.provider.upper()} {p.kind}".strip()
+            lines.append(f"    {label:<20} {cap:<28} {hit}, {p.avg_ms:.0f} ms{warn}")
 
     if s.campaigns:
         lines.append("")

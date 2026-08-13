@@ -154,8 +154,14 @@ class Settings(BaseSettings):
     # What the provider allows per day. 0 = no published daily limit, which
     # withholds the headroom percentage rather than inventing a denominator —
     # the calls are still counted and the cache hit rate still computed.
-    ORS_DAILY_QUOTA: int = 2000   # openrouteservice free tier, directions/day
-    OCM_DAILY_QUOTA: int = 0      # OpenChargeMap publishes no hard daily cap
+    # ORS meters each SERVICE separately, so these are per service and not per
+    # provider. Getting that wrong is not academic: geocoding died while a
+    # single provider-level gauge, measured against the directions ceiling,
+    # reported 96% headroom — the outage was invisible in the one place built
+    # to make it visible.
+    ORS_DAILY_QUOTA: int = 2000          # directions/day
+    ORS_GEOCODE_DAILY_QUOTA: int = 1000  # geocoding/day, a separate allowance
+    OCM_DAILY_QUOTA: int = 0             # OpenChargeMap publishes no hard daily cap
 
     # Campaign tags accepted on `?src=`, comma-separated (e.g.
     # "r-electricvehicles,r-evcharging,hn"). Empty means any well-formed slug

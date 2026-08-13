@@ -29,7 +29,30 @@ from app.services.simulator import RouteSegment
 
 logger = logging.getLogger(__name__)
 
-ORS_BASE = "https://api.openrouteservice.org"
+# HeiGIT retired `api.openrouteservice.org` in favour of `api.heigit.org`,
+# announced 2026-04-28 with the old host shut off entirely on 2026-08-24. The
+# services are unchanged — same key, same request and response shapes, no
+# regeneration needed — but they now sit under a per-service prefix, and
+# routing and geocoding do NOT share one:
+#
+#     /v2/directions/…   →  /openrouteservice/v2/directions/…
+#     /geocode/…         →  /pelias/v1/…
+#
+# which is why this is two constants rather than one base and a path.
+#
+# Worth knowing why this landed as an outage rather than as housekeeping: the
+# deprecation notice says quota on the OLD host "might be restricted", and it
+# is. Geocoding on `api.openrouteservice.org` began returning 403 "Quota
+# exceeded" while the account's real allowance — the one the dashboard shows —
+# was untouched and the same key worked immediately against `api.heigit.org`.
+# Directions kept working throughout, so the app half-failed: you could not
+# search for a place, but a permalink still planned.
+#
+# No trailing slashes. A base ending in "/" produces a double slash and the
+# gateway answers 405 "Method 'GET' is not supported", which reads like an
+# endpoint or auth problem and is neither.
+ORS_DIRECTIONS_BASE = "https://api.heigit.org/openrouteservice"
+ORS_GEOCODE_BASE = "https://api.heigit.org/pelias/v1"
 
 _client: httpx.AsyncClient | None = None
 
@@ -116,23 +139,48 @@ def _lerp_axis(xs: list[float], ys: list[float], x: float) -> float:
 # Prefixes repeat enormously across users ("ut", "utr", "amst"), so even a short
 # TTL collapses most of the volume — and a dead autocomplete is what a visitor
 # from a link would hit first, before anything else in the app.
-_GEOCODE_TTL_S = 900.0
-_GEOCODE_MAX = 2000
+#
+# Six hours rather than fifteen minutes. A place name does not move, and the
+# fifteen-minute window was tuned for a memory cost that never materialised:
+# 4000 prefixes of a handful of results each is a couple of megabytes. The
+# window that matters is a traffic spike, which lasts an evening, not a quarter
+# of an hour.
+#
+# Still in-process, so it dies with the container and is not shared between
+# instances — every deploy starts cold and re-spends the popular prefixes. A
+# table would fix that, and would also mean storing what people typed into a
+# search box; that is a deliberate open question rather than an oversight.
+_GEOCODE_TTL_S = 6 * 3600.0
+_GEOCODE_MAX = 4000
 _geocode_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
 
 
-async def geocode(q: str, size: int = 5) -> list[dict]:
-    """ORS autocomplete → [{label, lat, lon, country}]. Cached in-process."""
+async def geocode(
+    q: str, size: int = 5, db: AsyncSession | None = None
+) -> list[dict]:
+    """ORS autocomplete → [{label, lat, lon, country}]. Cached in-process.
+
+    `db` is optional and is only used to record quota. It is threaded through
+    from the route rather than omitted because this call was invisible to
+    `UpstreamCall` for as long as it existed: every row the quota table held was
+    written by `get_route`, so the dashboard reported healthy ORS headroom while
+    autocomplete — the one call with no durable cache in front of it — was the
+    thing actually being rate-limited. A meter that cannot see the biggest
+    spender is not a meter.
+    """
     key = _require_key()
     ck = (q.strip().lower(), size)
     hit = _geocode_cache.get(ck)
     now = time.monotonic()
     if hit is not None and now - hit[0] < _GEOCODE_TTL_S:
+        if db is not None:
+            await quota.record(db, provider="ors", kind="geocode", cache_hits=1)
         return hit[1]
 
+    started = time.monotonic()
     try:
         resp = await _http().get(
-            f"{ORS_BASE}/geocode/autocomplete",
+            f"{ORS_GEOCODE_BASE}/autocomplete",
             # Header, not a query param: an httpx error message embeds the full
             # URL, and `logger.warning` below would then write the live API key
             # into the application log on every upstream failure.
@@ -146,7 +194,28 @@ async def geocode(q: str, size: int = 5) -> list[dict]:
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         logger.warning("ORS geocode failed: %s", exc)
+        if db is not None:
+            # Still a spent request as far as the provider is concerned, and the
+            # failure is the whole signal when a quota runs out — recording only
+            # successes is how a dead service looks quiet.
+            await quota.record(
+                db,
+                provider="ors",
+                kind="geocode",
+                calls=1,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                ok=False,
+            )
         raise HTTPException(status_code=503, detail="Geocoding is temporarily unavailable.")
+
+    if db is not None:
+        await quota.record(
+            db,
+            provider="ors",
+            kind="geocode",
+            calls=1,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
     hits = []
     for feat in resp.json().get("features", []):
         props = feat.get("properties", {})
@@ -242,7 +311,7 @@ async def _fetch_route_payload(
     key = _require_key()
     try:
         resp = await _http().post(
-            f"{ORS_BASE}/v2/directions/driving-car/geojson",
+            f"{ORS_DIRECTIONS_BASE}/v2/directions/driving-car/geojson",
             headers={"Authorization": key},
             json={
                 "coordinates": [[o_lon, o_lat], [d_lon, d_lat]],
