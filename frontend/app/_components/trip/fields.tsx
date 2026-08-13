@@ -86,6 +86,7 @@ export function NumberField({
   onValidity,
 }: NumberFieldProps) {
   const [draft, setDraft] = useState(() => String(value))
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // What we last handed up. Lets us tell an outside change (a reset, a preset)
   // — which should overwrite the box — from our own echo, which must not.
@@ -131,25 +132,58 @@ export function NumberField({
 
   return (
     <div>
-      <label
-        htmlFor={id}
-        className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500"
-      >
-        {label}
-        {explain && <InfoTip>{explain}</InfoTip>}
-      </label>
-      {/* The unit sits beside the input, not over it: absolutely positioning it
-          put it on top of the native spinner arrows, which clipped "min" and
-          wrapped "€/kWh" out of the box. */}
+      {/* The label is the box's own first line rather than a row above it.
+          This is a Material "filled" field with the label permanently in its
+          floated position — deliberately NOT a floating label, which animates
+          from inside the box to the top as you type. The usability complaints
+          about that pattern are about the movement and about an empty field
+          reading as pre-filled (NN/g on placeholders); neither can happen here,
+          because every one of these fields ships with a value, so a floating
+          label would sit floated 100% of the time anyway. What is left is the
+          part that pays: label and value are one object, and the pair costs one
+          row instead of two.
+
+          The readout lives in the tip, not under the box. It is the line that
+          says what the number you typed actually does, so it has to stay — but
+          nine of them stacked down a form is what made the page read as grey
+          soup. It sits at the top of the tip because it is the live half. */}
       <div
-        className={`flex items-center rounded-xl border bg-white ${
+        onClick={(e) => {
+          // The padding around the input is part of the target — except over
+          // the tip, where focusing the input would shut the tooltip that the
+          // same tap just opened.
+          if ((e.target as HTMLElement).closest("button")) return
+          inputRef.current?.focus()
+        }}
+        className={`cursor-text rounded-xl border bg-white px-3.5 pb-2.5 pt-2 ${
           problem
             ? "border-red-400 focus-within:border-red-500 focus-within:ring-2 focus-within:ring-red-200"
             : "border-ink-200 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200"
         }`}
       >
+        <div className="flex min-h-4 items-center gap-1.5">
+          <label
+            htmlFor={id}
+            className="cursor-text text-[10px] font-semibold uppercase tracking-wider text-ink-400"
+          >
+            {label}
+          </label>
+          {(explain || readout) && (
+            <InfoTip>
+              {readout && (
+                <span className="mb-1.5 block font-semibold text-ink-900">{readout}</span>
+              )}
+              {explain}
+            </InfoTip>
+          )}
+        </div>
+        {/* The unit sits beside the input, not over it: absolutely positioning
+            it put it on top of the native spinner arrows, which clipped "min"
+            and wrapped "€/kWh" out of the box. */}
+        <div className="flex items-baseline gap-2">
         <input
           id={id}
+          ref={inputRef}
           type="text"
           // A decimal pad has no minus key, so anything that can go negative
           // gets the full keyboard instead.
@@ -174,18 +208,17 @@ export function NumberField({
           // 16px on a phone: WebKit zooms the page when a field under 16px
           // takes focus, which on this form meant every tap on a number
           // jolted the layout.
-          className="min-w-0 flex-1 rounded-xl bg-transparent py-2.5 pl-3 pr-1 text-base text-ink-900 outline-none sm:text-sm"
+          className="min-w-0 flex-1 bg-transparent text-base text-ink-900 outline-none sm:text-sm"
         />
-        <span className="shrink-0 whitespace-nowrap pl-1 pr-3 font-mono text-xs text-ink-400">
+        <span className="shrink-0 whitespace-nowrap font-mono text-xs text-ink-400">
           {unit}
         </span>
+        </div>
       </div>
-      {problem ? (
+      {problem && (
         <p id={`${id}-error`} className="mt-1 text-xs leading-relaxed text-red-600">
           {problem}
         </p>
-      ) : (
-        readout && <p className="mt-1 text-xs leading-relaxed text-ink-500">{readout}</p>
       )}
     </div>
   )

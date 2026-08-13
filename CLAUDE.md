@@ -167,7 +167,7 @@ running it — `npm --prefix dashboard run build` also runs `tsc --noEmit`.
   world"), because a permanently zoomed-out world map renders this app's actual
   traffic as a smudge over the Low Countries. It is also **draggable**: pan,
   wheel-zoom anchored on the cursor, double-click or "reset view" to go back,
-  and arrow keys / `+` / `-` / `0` when focused. Five things that took getting
+  and arrow keys / `+` / `-` / `0` when focused. Eight things that took getting
   right, all of them easy to reintroduce:
   - The fitted box is grown to the frame's aspect ratio (`toAspect`), or
     `preserveAspectRatio="meet"` letterboxes a tall box and shrinks everything.
@@ -183,6 +183,21 @@ running it — `npm --prefix dashboard run build` also runs `tsc --noEmit`.
   - The manual view is **not** reset when data refreshes — the panels reload
     every ten seconds while the stream is live, and yanking the map back to
     centre mid-drag would break it exactly when it is most interesting.
+  - **A pan is not a selection.** `user-select: none` plus `preventDefault()` on
+    `pointerdown` — both, and verified together — or a drag paints the country
+    tooltips and the legend in selection blue and the browser treats the gesture
+    as selecting text rather than as dragging. `preventDefault` there drops the
+    implicit focus, so focus is taken by hand; `dblclick` still fires, which is
+    what keeps double-click-to-reset working.
+  - **The focus ring is keyboard-only**, tracked with a flag set in
+    `pointerdown`. `:focus-visible` does not work here: a `focus()` call made
+    from a pointer handler still matches it, so the ring appeared around the
+    frame on every click — which reads as the map being selected, i.e. the exact
+    thing the two rules above exist to prevent.
+  - **The pan is clamped** (`clampBox`) so the view's centre stays on the
+    planet, and a click under `DRAG_SLOP` never commits a view — otherwise a
+    one-pixel click dimmed both preset buttons and raised a "reset view" chip
+    for a gesture that moved nothing.
   `MIN_SPAN`/`MAX_SPAN` and the fit padding are derived from the projected world
   (`kmSpan`), never written as raw units — moving off the hand-rolled projection
   changed the coordinate scale and silently invalidated the hardcoded ones.
@@ -595,6 +610,30 @@ docker compose -f docker-compose.local-db.yml up -d
   "0.59" is unreachable because "0." parses to 0 mid-word. An empty or
   out-of-range box stays what you typed, turns red, and blocks submit via
   `useNumberFieldValidity`.
+- **Anything drawn from "today" must be resolved after mount**
+  (`trip/DepartureField.tsx`). The departure picker's day strip, its presets and
+  its "in 3 days" all start from the current date, and a client component is
+  still rendered on the server first — with the server's clock and timezone. Any
+  of it computed during render hydrates onto a different fortnight for everyone
+  whose date is not UTC's, which around midnight is most of the world. `now` is
+  set in a `useEffect` and those parts render a placeholder until it lands.
+  Everything derived from the VALUE (`parseLocalIso`, `fmtDeparture`) is safe:
+  the string is naive local, so it reads the same on both sides.
+- **The planner form's helper text lives in the tips, not under the fields.**
+  `NumberField`'s `readout` renders at the top of its `InfoTip`, section hints
+  render as a tip on the heading, and the only grey line left on the form is
+  the departure readout — which sits on the DEPARTURE label's own row. Nine
+  live readouts plus four section hints plus a checkbox paragraph is a column
+  of grey prose the reader scrolls past to reach the fields, and it made a
+  seven-field form look like a tax return. Keep new copy in the tip; the
+  visible line is for the value, and red validation text is the exception.
+  The label went the same way: it is the box's own first line (`NumberField`,
+  `GeocodeInput`), which is a Material "filled" field with the label parked
+  permanently in its floated position. It is deliberately NOT a floating label
+  — the usability case against those is the animation and the empty field that
+  reads as pre-filled, and neither applies when every field ships with a value.
+  Keep it static, keep the real `<label for>`, and keep the input at 16px on a
+  phone or WebKit zooms the page on focus.
 - **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless

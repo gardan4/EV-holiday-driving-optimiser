@@ -11,6 +11,7 @@ import { describeTemp } from "@/lib/weather"
 import { freeflowFactorFor } from "@/lib/driving"
 import { describePayload } from "@/lib/payload"
 import { InfoTip, NumberField, useNumberFieldValidity } from "./fields"
+import DepartureField from "./DepartureField"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
 
@@ -130,22 +131,10 @@ export default function TripForm() {
       </div>
 
       <FieldGroup title="When you leave" hint="weather moves the best speed more than anything else here">
-        <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label
-            htmlFor="departure"
-            className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500"
-          >
-            Departure
-          </label>
-          <input
-            id="departure"
-            type="datetime-local"
-            value={departure}
-            onChange={(e) => setDeparture(e.target.value)}
-            className="w-full rounded-xl border border-ink-200 bg-white px-3 py-2.5 text-sm text-ink-900 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-200"
-          />
-        </div>
+        <div className="space-y-4">
+        <DepartureField value={departure} onChange={setDeparture} />
+        {/* Full width, not half: it is the only field in the row, and a box
+            ending at the middle of the card just leaves a hole beside it. */}
         <NumberField
           id="temp"
           onValidity={onValidity}
@@ -205,8 +194,8 @@ export default function TripForm() {
         />
         <SocSlider
           id="target-soc"
-          label="Battery on arrival (at least)"
-          explain="Leave enough to reach the chalet, the shops and a charger. Low means you arrive nearly empty, which is the fastest plan."
+          label="Battery on arrival"
+          explain="The least you want left when you get there. Leave enough to reach the chalet, the shops and a charger. Low means you arrive nearly empty, which is the fastest plan."
           value={targetSoc}
           min={5}
           max={80}
@@ -219,30 +208,31 @@ export default function TripForm() {
           legal, so the answer is built on them — and outside western
           Europe the default is a guess the reader has to correct. Behind a
           closed "fine-tune" panel, nobody corrected it. */}
+      {/* Carries the assumptions line that used to sit in grey under the whole
+          form. Every claim in it is a claim about these three fields, so it
+          belongs on them rather than floating beneath the card. */}
       <FieldGroup
         title="How you drive"
-        hint="the answer is built on these"
+        hint="The answer is built on these. The plan assumes motorway cruise at your chosen speed wherever that is legal — the real limits in AT/NL and the rest of western Europe, derestricted where the German autobahn allows — plus the real fast chargers along your route and your car's measured charging curve."
       >
         <div className="space-y-4">
         {/* The whole point of the tool is that fast driving isn't free, so
             the honest way to argue with a speed limit is to let people see
             what removing it actually buys — usually another charging stop. */}
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-ink-200 bg-white px-3 py-2.5">
+        <label className="flex cursor-pointer items-center gap-3 rounded-xl bg-ink-100 px-3.5 py-3 transition-colors hover:bg-ink-200">
           <input
             type="checkbox"
             checked={noLimits}
             onChange={(e) => setNoLimits(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 accent-brand-500"
+            className="h-5 w-5 shrink-0 accent-brand-500"
           />
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-ink-900">
-              Ignore speed limits entirely
-            </span>
-            <span className="block text-xs leading-relaxed text-ink-500">
-              Every motorway treated as derestricted, so your cruise speed is the
-              only limit, so what the drive would look like if the law weren&apos;t
-              there. Ordinary roads still go at their own pace.
-            </span>
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink-900">
+            Ignore speed limits entirely
+            <InfoTip>
+              Every motorway treated as derestricted, so your cruise speed is the only
+              limit, so what the drive would look like if the law weren&apos;t there.
+              Ordinary roads still go at their own pace.
+            </InfoTip>
           </span>
         </label>
 
@@ -312,22 +302,25 @@ export default function TripForm() {
             step={5}
             value={autobahnShare}
             onChange={(e) => setAutobahnShare(Number(e.target.value))}
-            className="w-full accent-brand-500"
+            className="h-6 w-full accent-brand-500"
           />
         </div>
         </div>
       </FieldGroup>
 
       <details className="group mt-4 rounded-xl border border-ink-200 bg-white px-4 py-3">
-        <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
+        <summary className="flex cursor-pointer select-none items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink-500 marker:content-['']">
           Charging, breaks and the fine print
-          <span className="ml-2 font-normal normal-case tracking-normal text-ink-400">
-            sensible defaults, open it if yours differ
-          </span>
+          <InfoTip>
+            Sensible defaults for a European fast-charging network — open it if yours
+            differ. What you pay per kWh, how long each stop really costs you around
+            the charging itself, how much of a charger&apos;s rating reaches your car,
+            and when you stop to rest.
+          </InfoTip>
         </summary>
 
         <div className="mt-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <NumberField
               id="stop-overhead"
               onValidity={onValidity}
@@ -342,7 +335,7 @@ export default function TripForm() {
             <NumberField
               id="site-power"
               onValidity={onValidity}
-              label="Charger power you get"
+              label="Charger power"
               unit="%"
               value={sitePower}
               min={30}
@@ -359,7 +352,7 @@ export default function TripForm() {
             <NumberField
               id="queue"
               onValidity={onValidity}
-              label="Queue for a charger"
+              label="Queue"
               unit="min"
               value={queue}
               min={0}
@@ -369,8 +362,8 @@ export default function TripForm() {
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-4 sm:col-span-2">
               <NumberField
                 id="rest-every"
                 onValidity={onValidity}
@@ -440,7 +433,11 @@ export default function TripForm() {
 
 /** A titled group of fields. The form was a flat run of nine uppercase labels
  *  with no hierarchy, which is what pushed everything interesting into an
- *  accordion in the first place — headings buy back the room to leave it out. */
+ *  accordion in the first place — headings buy back the room to leave it out.
+ *
+ *  The hint is carried by the heading's tip rather than printed beside it: four
+ *  of them, one per section, is four grey sentences the reader scrolls past on
+ *  the way to the fields. */
 function FieldGroup({
   title,
   hint,
@@ -452,9 +449,9 @@ function FieldGroup({
 }) {
   return (
     <section className="mt-5 border-t border-ink-100 pt-4">
-      <h3 className="mb-2.5 flex flex-wrap items-baseline gap-x-2 font-display text-sm font-semibold text-ink-900">
+      <h3 className="mb-2.5 flex items-center gap-1.5 font-display text-sm font-semibold text-ink-900">
         {title}
-        {hint && <span className="text-xs font-normal text-ink-400">{hint}</span>}
+        {hint && <InfoTip>{hint}</InfoTip>}
       </h3>
       {children}
     </section>
@@ -500,7 +497,7 @@ function SocSlider({
         step={5}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-brand-500"
+        className="h-6 w-full accent-brand-500"
       />
     </div>
   )

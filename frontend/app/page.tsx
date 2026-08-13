@@ -49,11 +49,6 @@ export default function Home() {
           <TripForm />
         </div>
 
-        <p className="mx-auto mt-8 max-w-xl text-center text-xs leading-relaxed text-ink-400">
-          Assumes motorway cruise at your chosen speed where legally possible (130 in
-          AT/NL, derestricted where German autobahn allows), real fast-chargers along
-          the route, and your car&apos;s measured charging curve. Night-owl approved.
-        </p>
       </section>
 
       {/* Opaque, not the `bg-white/70 backdrop-blur` the hero cards use. Frosted

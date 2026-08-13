@@ -28,13 +28,36 @@ export function clockAt(departureIso: string, minutes: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+export const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+export const MONTHS_SHORT = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
 
 /** "Fri 14 Aug, 22:00" — hand-formatted for SSR/client consistency. */
 export function fmtDeparture(departureIso: string): string {
   const d = new Date(departureIso)
-  return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+  return `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}, ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/**
+ * "2026-08-14T22:00" → a local Date.
+ *
+ * Split by hand rather than handed to `new Date(s)`: a value that has lost its
+ * time part ("2026-08-14") is read as UTC by the parser, which west of
+ * Greenwich lands on the previous evening — so the day you picked and the day
+ * you get differ by one for half the planet.
+ */
+export function parseLocalIso(iso: string): Date {
+  const [date, time = "00:00"] = iso.split("T")
+  const [y, mo, d] = date.split("-").map(Number)
+  const [h, mi] = time.split(":").map(Number)
+  return new Date(y, (mo || 1) - 1, d || 1, h || 0, mi || 0, 0, 0)
+}
+
+/** A local Date → "2026-08-14T22:00", the naive local string the API stores. */
+export function toLocalIso(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
 export function fmtKm(meters: number): string {
@@ -53,6 +76,5 @@ export function defaultDepartureIso(): string {
   const daysUntilFriday = (5 - day + 7) % 7 || 7
   d.setDate(d.getDate() + daysUntilFriday)
   d.setHours(22, 0, 0, 0)
-  const pad = (n: number) => String(n).padStart(2, "0")
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return toLocalIso(d)
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { MapPin } from "lucide-react"
 import { geocode, GeocodeHit, PlacePoint } from "@/lib/client"
 
@@ -21,6 +21,8 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
   const [error, setError] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const id = useId()
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -94,28 +96,46 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
 
   return (
     <div ref={rootRef} className="relative">
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
-        {label}
-      </label>
-      <div className="relative">
-        <MapPin
-          className={`pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${
-            value ? "text-brand-500" : "text-ink-300"
-          }`}
-        />
-        <input
-          value={text}
-          onChange={(e) => handleInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          onFocus={() => hits.length > 0 && setOpen(true)}
-          placeholder={placeholder}
-          role="combobox"
-          aria-expanded={open}
-          aria-label={label}
-          className={`w-full rounded-xl border bg-white py-2.5 pl-9 pr-3 text-base text-ink-900 outline-none transition-colors placeholder:text-ink-300 focus:border-brand-400 focus:ring-2 focus:ring-brand-200 sm:text-sm ${
-            value ? "border-brand-300" : "border-ink-200"
-          } ${loading ? "animate-pulse-soft" : ""}`}
-        />
+      {/* Label inside the box, same as the number fields — see the note in
+          fields.tsx. Unlike those this one CAN be empty, so it keeps a
+          placeholder underneath the label rather than relying on it. */}
+      <div
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("button")) return
+          inputRef.current?.focus()
+        }}
+        className={`cursor-text rounded-xl border bg-white px-3.5 pb-2.5 pt-2 transition-colors focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200 ${
+          value ? "border-brand-300" : "border-ink-200"
+        } ${loading ? "animate-pulse-soft" : ""}`}
+      >
+        <label
+          htmlFor={id}
+          className="cursor-text text-[10px] font-semibold uppercase tracking-wider text-ink-400"
+        >
+          {label}
+        </label>
+        <div className="flex items-center gap-2">
+          <MapPin
+            className={`h-4 w-4 shrink-0 ${value ? "text-brand-500" : "text-ink-300"}`}
+          />
+          <input
+            id={id}
+            ref={inputRef}
+            value={text}
+            onChange={(e) => handleInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            onFocus={() => hits.length > 0 && setOpen(true)}
+            placeholder={placeholder}
+            role="combobox"
+            aria-expanded={open}
+            // Belt and braces. The <label for> above is correctly associated
+            // (input.labels is 1), but an explicit role="combobox" moves this
+            // off the plain-textbox naming path, and at least one a11y tree
+            // reads the placeholder instead. Same string, so nothing conflicts.
+            aria-label={label}
+            className="min-w-0 flex-1 bg-transparent text-base text-ink-900 outline-none placeholder:text-ink-300 sm:text-sm"
+          />
+        </div>
       </div>
       {open && hits.length === 0 && error && (
         <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900 shadow-lg shadow-ink-900/5">
