@@ -317,7 +317,12 @@ function ClaimForm({ onClaimed }: { onClaimed: (name: string) => void }) {
         id="evtrip-username"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="marc"
+        // "e.g." on purpose. A bare name in an empty box reads as a value that
+        // is already filled in rather than a hint, and this is the one field
+        // where mistaking the two means claiming a public handle you did not
+        // choose. The example doubles as the character set: lowercase and
+        // dashes.
+        placeholder="e.g. alpine-driver"
         autoComplete="off"
         spellCheck={false}
         aria-invalid={showInvalid}
