@@ -1,4 +1,9 @@
 {
+  // Ordered by how often you actually reach for them. Two prefixes only:
+  // "Mission control" for the dashboard, "Usage" for the production numbers
+  // you cannot get locally.
+  //
+  // ⇧⌘B → Run app.  ⇧⌘P → "Tasks: Run Task" → everything else.
   "version": "2.0.0",
   "tasks": [
     {
@@ -26,20 +31,43 @@
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
-      "label": "Free dev ports",
-      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100 (leaves Docker alone).",
+      "label": "Mission control",
+      "detail": "The live dashboard on :8101 — builds the UI if needed, waits for the DB, opens the browser. Reads your LOCAL database. Sign in with STATS_TOKEN from .env. Ctrl-C stops it.",
       "type": "shell",
-      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-ser\") {print $2}' | sort -u | xargs -r kill 2>/dev/null; echo 'Ports freed.'",
+      "command": "./scripts/dashboard.sh",
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
-      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "focus": true
+      }
     },
     {
-      "label": "Stop database",
-      "detail": "Stop the local SQL Server container (data is kept in its volume).",
+      "label": "Mission control: rebuild the UI",
+      "detail": "After editing dashboard/. Recompiles into src/dashboard_static without starting the server. (For hot reload instead: npm --prefix dashboard run dev.)",
       "type": "shell",
-      "command": "docker compose -f docker-compose.local-db.yml down",
+      "command": "./scripts/dashboard.sh --build-only",
       "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc"],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Usage: production numbers",
+      "detail": "The live site's numbers as a terminal table. Mission control reads your local DB, so this is how you see production. Needs STATS_TOKEN in .env.",
+      "type": "shell",
+      "command": "uv run python -m scripts.usage_report --remote --days 7",
+      "options": { "cwd": "${workspaceFolder}/src" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Usage: production snapshot",
+      "detail": "Same production numbers as a single self-contained HTML file, opened in your browser — no server, mailable, keeps working offline.",
+      "type": "shell",
+      "command": "uv run python -m scripts.usage_dashboard --remote --days 30",
+      "options": { "cwd": "${workspaceFolder}/src" },
       "problemMatcher": [],
       "presentation": { "reveal": "silent", "panel": "shared", "close": true }
     },
@@ -63,49 +91,22 @@
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
-      "label": "Usage: dashboard",
-      "detail": "Last 30 days from the deployed API, as a page in your browser. Needs STATS_TOKEN in src/.env.",
+      "label": "Free dev ports",
+      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100, 8101 (leaves Docker alone).",
       "type": "shell",
-      "command": "uv run python -m scripts.usage_dashboard --remote --days 30",
-      "options": { "cwd": "${workspaceFolder}/src" },
+      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -iTCP:8101 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-ser\") {print $2}' | sort -u | xargs -r kill 2>/dev/null; echo 'Ports freed.'",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "presentation": { "reveal": "silent", "panel": "shared", "close": true }
     },
     {
-      "label": "Usage: dashboard, choose a window",
-      "detail": "Same page, over however many days you ask for (1–90).",
+      "label": "Stop database",
+      "detail": "Stop the local SQL Server container (data is kept in its volume).",
       "type": "shell",
-      "command": "uv run python -m scripts.usage_dashboard --remote --days ${input:usageDays}",
-      "options": { "cwd": "${workspaceFolder}/src" },
+      "command": "docker compose -f docker-compose.local-db.yml down",
+      "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "presentation": { "reveal": "silent", "panel": "shared", "close": true }
-    },
-    {
-      "label": "Usage: dashboard, keep it refreshing",
-      "detail": "Opens the page and re-renders it every 60s. Ctrl-C in the terminal stops it.",
-      "type": "shell",
-      "command": "uv run python -m scripts.usage_dashboard --remote --days 30 --watch",
-      "options": { "cwd": "${workspaceFolder}/src" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
-    },
-    {
-      "label": "Usage: terminal table (live)",
-      "detail": "The same numbers as text, for when a browser is overkill.",
-      "type": "shell",
-      "command": "uv run python -m scripts.usage_report --remote --days 7",
-      "options": { "cwd": "${workspaceFolder}/src" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
-    },
-    {
-      "label": "Usage: local database",
-      "detail": "Reads DATABASE_URL directly — your dev data, not the live site.",
-      "type": "shell",
-      "command": "uv run python -m scripts.usage_report --days 7",
-      "options": { "cwd": "${workspaceFolder}/src" },
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
       "label": "Demo: print the Born answer table",
@@ -115,14 +116,6 @@
       "options": { "cwd": "${workspaceFolder}/src" },
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
-    }
-  ],
-  "inputs": [
-    {
-      "id": "usageDays",
-      "type": "promptString",
-      "description": "How many days back? (1–90)",
-      "default": "30"
     }
   ]
 }

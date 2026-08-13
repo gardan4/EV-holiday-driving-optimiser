@@ -233,7 +233,9 @@ async def record_event(
 
 
 @router.get("/stats", response_model=UsageStats)
+@limiter.limit(settings.RATE_LIMIT_DEFAULT)
 async def read_stats(
+    request: Request,
     days: int = 7,
     x_stats_token: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),

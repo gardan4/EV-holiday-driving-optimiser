@@ -22,12 +22,18 @@ class Settings(BaseSettings):
     EXPOSE_DOCS: bool = False
 
     # Process role — which half of the app this process runs (web/worker split).
-    #   "web"    → serve the API; start NO background loops
-    #   "worker" → run background loops; serve only /health (no API routers)
-    #   "all"    → one process does both (local-dev default)
-    # The skeleton ships no background loops, so "web" and "all" behave the same
-    # today. The seam is kept (see main.py `_start_background_loops`) so adding
-    # async workers later is a copy-paste. Set "worker" on a dedicated worker app.
+    #   "web"       → serve the API; start NO background loops
+    #   "worker"    → run background loops; serve only /health (no API routers)
+    #   "dashboard" → serve ONLY the admin dashboard (its own app service, own
+    #                 auth, own origin); mounts none of the public API routers
+    #   "all"       → one process does both web and worker (local-dev default)
+    #
+    # "dashboard" is how the admin console is a separate served app without
+    # being a separate image: same container, second App Service, this one
+    # setting different. It reads the database directly through
+    # `app.services.*`, so analytics queries never land on the public API tier
+    # and cannot eat its rate limit. Note "all" does NOT include it — the
+    # dashboard is opt-in, so a misconfigured public instance cannot serve it.
     PROCESS_ROLE: str = "all"
 
     # Database — Azure SQL (MSSQL) for both local dev and production.
@@ -81,7 +87,7 @@ class Settings(BaseSettings):
         # Fall back to "all" on anything unexpected so a typo in an App Setting
         # can't start a process that neither serves the API nor runs the loops.
         role = (v or "").strip().lower()
-        if role not in {"web", "worker", "all"}:
+        if role not in {"web", "worker", "dashboard", "all"}:
             import logging
 
             logging.getLogger(__name__).warning(
@@ -174,6 +180,24 @@ class Settings(BaseSettings):
     # they are two different capabilities, and sharing one secret means you
     # cannot hand out or rotate either without the other.
     STATS_TOKEN: str = ""
+
+    # ----- Admin dashboard (PROCESS_ROLE=dashboard) -----
+    # The dashboard signs you in with STATS_TOKEN as the password and keeps the
+    # session in a Fernet-encrypted httpOnly cookie, so the token itself never
+    # reaches client JavaScript. There is no second secret to provision: an
+    # empty STATS_TOKEN already means "the usage numbers are not readable", and
+    # the dashboard is the same capability with a nicer front end.
+    DASHBOARD_SESSION_HOURS: int = 12
+    # Per IP. A password box on the public internet is exactly the thing worth
+    # limiting, and there is only ever one person signing in here — so this can
+    # be tight enough to make guessing pointless without ever inconveniencing
+    # the only legitimate user.
+    RATE_LIMIT_DASHBOARD_LOGIN: str = "10/hour"
+    # How often the SSE stream looks for new rows. A poll rather than an
+    # in-process bus on purpose: it touches neither the hot write path in
+    # POST /api/events nor the multi-instance fan-out problem, and it works no
+    # matter which process wrote the row.
+    DASHBOARD_STREAM_POLL_SECONDS: float = 2.0
 
     # ----- CORS / URLs -----
     # Comma-separated allowed origins (e.g. "https://evtrip.app,https://www.evtrip.app").

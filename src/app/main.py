@@ -49,7 +49,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # strict policy to that rather than to ENV: the public deployment runs
         # with ENV=development, so keying on it skipped this everywhere it
         # actually mattered.
-        if not settings.EXPOSE_DOCS:
+        #
+        # The dashboard role is the one exception: it serves an HTML page, and
+        # `default-src 'none'` would block its own stylesheet and bundle. It
+        # gets a policy that is still fully self-hosted — no CDN, no external
+        # font, and `connect-src 'self'` because the SPA only ever talks back
+        # to the origin that served it.
+        if _serves_dashboard():
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; base-uri 'self'; object-src 'none'; "
+                "script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; font-src 'self' data:; "
+                "connect-src 'self'; frame-ancestors 'none'; form-action 'self'"
+            )
+            # Nothing here should ever be indexed, and unlike the Next app
+            # there is no middleware in front to say so.
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+        elif not settings.EXPOSE_DOCS:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
             )
@@ -67,6 +83,17 @@ def _runs_loops() -> bool:
 
 def _serves_api() -> bool:
     return settings.PROCESS_ROLE in ("web", "all")
+
+
+def _serves_dashboard() -> bool:
+    """The admin console — its own App Service, same image.
+
+    Deliberately NOT part of "all": the dashboard is opt-in, so a public
+    instance that was started with a default config cannot end up serving an
+    admin surface. It also mounts none of the public API routers, which means
+    the two never share a rate-limit bucket or a connection pool.
+    """
+    return settings.PROCESS_ROLE == "dashboard"
 
 
 async def _run_common_startup():
@@ -190,83 +217,143 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down instance", extra={"instance_id": INSTANCE_ID})
 
 
-# Hide Swagger UI + OpenAPI schema in production — the schema is a full map of
-# every route. `EXPOSE_DOCS` overrides, because the publicly-reachable
-# deployment is the one named "dev" and was therefore serving them.
-_expose_docs = settings.EXPOSE_DOCS
+def create_app() -> FastAPI:
+    """Build a fully configured app for the CURRENT `PROCESS_ROLE`.
 
-app = FastAPI(
-    title="EV Trip Optimizer API",
-    description="EV Trip Optimizer backend — see docs/ARCHITECTURE.md",
-    version="0.1.0",
-    lifespan=lifespan,
-    docs_url="/docs" if _expose_docs else None,
-    redoc_url="/redoc" if _expose_docs else None,
-    openapi_url="/openapi.json" if _expose_docs else None,
-)
+    A factory rather than a module-level sequence because the role decides
+    which routers exist, and a module-level `if` bakes that in at import — so
+    the role gating (the thing keeping the admin console off the public API
+    tier) could not be exercised by a test in the same process. Reading the
+    role here instead means a test can set it and build an app.
 
-# Rate limiting
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    `app = create_app()` below keeps `from app.main import app` working for
+    uvicorn and for every existing caller.
+    """
+    # Hide Swagger UI + OpenAPI schema in production — the schema is a full map
+    # of every route. `EXPOSE_DOCS` overrides, because the publicly-reachable
+    # deployment is the one named "dev" and was therefore serving them.
+    expose_docs = settings.EXPOSE_DOCS
 
-# Security headers, then request-id (must be added before CORS).
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestIdMiddleware)
+    app = FastAPI(
+        title="EV Trip Optimizer API",
+        description="EV Trip Optimizer backend — see docs/ARCHITECTURE.md",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if expose_docs else None,
+        redoc_url="/redoc" if expose_docs else None,
+        openapi_url="/openapi.json" if expose_docs else None,
+    )
 
-# CORS
-cors_origins = settings.get_cors_origins()
-wildcard_cors = cors_origins == ["*"]
-# Never combine credentialed CORS with a wildcard origin. Auth is via bearer
-# tokens (not cookies), so allow_credentials can safely be False under wildcard.
-allow_credentials = not wildcard_cors
-if wildcard_cors:
-    _log = logger.error if settings.ENV == "production" else logger.warning
-    _log("CORS_ORIGINS is '*' — set an explicit allowlist for production. Credentialed CORS is disabled while wildcard is in effect.")
-else:
-    logger.info("CORS configured", extra={"origins": cors_origins})
+    # Rate limiting
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    # Security headers, then request-id (must be added before CORS).
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestIdMiddleware)
 
-# API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only / and
-# /health below, so health probes pass without exposing the API surface.
-if _serves_api():
-    from app.api import events, feedback, geocode, runs, trips, vehicles
+    # CORS
+    cors_origins = settings.get_cors_origins()
+    wildcard_cors = cors_origins == ["*"]
+    # Never combine credentialed CORS with a wildcard origin. The public API
+    # authenticates with header tokens (not cookies), so allow_credentials can
+    # safely be False under wildcard. The dashboard's session cookie is
+    # unaffected either way — it is same-origin, so CORS never enters into it.
+    allow_credentials = not wildcard_cors
+    if wildcard_cors:
+        _log = logger.error if settings.ENV == "production" else logger.warning
+        _log("CORS_ORIGINS is '*' — set an explicit allowlist for production. Credentialed CORS is disabled while wildcard is in effect.")
+    else:
+        logger.info("CORS configured", extra={"origins": cors_origins})
 
-    app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
-    app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
-    app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
-    app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
-    app.include_router(events.router, prefix="/api/events", tags=["events"])
-    # Live runs own routes under both /api/trips/{id}/… and /api/runs/{id}/…,
-    # so they mount at /api rather than under either one.
-    app.include_router(runs.router, prefix="/api", tags=["live"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only /
+    # and /health below, so health probes pass without exposing the API surface.
+    if _serves_api():
+        from app.api import events, feedback, geocode, runs, trips, vehicles
+
+        app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
+        app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
+        app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
+        app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+        app.include_router(events.router, prefix="/api/events", tags=["events"])
+        # Live runs own routes under both /api/trips/{id}/… and /api/runs/{id}/…,
+        # so they mount at /api rather than under either one.
+        app.include_router(runs.router, prefix="/api", tags=["live"])
+
+    # The admin dashboard: its own role, its own origin, its own auth. Mounted
+    # instead of the API routers above, never alongside them.
+    if _serves_dashboard():
+        from app.api import admin
+
+        app.include_router(admin.router, tags=["dashboard"])
+
+    # Not registered under the dashboard role: "/" there is the SPA's
+    # index.html, served by the StaticFiles mount below. A route declared here
+    # would win over the mount (Starlette matches in registration order) and
+    # the dashboard would answer its own front door with API JSON.
+    if not _serves_dashboard():
+
+        @app.get("/")
+        async def root():
+            return {"message": "EV Trip Optimizer API is running"}
+
+    @app.get("/health")
+    async def health_check():
+        return {"status": "healthy"}
+
+    @app.get("/health/detailed")
+    async def detailed_health_check():
+        """Detailed health check that verifies dependencies (DB reachability)."""
+        health: dict = {"status": "healthy", "checks": {}}
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            health["checks"]["database"] = {"status": "ok"}
+        except Exception:
+            health["checks"]["database"] = {"status": "error", "message": "connection_failed"}
+            health["status"] = "degraded"
+        return health
+
+    # The dashboard SPA, mounted LAST and deliberately so. Starlette matches
+    # routes in registration order and a mount at "/" matches every path
+    # beneath it — put this any earlier and it swallows /health, which is what
+    # Azure's probe hits, so the App Service would report itself unhealthy and
+    # cycle forever.
+    if _serves_dashboard():
+        from pathlib import Path
+
+        # Guarded rather than assumed, so the role can be run straight from a
+        # source checkout for backend work: the API answers, the page 404s, and
+        # nothing has to be built first.
+        static = Path(__file__).resolve().parent.parent / "dashboard_static"
+        if static.is_dir():
+            from starlette.staticfiles import StaticFiles
+
+            # html=True makes "/" serve index.html. It does NOT rewrite
+            # arbitrary unknown paths to it — Starlette only does that for
+            # directories — which is fine here: the console keeps its whole
+            # state in the query string, so there are no path routes to lose on
+            # a refresh. Anything else under "/" 404s, including stray /api
+            # calls, which is the behaviour we want on this origin.
+            app.mount(
+                "/", StaticFiles(directory=str(static), html=True), name="dashboard"
+            )
+        else:
+            logger.warning(
+                "Dashboard role is running without a built UI at %s — API only. "
+                "Build it with `npm --prefix dashboard run build`.",
+                static,
+            )
+
+    return app
 
 
-@app.get("/")
-async def root():
-    return {"message": "EV Trip Optimizer API is running"}
-
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
-
-
-@app.get("/health/detailed")
-async def detailed_health_check():
-    """Detailed health check that verifies dependencies (DB reachability)."""
-    health: dict = {"status": "healthy", "checks": {}}
-    try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-        health["checks"]["database"] = {"status": "ok"}
-    except Exception:
-        health["checks"]["database"] = {"status": "error", "message": "connection_failed"}
-        health["status"] = "degraded"
-    return health
+app = create_app()

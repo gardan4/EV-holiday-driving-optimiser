@@ -1,0 +1,215 @@
+@import "tailwindcss";
+
+/* A flight deck, not a report.
+ *
+ * Dark-only on purpose: this is a room you sit in during a launch, not a
+ * document you read once. The public app is light and stays light — the shared
+ * thing between them is the palette, not the surface.
+ *
+ * The hexes are lifted from `scripts/usage_dashboard.py`'s dark block rather
+ * than re-picked, because that pair was already validated for colour-vision
+ * deficiency against this exact background (CVD ΔE 23.5, normal 24.4). An
+ * automatic flip of the light-mode values lands outside the dark lightness
+ * band, which is why there are two hand-stepped pairs in the first place.
+ */
+@theme {
+  --color-deck-bg: #0b1220;
+  --color-deck-panel: #141d2c;
+  --color-deck-raised: #1a2536;
+  --color-deck-line: #26344a;
+  --color-deck-line-soft: #1e2a3d;
+
+  --color-ink: #e8edf1;
+  --color-ink-soft: #aab6c5;
+  --color-ink-mute: #7d8ca0;
+
+  /* Series. `drive` and `charge` are the app's own chart pair, so a bar here
+   * means the same thing it means on a trip page. */
+  --color-s-drive: #5b8ad4;
+  --color-s-charge: #b8842a;
+  --color-s-mint: #43c389;
+  --color-s-violet: #9b7ec0;
+  --color-s-rose: #d9534f;
+
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+/* Bricolage Grotesque is the app's display face, but it is self-hosted by
+ * next/font at build time in `frontend/` and there is no woff2 in the repo to
+ * reuse. The dashboard's CSP is `font-src 'self' data:` with no external
+ * origin, so fetching it would simply be blocked. A tightly-tracked system
+ * stack is the honest substitute; swap it here if the file ever lands in the
+ * repo. */
+:root {
+  color-scheme: dark;
+  --display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-deck-bg);
+  color: var(--color-ink);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A very faint vertical wash so the page has a horizon rather than being a
+ * flat slab. Fixed, so it does not travel with the scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 520px at 18% -12%, rgba(67, 195, 137, 0.07), transparent 65%),
+    radial-gradient(900px 460px at 88% 4%, rgba(91, 138, 212, 0.06), transparent 60%);
+  z-index: 0;
+}
+
+@layer components {
+  /* Panels are glass: one hairline, one highlight along the top edge, no drop
+   * shadow. Density comes from typography, not from boxes inside boxes. */
+  .panel {
+    position: relative;
+    border: 1px solid var(--color-deck-line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0) 42%),
+      var(--color-deck-panel);
+    padding: 18px 20px 20px;
+  }
+  .panel::after {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto;
+    height: 1px;
+    border-radius: 14px 14px 0 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.09), transparent);
+  }
+
+  .panel-title {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--color-ink-mute);
+  }
+
+  /* Every figure is tabular so a ticking number cannot shove its neighbours. */
+  .figure {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--color-deck-line);
+    background: var(--color-deck-raised);
+    color: var(--color-ink-soft);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .chip:hover {
+    border-color: color-mix(in oklab, var(--color-s-mint) 45%, var(--color-deck-line));
+    color: var(--color-ink);
+  }
+  .chip[data-on="true"] {
+    border-color: color-mix(in oklab, var(--color-s-mint) 60%, transparent);
+    background: color-mix(in oklab, var(--color-s-mint) 14%, var(--color-deck-raised));
+    color: var(--color-ink);
+  }
+}
+
+@layer utilities {
+  .display {
+    font-family: var(--display);
+    letter-spacing: -0.02em;
+  }
+}
+
+/* Motion is a signal, never decoration — so all of it is one-shot and tied to
+ * something arriving, and all of it is off when the reader has asked for that. */
+@keyframes deck-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-s-mint) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+@keyframes deck-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes deck-dash {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes deck-travel {
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+.pulse-once {
+  animation: deck-pulse 900ms ease-out 1;
+}
+.rise {
+  animation: deck-rise 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #26344a;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33456180;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

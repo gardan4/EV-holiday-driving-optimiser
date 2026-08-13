@@ -1,9 +1,16 @@
 """Reading the usage numbers back out.
 
-Lives here rather than in the route because two callers need it: the token-gated
-`GET /api/events/stats` and `scripts.usage_report`, which prints the same
-summary from a terminal against `DATABASE_URL`. One implementation means the
-number on the dashboard and the number in the terminal cannot disagree.
+Lives here rather than in the route because three callers need it: the
+token-gated `GET /api/events/stats`, `scripts.usage_report` (which prints the
+same summary from a terminal against `DATABASE_URL`), and the admin dashboard's
+overview. One implementation means the number on the dashboard and the number
+in the terminal cannot disagree.
+
+This is now a **composition over `services.analytics`** rather than fifteen
+bespoke queries. The dashboard asks arbitrary filtered questions through those
+primitives; this asks the fixed unfiltered ones. Both going through the same
+code is what stops "page views" quietly meaning two different things in two
+places — the rule `services/corridors.py` already lives by.
 
 Every query is bounded by a window and, for the top-N lists, a limit — this runs
 against the live Azure SQL instance, and an unbounded scan of the busiest table
@@ -12,7 +19,7 @@ in the app is not something an admin endpoint should be able to trigger.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlalchemy import case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +34,7 @@ from app.api.schemas import (
 )
 from app.models import AppEvent, Trip, TripRun
 from app.services import corridors, quota
+from app.services.analytics import Filters, breakdown, retention, timeseries
 
 
 def _corridor_out(c: corridors.Corridor) -> CorridorOut:
@@ -55,35 +63,26 @@ MAX_DAYS = 90
 
 async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     days = max(1, min(days, MAX_DAYS))
-    now = datetime.utcnow()
-    cutoff = now - timedelta(days=days)
+    f = Filters.window(days)
+    now = f.until
+    cutoff = f.since
 
-    # One aggregate per day rather than a GROUP BY on a truncated date: MSSQL
-    # and SQLite share no date-truncation function, and CAST(x AS DATE) means
-    # different things on each. `days` is capped, and the (at, name) index makes
-    # each of these a range scan.
-    daily: list[DayCount] = []
-    for i in range(days - 1, -1, -1):
-        day_start = (now - timedelta(days=i)).replace(
-            hour=0, minute=0, second=0, microsecond=0
+    # Two grouped queries rather than one per day. This used to be a loop of
+    # `days` separate SELECTs because MSSQL and SQLite share no date-truncation
+    # function — `analytics.filters.day_bucket` is where that branch now lives,
+    # written once, so the dashboard can redraw a 90-day chart on every filter
+    # change without firing 90 round trips per panel.
+    per_day_visitors = await timeseries(db, f, m="visitors", granularity="day")
+    per_day_views = await timeseries(db, f, m="events", granularity="day")
+    views_by_day = {p.bucket: p.value for p in per_day_views}
+    daily: list[DayCount] = [
+        DayCount(
+            day=p.bucket,
+            visitors=p.value,
+            page_views=views_by_day.get(p.bucket, 0),
         )
-        day_end = day_start + timedelta(days=1)
-        row = (
-            await db.execute(
-                select(func.count(distinct(AppEvent.visitor)), func.count()).where(
-                    AppEvent.at >= day_start,
-                    AppEvent.at < day_end,
-                    AppEvent.name == "page_view",
-                )
-            )
-        ).one()
-        daily.append(
-            DayCount(
-                day=day_start.date().isoformat(),
-                visitors=int(row[0]),
-                page_views=int(row[1]),
-            )
-        )
+        for p in per_day_visitors
+    ]
 
     # Window totals. `visitors` is NOT the sum of the daily column, and it is
     # also not "people": the salt rotates at midnight, so somebody who visits on
@@ -109,79 +108,38 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     counts = {name: int(n) for name, n in by_name}
     funnel = [LabelCount(label=n, count=counts.get(n, 0)) for n in sorted(ALLOWED_EVENTS)]
 
-    top_paths = [
-        LabelCount(label=p or "unknown", count=int(n))
-        for p, n in (
-            await db.execute(
-                select(AppEvent.path, func.count())
-                .where(AppEvent.at >= cutoff, AppEvent.name == "page_view")
-                .group_by(AppEvent.path)
-                .order_by(func.count().desc())
-                .limit(10)
-            )
-        ).all()
-    ]
+    async def _counts(dim: str, **kw) -> list[LabelCount]:
+        """`analytics.breakdown` in the shape the schema wants.
 
-    top_referrers = [
-        LabelCount(label=r, count=int(n))
-        for r, n in (
-            await db.execute(
-                select(AppEvent.referrer, func.count())
-                .where(AppEvent.at >= cutoff, AppEvent.referrer.isnot(None))
-                .group_by(AppEvent.referrer)
-                .order_by(func.count().desc())
-                .limit(10)
-            )
-        ).all()
-        if r
-    ]
-
-    async def _breakdown(column, limit: int = 10) -> list[LabelCount]:
-        """Count one coarse column over the window, commonest first.
-
-        Every column this is used on is low-cardinality by construction (see
+        Every dimension this is used on is low-cardinality by construction (see
         `core.client_context`), so the GROUP BY is over a handful of values and
         the limit is a backstop rather than a real truncation.
         """
-        rows = (
-            await db.execute(
-                select(column, func.count())
-                .where(AppEvent.at >= cutoff, column.isnot(None))
-                .group_by(column)
-                .order_by(func.count().desc())
-                .limit(limit)
-            )
-        ).all()
-        return [LabelCount(label=v, count=int(n)) for v, n in rows if v]
+        return [
+            LabelCount(label=s.label, count=s.value)
+            for s in await breakdown(db, f, dim, **kw)
+        ]
+
+    # NULL paths are kept and named rather than dropped: this list sits next to
+    # the page-view headline, and silently omitting rows would make the column
+    # add up to less than the number above it.
+    top_paths = await _counts("path", event="page_view", null_label="unknown")
+    top_referrers = await _counts("referrer")
 
     # Why planning broke, when it broke. The most valuable list on launch day:
     # everything in the "world" group is demand we could not serve, which is a
-    # roadmap rather than a bug list.
-    failure_reasons = [
-        LabelCount(label=r, count=int(n))
-        for r, n in (
-            await db.execute(
-                select(AppEvent.reason, func.count())
-                .where(
-                    AppEvent.at >= cutoff,
-                    AppEvent.name == "plan_failed",
-                    AppEvent.reason.isnot(None),
-                )
-                .group_by(AppEvent.reason)
-                .order_by(func.count().desc())
-            )
-        ).all()
-        if r
-    ]
+    # roadmap rather than a bug list. `PLAN_FAILURE_REASONS` has thirteen
+    # members, so the limit here is a backstop and never truncates.
+    failure_reasons = await _counts("reason", event="plan_failed", limit=50)
 
-    countries = await _breakdown(AppEvent.country)
-    devices = await _breakdown(AppEvent.device)
-    browsers = await _breakdown(AppEvent.browser)
-    operating_systems = await _breakdown(AppEvent.os)
-    viewports = await _breakdown(AppEvent.viewport)
+    countries = await _counts("country")
+    devices = await _counts("device")
+    browsers = await _counts("browser")
+    operating_systems = await _counts("os")
+    viewports = await _counts("viewport")
     # More of these than of anything else above — one row per thread rather
     # than per site — so it gets a bigger limit.
-    referrer_paths = await _breakdown(AppEvent.referrer_path, limit=15)
+    referrer_paths = await _counts("referrer_path", limit=15)
 
     # These come from the domain tables, not from events — so they are accurate
     # for the whole window even before events existed, they reach back to the
@@ -249,41 +207,10 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     repeat = await corridors.repeat_planners(db, cutoff)
     cars = await corridors.by_vehicle(db, cutoff, limit=10)
 
-    # Retention: the question the daily pseudonym cannot answer.
-    #
-    # "Returning" means this browser was seen BEFORE the window opened, not
-    # merely twice inside it — someone who lands from a link and reads two
-    # pages is one visit, and counting them as retained would flatter every
-    # launch spike into looking like a product.
-    #
-    # The denominator is only browsers that sent an id, so it excludes anyone
-    # on Global Privacy Control, in a private window, or with storage cleared.
-    # That biases toward under-counting returns (a real returner who cleared
-    # storage reads as new), which is the right direction for a number whose
-    # whole job is to stop you believing your own launch.
-    # GROUP BY rather than DISTINCT so both sides are subqueries of the same
-    # shape and the join below is plain SQL on either engine.
-    def _ids(*where):
-        return (
-            select(AppEvent.client_id)
-            .where(AppEvent.client_id.isnot(None), *where)
-            .group_by(AppEvent.client_id)
-            .subquery()
-        )
-
-    in_window = _ids(AppEvent.at >= cutoff)
-    before_window = _ids(AppEvent.at < cutoff)
-
-    identified = (
-        await db.execute(select(func.count()).select_from(in_window))
-    ).scalar_one()
-    returning = (
-        await db.execute(
-            select(func.count())
-            .select_from(in_window)
-            .join(before_window, in_window.c.client_id == before_window.c.client_id)
-        )
-    ).scalar_one()
+    # Retention: the question the daily pseudonym cannot answer. The rule it
+    # encodes — "returning" means seen BEFORE the window opened, not twice
+    # inside it — now lives in `analytics.retention`, with the reasoning.
+    seen = await retention(db, f)
 
     return UsageStats(
         days=days,
@@ -297,8 +224,8 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
         trips_planned=int(trips_planned),
         drives_started=int(drives_started),
         trips_planned_since_launch=int(trips_all_time),
-        identified_visitors=int(identified),
-        returning_visitors=int(returning),
+        identified_visitors=seen.identified,
+        returning_visitors=seen.returning,
         countries=countries,
         devices=devices,
         browsers=browsers,

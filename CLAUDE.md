@@ -48,6 +48,19 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   `GET /api/events/stats` behind `X-Stats-Token` (default-deny) and
   `uv run python -m scripts.usage_report`. See the design decision below before
   touching any of it.
+- **Analytics query layer** `src/app/services/analytics/` — `Filters` (a window
+  plus allowlisted equality constraints) and five primitives: `timeseries`,
+  `breakdown`, `funnel`, `histogram`, `totals`/`compare`, plus `retention`.
+  `usage.usage_stats` is a composition over these, so the terminal report and
+  the dashboard cannot answer the same question differently.
+  `filters.day_bucket` holds the MSSQL/SQLite date-truncation split.
+- **The metrics nothing used to read** `services/drives.py` (TripRun/TripEvent:
+  completion, replans, real charge-stop durations, plan-vs-actual),
+  `services/trip_shape.py` (distance and charge-share distributions, departure
+  month, transit countries) and `services/upstream_health.py` (ORS/OCM as a
+  trend, with latency percentiles).
+- **The admin dashboard** `src/app/api/admin.py` + `dashboard/` — its own
+  process role, its own origin, its own auth. See the design decision below.
 - **Models** `src/app/models/__init__.py` — `Vehicle` (curated catalog with
   consumption/charge-curve JSON), `Charger`/`OcmTile`/`RouteCache` (caches),
   `Trip` (request+result JSON, id = share token), `TripRun`/`TripEvent` (live
@@ -96,10 +109,91 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
 - Design system: EV-mint brand ramp + navy ink in `app/globals.css`,
   Bricolage Grotesque display font, chart palette validated for CVD.
 
+### Dashboard (`dashboard/`) — Vite + React 19 + Tailwind 4 + Recharts
+
+The admin console — **local only**, run with `./scripts/dashboard.sh` (⇧⌘P →
+"Mission control"). Dark-only "flight deck", sharing the app's validated chart
+hexes but not its light surface. Vite builds into `src/dashboard_static/`
+(gitignored) so the `dashboard` process role can serve it with `StaticFiles`.
+Nothing builds it in CI, so a UI change that does not compile is only caught by
+running it — `npm --prefix dashboard run build` also runs `tsc --noEmit`.
+
+- `App.tsx` composes the panels; `lib/useFilters.ts` keeps the segment in the
+  **URL**, so a view is linkable and survives a refresh. Clicking any bar adds
+  a facet chip that narrows every panel at once — that is the whole drilldown
+  mechanic, so depth costs no extra UI.
+- `lib/useStream.ts` is the `EventSource` layer (capped ticker, rolling
+  counters, reconnect state). Panels refetch on a beat, throttled to 10s.
+- `components/WorldMap.tsx` — corridors as arcs over **the whole world**, drawn
+  with **`d3-geo`** (`geoNaturalEarth1` + `geoPath` + `geoInterpolate`).
+  Geometry is **Natural Earth, public domain**, simplified to ~0.18° and bundled
+  into `lib/world.ts` by `scripts/build_world_geometry.py` (generated; do not
+  hand-edit — regenerate). Bundled rather than fetched because the console's CSP
+  is `connect-src 'self'`: a tile server or a CDN GeoJSON would be blocked, and
+  allowing one would break the app's no-external-origins rule. So the "no
+  in-app map" decision survives — it was about the public planner and the CSP,
+  and both are respected.
+  **`d3-geo`, and specifically not Leaflet or MapLibre**: those want a tile
+  server, which the CSP forbids and self-hosting world tiles would mean shipping
+  gigabytes. `d3-geo` is ~30 kB, does no I/O, and is the only part of a map
+  stack this needs. It replaced a hand-rolled Robinson lookup table that was
+  wrong in a way only visible once data left one hemisphere — no antimeridian
+  handling, so a Tokyo → Los Angeles corridor was drawn the long way across
+  Europe and Africa (1440 units instead of 693), and its arcs were beziers in
+  projected space rather than great circles. `geoPath` clips to the sphere and
+  cuts at the antimeridian; `geoInterpolate` gives the true geodesic. Country
+  rings go through `geoPath` too, which is what stops Russia and Fiji smearing
+  across the frame.
+  **The world, not Europe, because the planner is worldwide.** The Europe-only
+  version silently dropped every corridor outside its frame — which on the real
+  dev database meant hiding live US, Japanese and Australian routes, including
+  a US corridor at 0.76 stops/100 km. Two causes, both fixed: the frame, and
+  `corridors.place()` emitting `?? 41.9,-87.6` when `geo.country_at` does not
+  recognise a point (it only knows coarse boxes for eight European countries),
+  which the old label parser rejected outright.
+  The map's other job is to make one design decision visible: **countries the
+  simulator has real motorway caps for are lit; everywhere else is hatched**,
+  and arcs with an unrecognised or unmodelled endpoint are dashed. "The planner
+  is worldwide, the speed caps are not" is otherwise only a sentence. The
+  modelled set comes from `/api/meta`, derived server-side from
+  `simulator._default_country_caps`, so it cannot drift from what the planner
+  actually models. Endpoints are the geohash-4 centres `corridors.place()`
+  emits, so nothing resolves finer than the table it draws.
+  The view **frames itself on the data** (presets: "fit to trips" / "whole
+  world"), because a permanently zoomed-out world map renders this app's actual
+  traffic as a smudge over the Low Countries. It is also **draggable**: pan,
+  wheel-zoom anchored on the cursor, double-click or "reset view" to go back,
+  and arrow keys / `+` / `-` / `0` when focused. Five things that took getting
+  right, all of them easy to reintroduce:
+  - The fitted box is grown to the frame's aspect ratio (`toAspect`), or
+    `preserveAspectRatio="meet"` letterboxes a tall box and shrinks everything.
+  - Stroke widths go through `px()`, which converts rendered pixels to
+    projection units against the **measured** frame width. Sizing them against
+    the world extent draws sub-pixel borders; using the `max-w` constant makes
+    the map drift away from the cursor on a narrow screen.
+  - The wheel listener is registered with `addEventListener(..., {passive:
+    false})`. React's `onWheel` is passive, so `preventDefault` there does
+    nothing and zooming scrolls the dashboard underneath at the same time.
+  - `touch-action: none` on the `svg`, or a touch drag scrolls the page and the
+    map only moves once the browser has decided the gesture was not a scroll.
+  - The manual view is **not** reset when data refreshes — the panels reload
+    every ten seconds while the stream is live, and yanking the map back to
+    centre mid-drag would break it exactly when it is most interesting.
+  `MIN_SPAN`/`MAX_SPAN` and the fit padding are derived from the projected world
+  (`kmSpan`), never written as raw units — moving off the hand-rolled projection
+  changed the coordinate scale and silently invalidated the hardcoded ones.
+  The floor is set by the data rather than by taste: outlines are simplified to
+  ~20 km and endpoints are geohash-4, so zooming past ~2 km/px only invents
+  precision.
+- The role sends its own CSP (`app/main.py`) — the API's `default-src 'none'`
+  would block the console's own bundle — plus `X-Robots-Tag: noindex`, since
+  unlike the Next app there is no middleware in front to say so.
+
 ### Infra (`infra/`) + CI (`.github/workflows/`)
 
 Bicep provisions an App Service Plan, api + web App Services (GHCR containers),
 Azure SQL, and Log Analytics; `orsApiKey`/`ocmApiKey` land as api app settings.
+The admin console is deliberately absent from all of this — it runs locally.
 **One environment (`dev`), one workflow** (`deploy.yml`, push to `main`) — this
 is a PoC. It runs `uv run pytest` + `tsc`/`next build`, then builds images; the
 GHCR push and Azure deploy steps are gated on `AZURE_CLIENT_ID` being set, so
@@ -276,6 +370,59 @@ the pipeline is green before infra exists. Infra deploy is manual
   A robots allow is necessary, not sufficient: Cloudflare's "block AI crawlers"
   rule would stop all of them before they reach the origin.
 
+- **The dashboard is LOCAL ONLY, and is a process role rather than an app.**
+  `PROCESS_ROLE=dashboard` (`./scripts/dashboard.sh`, or the "Mission control"
+  VS Code task) serves the console on :8101 against whatever `DATABASE_URL`
+  says — in practice the local database, since Azure SQL only admits the App
+  Service outbound IPs. **Production numbers therefore still come from
+  `usage_report --remote` / `usage_dashboard --remote`**, which read the
+  token-gated `GET /api/events/stats`. Closing that gap means either putting
+  the console on an App Service after all (see below) or adding your own IP to
+  `sqlAllowedIps` — a real firewall change, not a convenience.
+  Nothing about it is in `infra/` or `deploy.yml`: no App Service, no image
+  content, no CI step, and `src/dashboard_static/` is gitignored so the API
+  image never carries the bundle. **If that ever changes**, three things come
+  with it: the SPA has to be built into the image (its build context is
+  `./src`, and `dashboard/` sits outside it), the role must skip
+  `db_bootstrap` in the Dockerfile CMD (a read-only console has no business
+  migrating the schema it reads, and two apps running `alembic upgrade head`
+  per deploy is a race), and the App Service needs `STATS_TOKEN` set or every
+  route 404s.
+  The role mounts the admin router and the built SPA and **none** of the public
+  API routers, so an analytics query scanning 90 days of events cannot compete
+  with a trip plan for the API's pool. It is deliberately **not part of `all`**
+  (the local-dev default), so a misconfigured public instance cannot serve an
+  admin surface, and an unrecognised `PROCESS_ROLE` still falls back to `all`.
+  `app.main.create_app()` is a factory precisely so the role gating is testable
+  in-process.
+- **The dashboard's auth is a cookie, and its default-deny is `STATS_TOKEN`.**
+  The token is exchanged once at `POST /api/login` for a Fernet-encrypted
+  httpOnly cookie, so it never reaches client JavaScript — that is the whole
+  reason the console is its own served app rather than a route in the Next
+  frontend, where the token would have to be shipped to the browser or proxied
+  by a second server. Fernet already carries an authenticated timestamp, so
+  `decrypt(..., ttl=…)` is the entire expiry mechanism: no session table, no
+  migration, nothing to purge. An empty `STATS_TOKEN` 404s every route
+  including the login — same rule as `/api/events/stats`, and never keyed on
+  `ENV`.
+- **The live stream polls the database; it is not an in-process bus.**
+  `GET /api/stream` tails `app_events` on an `(at, id)` cursor. A pub/sub would
+  have to be published to from `POST /api/events` — the hot write path the
+  stream exists to watch — and would only ever see rows written by its own
+  process, so the moment the API tier has two instances the dashboard silently
+  misses half the traffic. Polling an indexed column is correct regardless of
+  topology. The frames carry only columns that already exist and **neither
+  pseudonym**, so a live feed cannot become a feed of people.
+- **Nothing on the dashboard collects anything.** Every route is a read over
+  tables that already exist, which is why `frontend/app/privacy/page.tsx` needed
+  no edit and there is no migration. Keep it that way: a new column for the
+  console is a change to the privacy page first.
+- **"Visitors" means browsers that viewed a page**, in `analytics.totals`, in
+  `usage_stats`, in the terminal report and on the tile — everywhere. Counting
+  every event's visitor instead is defensible in isolation and wrong here,
+  because it silently includes anything that reported a plan without a page
+  view and the two surfaces then print different numbers under the same word.
+  `tests/test_analytics.py::TestUsageStatsParity` pins them together.
 - **ORS free-flow under-caps fast roads**, so motorway-like segments
   (free-flow ≥ 105) use country legal caps instead; disclosed in the UI's
   assumptions accordion. The naive clamp survives behind
@@ -299,7 +446,21 @@ uv run python -m scripts.dev_seed_trip  # keyless demo trip for frontend dev
 uv run python -m scripts.backfill_trip_stats        # dry run; --apply to write
 uv run python -m scripts.corridor_report            # where people drive + charging gaps
 uv run python -m scripts.purge_old_trip_stat_ids    # dry run; --apply to clear old ids
-uv run python -m scripts.usage_dashboard            # local HTML dashboard; --remote for prod
+uv run python -m scripts.usage_dashboard            # local HTML snapshot; --remote for prod
+
+# Admin dashboard — live, filterable mission control on :8101. Local only.
+# Builds the UI if needed, waits for the DB, opens the browser. The sign-in
+# password is STATS_TOKEN from .env; empty means every route 404s by design.
+# VS Code: ⇧⌘P → "Mission control".
+#
+# It reads DATABASE_URL, i.e. your LOCAL database — Azure SQL is firewalled to
+# the App Service outbound IPs, so a laptop cannot reach it. For PRODUCTION use
+# `usage_report --remote` / `usage_dashboard --remote` (above), which go
+# through the token-gated GET /api/events/stats instead.
+./scripts/dashboard.sh
+./scripts/dashboard.sh --build        # force a UI rebuild first
+./scripts/dashboard.sh --build-only   # compile the UI, don't serve
+npm --prefix dashboard run dev        # Vite on 5273 w/ HMR, proxying /api to 8101
 # Post launch links tagged: https://…/?src=r-electricvehicles (see CAMPAIGN_SOURCES)
 
 # Migrations
@@ -318,8 +479,32 @@ docker compose -f docker-compose.local-db.yml up -d
 
 - **MSSQL boolean filters**: `.is_(True)` / `.is_(False)` compile to `IS 1` / `IS 0`
   — a T-SQL **syntax error**. Use `Column == True  # noqa: E712`.
+- **You cannot CAST a comparison on MSSQL.** `cast(col == False, Float)` — to
+  sum a boolean — emits `CAST(ok = 0 AS FLOAT)`, which SQLite accepts (a
+  comparison there yields 0/1) and SQL Server rejects with "Incorrect syntax
+  near the keyword 'AS'": it has no boolean *value* type, so `ok = 0` is a
+  predicate, not something castable. Use `func.sum(case((col == False, 1),
+  else_=0))`. This shipped once and no SQLite test could catch it; the guard is
+  to compile the **real** statement against the MSSQL dialect and assert its
+  shape (`upstream_health.daily_query`, and the test that pins it). A test that
+  builds its own copy of the query only proves the test is well written.
 - **Keep new columns MSSQL+SQLite portable** (tests run on aiosqlite): plain
   `JSON`, `GUID`, no filtered indexes.
+- **Use `DATE`, not `Date`, when casting to truncate a day on MSSQL.**
+  SQLAlchemy's `Date` renders as `CAST(x AS DATETIME)` whenever the dialect
+  cannot read `server_version_info` (it assumes a pre-2008 server), and a cast
+  to DATETIME does not truncate — every row lands in its own "day" and the
+  chart draws one bar per event. SQLite needs `strftime` instead: CAST there
+  has numeric affinity and returns the year as a number. Both branches live in
+  `analytics.filters.day_bucket`, and `normalize_bucket` is what makes their
+  two return types one shape again.
+- **A `StaticFiles` mount at `"/"` must be registered LAST.** Starlette matches
+  routes in registration order and a mount at the root matches every path
+  beneath it — put it any earlier and it swallows `/health`, which is what
+  Azure's probe hits, so the App Service reports itself unhealthy and cycles
+  forever. For the same reason the dashboard role does not register the `/`
+  JSON root: it would win over the mount and answer the console's front door
+  with API JSON.
 - **`func.avg` over an Integer column truncates on MSSQL** (integer `AVG`)
   while SQLite returns a float — the same query gives different answers on the
   test engine and in production. `cast(col, Float)` first; see
@@ -362,6 +547,17 @@ docker compose -f docker-compose.local-db.yml up -d
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless
   the DB name contains `-dev` (see `scripts/dev_seed_trip.py`).
+- **Brace shell variables that touch a non-ASCII character**: `"port $PORT…"`
+  is a landmine. In a UTF-8 locale bash reads the ellipsis bytes as part of the
+  identifier, so `set -u` kills the script with `PORT<junk>: unbound variable`;
+  in the C locale it works fine. Write `"port ${PORT}…"`. These scripts are
+  full of `…` and `→`, so the pattern is easy to hit — find them with
+  `perl -ne 'print if /\$\{?\w+[^\x00-\x7F]/' scripts/*.sh`.
+- **`env -i` is the right way to test a VS Code task's PATH and the wrong way
+  to test everything else.** It strips `LANG` too, so the script runs in the C
+  locale and any UTF-8-specific bug (see above) passes locally and fails for
+  real. Reproduce a task with `LANG=en_US.UTF-8 /bin/zsh -l -c './scripts/x.sh'`
+  once the PATH question is settled.
 - **`./scripts/dev.sh` is the supported way to run locally** (VS Code: ⇧⌘B).
   It frees ports, waits for SQL Server, and CREATEs the database — the compose
   file only starts the server, so a fresh volume has no `evtripdb-dev`.

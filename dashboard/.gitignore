@@ -1,0 +1,29 @@
+# Mirrors frontend/.gitignore — each JS package keeps its own, so a new one
+# does not silently inherit (or fail to inherit) the root's rules.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# build output
+# Vite writes the bundle to ../src/dashboard_static (ignored at the root), so
+# there is nothing here — /dist is listed in case the outDir ever moves back.
+/dist
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env*
+
+# typescript
+*.tsbuildinfo

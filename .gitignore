@@ -13,6 +13,11 @@ eggs/
 lib/
 !frontend/lib/
 !tests/lib/
+# The admin console's own lib, added after the two above and caught by the same
+# Python rule. Without this the console commits without `useFilters`,
+# `useStream` and the generated `world.ts`, so it builds locally and not from a
+# fresh clone.
+!dashboard/src/lib/
 lib64/
 parts/
 sdist/
@@ -87,6 +92,12 @@ server.err
 
 # Build artifacts
 .specstory/
+
+# The admin dashboard's compiled bundle. Built by CI into the API image (and by
+# `npm --prefix dashboard run build` locally) — committing it would mean the
+# repo carries a minified copy of dashboard/src that goes stale the moment
+# anyone edits the source.
+src/dashboard_static/
 
 .claude/
 claude-code-main
