@@ -67,6 +67,11 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9-]{1,22}[a-z0-9]$/
 export default function TripsDrawer() {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
+  // Whether the collapsed desktop tab is showing its label. Held in state
+  // rather than done with a `sm:group-hover:` class because only one of the two
+  // width classes is then ever on the element — no stacked variant to get the
+  // cascade order right, and the open/closed states are testable.
+  const [tabExpanded, setTabExpanded] = useState(false)
   const [username, setUsername] = useState<string | null>(null)
   const [trips, setTrips] = useState<TripSummary[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -134,22 +139,38 @@ export default function TripsDrawer() {
         <button
           type="button"
           onClick={() => toggle(true)}
+          onMouseEnter={() => setTabExpanded(true)}
+          onMouseLeave={() => setTabExpanded(false)}
+          onFocus={() => setTabExpanded(true)}
+          onBlur={() => setTabExpanded(false)}
           aria-label="Open your trips"
-          // Labelled at every size: this tab is the only way into the feature
-          // that exists so people stop losing their trips, and a drawer nobody
-          // finds solves nothing. An unlabelled icon on a screen edge is a
-          // puzzle, so the label stays.
+          title="Your trips"
+          // Two shapes, because a left-edge tab works on a wide screen and
+          // fights a phone. Mobile content is full-bleed, so an edge tab lands
+          // on the hero wherever it is put vertically — there it is a labelled
+          // pill floating bottom-RIGHT, clear of `FeedbackLink` in the opposite
+          // corner. From `sm` up it is the edge tab the panel slides out of.
           //
-          // Two positions, because a left-edge tab works on a wide screen and
-          // fights a phone. Mobile content is full-bleed, so the tab lands on
-          // the hero headline wherever it is put vertically — there it floats
-          // bottom-RIGHT instead, clear of `FeedbackLink` in the opposite
-          // corner. From `sm` up it becomes the edge tab the drawer slides out
-          // of, which is what the panel actually is on a desktop.
-          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-30 flex items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-4 py-3 text-sm font-medium text-ink-600 shadow-lg shadow-ink-900/10 backdrop-blur transition hover:border-brand-300 hover:text-brand-700 sm:bottom-auto sm:left-0 sm:right-auto sm:top-24 sm:rounded-l-none sm:rounded-r-xl sm:border-l-0 sm:py-3 sm:pl-2 sm:pr-3 sm:shadow-sm"
+          // On the desktop tab the label is collapsed until hover. This sits
+          // over the trip page's dark journey scene, and a permanent opaque
+          // pill there reads as damage to the picture rather than as chrome —
+          // so it stays a translucent icon until you go for it. The label is
+          // still in `aria-label` and `title`, and the mobile pill keeps it
+          // visible, which is where discovering it actually matters.
+          className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-30 flex items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-4 py-3 text-sm font-medium text-ink-600 shadow-lg shadow-ink-900/10 backdrop-blur transition-[background-color,border-color,color,padding] hover:border-brand-300 hover:text-brand-700 sm:bottom-auto sm:left-0 sm:right-auto sm:top-24 sm:rounded-l-none sm:rounded-r-xl sm:border-l-0 sm:py-2.5 sm:pl-2 sm:shadow-sm ${
+            tabExpanded
+              ? "sm:gap-2 sm:border-ink-200 sm:bg-white/95 sm:pr-3"
+              : "sm:gap-0 sm:border-ink-200/60 sm:bg-white/55 sm:pr-2"
+          }`}
         >
-          <Route className="h-4 w-4" />
-          Your trips
+          <Route className="h-4 w-4 shrink-0" />
+          <span
+            className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ${
+              tabExpanded ? "sm:max-w-24 sm:opacity-100" : "sm:max-w-0 sm:opacity-0"
+            }`}
+          >
+            Your trips
+          </span>
         </button>
       )}
 
@@ -169,14 +190,20 @@ export default function TripsDrawer() {
         // z-50, above the feedback button's z-40: both live in the bottom-left
         // corner, and at equal depth the later-mounted one wins and covers this
         // panel's release/share controls.
-        className={`fixed left-0 top-0 z-50 flex h-dvh w-[min(22rem,90vw)] flex-col border-r border-ink-100 bg-white shadow-xl transition-transform duration-200 ${
+        //
+        // Frosted rather than solid. On the trip page this slides over the 3D
+        // journey scene, and a flat white column there cuts the picture in two;
+        // letting the scene blur through keeps the panel reading as something
+        // laid ON the page rather than a hole punched in it. The cards inside
+        // stay opaque, so the text they carry never sits on a moving image.
+        className={`fixed left-0 top-0 z-50 flex h-dvh w-[min(22rem,90vw)] flex-col border-r border-ink-100/80 bg-white/80 shadow-xl backdrop-blur-xl transition-transform duration-200 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* Safe areas top and bottom: this panel is full-height on a phone, so
             without them the title sits under the notch and the release control
             sits under the home indicator. `FeedbackLink` does the same. */}
-        <header className="flex items-center justify-between border-b border-ink-100 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <header className="flex items-center justify-between border-b border-ink-100/80 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <h2 className="font-display text-base font-semibold text-ink-900">
             Your trips
           </h2>
@@ -460,7 +487,7 @@ function DrawerFooter({
     typeof window !== "undefined" ? `${window.location.origin}/u/${username}` : ""
 
   return (
-    <div className="border-t border-ink-100 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div className="border-t border-ink-100/80 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <div className="flex items-center justify-between gap-2">
         <Link
           href={`/u/${username}`}
