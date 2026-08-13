@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
+import { costOfSpeed } from "@/lib/summary"
 import { fmtDuration } from "@/lib/format"
 
 const COST = "#d98e1f" // --color-chart-charge (validated)
@@ -59,16 +60,7 @@ export default function CostChart({
   const pad = Math.max((Math.max(...costs) - Math.min(...costs)) * 0.18, 2)
 
   // The trade-off in one sentence: what the fast plan buys and what it costs.
-  let verdict: string | null = null
-  if (fastest && cheapest && fastest.speed_kph !== cheapest.speed_kph) {
-    const extra = fastest.cost_eur - cheapest.cost_eur
-    const saved = (cheapest.total_min ?? 0) - (fastest.total_min ?? 0)
-    if (saved > 0 && extra > 0) {
-      verdict =
-        `The fastest plan costs €${extra.toFixed(2)} more than the cheapest and saves ` +
-        `${fmtDuration(saved)}, about €${(extra / (saved / 60)).toFixed(2)} per hour bought.`
-    }
-  }
+  const trade = costOfSpeed(speeds, optimumSpeed)
 
   return (
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
@@ -191,7 +183,13 @@ export default function CostChart({
           </LineChart>
         </ResponsiveContainer>
       </div>
-      {verdict && <p className="mt-1 text-xs leading-relaxed text-ink-500">{verdict}</p>}
+      {trade && (
+        <p className="mt-1 text-xs leading-relaxed text-ink-500">
+          The fastest plan costs €{trade.extraEur.toFixed(2)} more than the
+          cheapest and saves {fmtDuration(trade.savedMin)}, about €
+          {trade.eurPerHour.toFixed(2)} per hour bought.
+        </p>
+      )}
     </div>
   )
 }

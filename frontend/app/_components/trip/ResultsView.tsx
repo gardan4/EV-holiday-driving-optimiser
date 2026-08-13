@@ -6,8 +6,10 @@ import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 import { LiveRun, SpeedResult, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
+import { buildVerdict } from "@/lib/summary"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
-import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import AnswerBlock from "./AnswerBlock"
 import Assumptions from "./Assumptions"
 import BatteryChart from "./BatteryChart"
 import CostChart from "./CostChart"
@@ -54,16 +56,49 @@ export default function ResultsView({
   // Keep whatever they clicked visually still instead.
   const { anchorRef, select } = useAnchoredSelection(setSelectedSpeed)
 
-  const best = useMemo(
-    () => result.speeds.find((s) => s.speed_kph === result.optimum_speed) ?? null,
-    [result.speeds, result.optimum_speed]
-  )
-  const slowBaseline = useMemo(() => {
-    // The friend's plan: 100 km/h if it was simulated, else the slowest that
-    // was — the comparison this whole app exists to settle.
-    const feasible = result.speeds.filter((s) => s.feasible)
-    return feasible.find((s) => s.speed_kph === 100) ?? feasible[0] ?? null
-  }, [result.speeds])
+  // The compact answer the hero states before anyone scrolls. Built here
+  // rather than in the hero because it is the same Verdict the AnswerBlock
+  // below expands on — one source, two densities.
+  const heroVerdict = useMemo(() => {
+    const v = buildVerdict(result, selectedSpeed)
+    if (!v || v.selected.total_min == null) return null
+    const arriveClock = clockAt(trip.request.departure_iso, v.selected.total_min)
+    const sub =
+      `arrive ${arriveClock} · ` +
+      `${v.selected.n_stops} ${v.selected.n_stops === 1 ? "stop" : "stops"} · ` +
+      `${fmtDuration(v.selected.charge_min ?? 0)} charging`
+    if (v.baseline == null || v.savedMin == null) {
+      return { headline: <>Arrive {arriveClock}</>, sub }
+    }
+    if (v.isBaseline) {
+      return { headline: <>The {v.baseline.speed_kph} km/h plan</>, sub }
+    }
+    if (v.tie) {
+      return {
+        headline: (
+          <>
+            Same arrival{" "}
+            <span className="font-medium text-white/60">
+              as cruising {v.baseline.speed_kph} km/h
+            </span>
+          </>
+        ),
+        sub,
+      }
+    }
+    const faster = v.savedMin > 0
+    return {
+      headline: (
+        <>
+          {fmtDuration(Math.abs(v.savedMin))} {faster ? "sooner" : "slower"}{" "}
+          <span className="font-medium text-white/60">
+            than cruising {v.baseline.speed_kph} km/h
+          </span>
+        </>
+      ),
+      sub,
+    }
+  }, [result, selectedSpeed, trip.request.departure_iso])
 
   const raceRun = useMemo(
     () =>
@@ -92,16 +127,6 @@ export default function ResultsView({
     return <p className="mx-auto max-w-6xl px-4 py-10 text-ink-500">No feasible plan at this speed.</p>
   }
 
-  // Minutes this plan saves against the friend's 100 km/h plan. Positive =
-  // arrives earlier. Anything under a minute is a tie, not a win — the DP plans
-  // on a 2.5% SoC grid, so differences that small are quantisation, not driving.
-  const vsBaseline =
-    slowBaseline && slowBaseline.total_min != null && selected.total_min != null
-      ? slowBaseline.total_min - selected.total_min
-      : null
-  const isBaseline = slowBaseline?.speed_kph === selected.speed_kph
-  const vsTie = vsBaseline != null && Math.abs(vsBaseline) < 1
-
   return (
     <div>
       <JourneyHero
@@ -114,6 +139,7 @@ export default function ResultsView({
         onRaceSpeedChange={setRaceSpeed}
         hoverStop={hoverStop}
         onHoverStop={setHoverStop}
+        verdict={heroVerdict}
       />
 
       <div className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
@@ -166,87 +192,8 @@ export default function ResultsView({
 
         <DriveBanner tripId={trip.id} live={live} />
 
-        {/* Hero stats for the selected speed */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Stat
-            label="cruise at"
-            value={`${selected.speed_kph}`}
-            unit="km/h"
-            accent={selected.speed_kph === result.optimum_speed}
-            sub={selected.speed_kph === result.optimum_speed ? "the fastest plan" : "your pick"}
-          />
-          <Stat
-            label="arrive at"
-            value={clockAt(trip.request.departure_iso, selected.total_min ?? 0)}
-            sub={`door to door ${fmtHm(selected.total_min ?? 0)}`}
-          />
-          <Stat
-            label="charging"
-            value={fmtDuration(selected.charge_min ?? 0)}
-            sub={
-              `${selected.n_stops} stop${selected.n_stops === 1 ? "" : "s"}` +
-              (selected.rest_min > 0 ? ` · +${Math.round(selected.rest_min)} min break` : "") +
-              (selected.cost_eur > 0 ? ` · €${selected.cost_eur.toFixed(2)}` : "")
-            }
-          />
-          <Stat
-            label={slowBaseline ? `vs ${slowBaseline.speed_kph} km/h` : "vs plan"}
-            value={
-              vsBaseline == null
-                ? "-"
-                : isBaseline || vsTie
-                  ? "±0"
-                  : `${vsBaseline > 0 ? "−" : "+"}${fmtDuration(Math.abs(vsBaseline))}`
-            }
-            accent={vsBaseline != null && !isBaseline && !vsTie && vsBaseline > 0}
-            sub={
-              vsBaseline == null
-                ? undefined
-                : isBaseline
-                  ? "this is that plan"
-                  : vsTie
-                    ? "the same, to the minute"
-                    : vsBaseline > 0
-                      ? "earlier at the chalet"
-                      : "slower overall"
-            }
-          />
-        </div>
-
-        {band && !band.sharp && (
-          <p className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm leading-relaxed text-ink-800">
-            <span className="font-semibold">
-              Anything from {band.lo} to {band.hi} km/h arrives within{" "}
-              {band.toleranceMin} minutes of the best.
-            </span>{" "}
-            The curve is flat across that range, so hold whatever is comfortable.
-            sitting at {band.lo} instead of {band.best} costs you{" "}
-            {band.loCostMin <= 0 ? "nothing" : `${band.loCostMin} min`}
-            {band.loSavesEur > 0.5 && (
-              <> and saves €{band.loSavesEur.toFixed(0)} in charging</>
-            )}
-            .
-          </p>
-        )}
-
-        {band?.sharp && (
-          <p className="mt-4 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm leading-relaxed text-ink-800">
-            <span className="font-semibold">Speed genuinely matters here.</span> No
-            other cruise speed comes within {band.toleranceMin} minutes of{" "}
-            {band.best} km/h.
-          </p>
-        )}
-
-        {result.optimum_at_top_speed && (
-          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">
-            <span className="font-semibold">The curve never turned.</span> Under these
-            assumptions the trip keeps getting shorter right up to{" "}
-            {Math.round(result.vehicle.top_speed_kph)} km/h, the {result.vehicle.make}{" "}
-            {result.vehicle.model}&apos;s limiter, so the theoretical optimum is faster
-            than the car goes. Charging is quick enough here that speed simply wins;
-            try colder conditions or a lower open-autobahn share to see it turn.
-          </p>
-        )}
+        {/* The answer, before the evidence */}
+        <AnswerBlock trip={trip} selected={selected} band={band} onSelectSpeed={select} />
 
         {/* Charts + itinerary */}
         <div
@@ -278,15 +225,6 @@ export default function ResultsView({
               departureIso={trip.request.departure_iso}
               targetSoc={trip.request.target_soc}
             />
-            {best && selected.speed_kph !== best.speed_kph && (
-              <button
-                onClick={() => select(best.speed_kph)}
-                className="w-full rounded-xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm font-medium text-brand-800 transition-colors hover:bg-brand-100"
-              >
-                Jump to the fastest plan: {best.speed_kph} km/h, arrives{" "}
-                {clockAt(trip.request.departure_iso, best.total_min ?? 0)}
-              </button>
-            )}
           </div>
           {/* `h-0 min-h-full` is load-bearing, not decoration. A grid row is as
               tall as its tallest item, so an uncapped itinerary sets the row
@@ -377,33 +315,3 @@ function SpeedPills({
   )
 }
 
-function Stat({
-  label,
-  value,
-  unit,
-  sub,
-  accent,
-}: {
-  label: string
-  value: string
-  unit?: string
-  sub?: string
-  accent?: boolean
-}) {
-  return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        accent ? "border-brand-200 bg-brand-50" : "border-ink-100 bg-white"
-      }`}
-    >
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-400">{label}</div>
-      <div className="mt-1 font-display text-2xl font-bold text-ink-900">
-        {value}
-        {unit && <span className="ml-1 text-sm font-semibold text-ink-500">{unit}</span>}
-      </div>
-      {sub && (
-        <div className={`mt-0.5 text-xs ${accent ? "text-brand-700" : "text-ink-500"}`}>{sub}</div>
-      )}
-    </div>
-  )
-}

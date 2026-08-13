@@ -18,6 +18,7 @@ import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
 import { isCharging, sampleTimeline, timeAtDist } from "@/lib/playback"
 import type { JourneyWorldRef } from "./scene/JourneyScene"
 import LiveHud from "./live/LiveHud"
+import VerdictPlate, { HeroVerdict } from "./VerdictPlate"
 
 const JourneyScene = dynamic(() => import("./scene/JourneyScene"), {
   ssr: false,
@@ -48,6 +49,8 @@ interface JourneyHeroProps {
   onRaceSpeedChange: (s: number | null) => void
   hoverStop: string | null
   onHoverStop: (id: string | null) => void
+  /** The one-sentence answer shown at rest; hidden during playback/scrub. */
+  verdict?: HeroVerdict | null
   /**
    * Present only on a drive that is actually happening.
    *
@@ -93,6 +96,7 @@ export default function JourneyHero({
   onRaceSpeedChange,
   hoverStop,
   onHoverStop,
+  verdict = null,
   live = null,
 }: JourneyHeroProps) {
   const scroller = useRef<HTMLDivElement>(null)
@@ -495,19 +499,26 @@ export default function JourneyHero({
         ))}
       </div>
 
-      {/* Endpoint plates */}
-      <div className="pointer-events-none absolute left-5 top-5 z-20 flex items-center gap-2 rounded-xl border border-white/12 bg-black/35 px-3 py-2 backdrop-blur">
-        <MapPin className="h-3.5 w-3.5 text-white/50" />
-        <span className="text-sm font-semibold text-white">
-          {trip.request.origin.label.split(",")[0]}
-        </span>
-        <span className="text-white/35">→</span>
-        <span className="text-sm font-semibold text-white">
-          {trip.request.dest.label.split(",")[0]}
-        </span>
-        <span className="ml-1 font-mono text-[11px] text-white/45">
-          {fmtKm(totalDistM)} · {result.speed_kph} km/h
-        </span>
+      {/* Endpoint plate + the verdict beneath it, one top-left column */}
+      <div className="pointer-events-none absolute left-5 top-5 z-20 flex flex-col items-start gap-2">
+        <div className="flex items-center gap-2 rounded-xl border border-white/12 bg-black/35 px-3 py-2 backdrop-blur">
+          <MapPin className="h-3.5 w-3.5 text-white/50" />
+          <span className="text-sm font-semibold text-white">
+            {trip.request.origin.label.split(",")[0]}
+          </span>
+          <span className="text-white/35">→</span>
+          <span className="text-sm font-semibold text-white">
+            {trip.request.dest.label.split(",")[0]}
+          </span>
+          <span className="ml-1 font-mono text-[11px] text-white/45">
+            {fmtKm(totalDistM)} · {result.speed_kph} km/h
+          </span>
+        </div>
+        {/* Only at rest at the start: during playback the HUD clock is the
+            story, and at the end the finish banner is. */}
+        {verdict && !live && (
+          <VerdictPlate verdict={verdict} visible={!playing && hud.min < 0.5} />
+        )}
       </div>
 
       <button

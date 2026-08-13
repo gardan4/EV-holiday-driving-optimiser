@@ -5,7 +5,7 @@ import AppHeader from "@/app/_components/AppHeader"
 import ResultsView from "@/app/_components/trip/ResultsView"
 import TripsDrawer from "@/app/_components/trips/TripsDrawer"
 import { LiveRun, Trip } from "@/lib/client"
-import { fmtDuration, fmtHm } from "@/lib/format"
+import { headlineDescription } from "@/lib/summary"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100"
 
@@ -27,18 +27,11 @@ export async function generateMetadata({
   const { id } = await params
   const trip = await fetchTrip(id)
   if (!trip) return { title: "Trip not found" }
-  const best = trip.result.speeds.find((s) => s.speed_kph === trip.result.optimum_speed)
-  const baseline = trip.result.speeds.find((s) => s.feasible && s.speed_kph === 100)
   const origin = trip.request.origin.label.split(",")[0]
   const dest = trip.request.dest.label.split(",")[0]
-  let description = `${origin} → ${dest} in a ${trip.result.vehicle.make} ${trip.result.vehicle.model}.`
-  if (best?.total_min != null) {
-    description = `${origin} → ${dest}: cruise ${best.speed_kph} km/h and you're there in ${fmtHm(best.total_min)}`
-    if (baseline?.total_min != null && baseline.total_min > best.total_min) {
-      description += `, ${fmtDuration(baseline.total_min - best.total_min)} sooner than at 100 km/h`
-    }
-    description += ", charging stops included."
-  }
+  // Same sentence the page states in the hero and answer block — one builder,
+  // so the share card cannot drift from what the page says.
+  const description = headlineDescription(trip)
   return {
     title: `${origin} → ${dest}`,
     description,
