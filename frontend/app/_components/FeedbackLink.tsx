@@ -122,24 +122,13 @@ export default function FeedbackLink() {
 
   return (
     <>
-      {/* In the footer, where someone reading the small print looks for it.
-          A filled chip rather than another underlined word: the two things
-          beside it navigate, this one does something. */}
-      <button
-        type="button"
-        data-feedback-trigger
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls="feedback-panel"
-        className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 font-medium text-brand-700 transition-colors hover:border-brand-400 hover:bg-brand-100"
-      >
-        <MessageSquarePlus className="h-3.5 w-3.5" />
-        Send feedback
-      </button>
-
-      {/* And again as a floating button, because the footer is the one part of
-          a long results page nobody scrolls to. Bottom-LEFT on purpose: the
-          toasts live bottom-right. */}
+      {/* One trigger, floating, because the footer is the one part of a long
+          results page nobody scrolls to. There used to be a second copy inline
+          in the footer row as well, from when this was an underlined word
+          there. That made no sense once this button went `fixed`: it is on
+          screen at every scroll position, so reaching the footer showed you
+          two ways to do the same thing, side by side. Bottom-LEFT on purpose:
+          the toasts live bottom-right. */}
       <button
         type="button"
         data-feedback-trigger
