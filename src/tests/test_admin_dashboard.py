@@ -27,6 +27,27 @@ from app.models import AppEvent
 TOKEN = "test-stats-token"
 
 
+class _Maker:
+    """Stands in for `AsyncSessionLocal` so a generator gets the test session.
+
+    Callable, and an async context manager that hands back the same session
+    every time. `_tail` re-enters it on every poll, so `__aexit__` must not
+    close it.
+    """
+
+    def __init__(self, session):
+        self._session = session
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self._session
+
+    async def __aexit__(self, *a):
+        return False
+
+
 @pytest.fixture
 def dashboard_app(monkeypatch):
     """A freshly built app running in the dashboard role."""
@@ -244,6 +265,23 @@ class TestStreamPayload:
     matches the aggregate `"visitors": 12` in the counters frame, and only
     stayed green because it happened to stop reading before that frame arrived.
     """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _stream_reads_the_seeded_db(self, db_session, monkeypatch):
+        """Point `_tail` at the test database.
+
+        `_tail` opens its own session on purpose, because it outlives the
+        request handler, so it does not go through the `get_db` override the
+        rest of these tests rely on. Left alone it polls whatever
+        `DATABASE_URL` points at. On a developer's machine that is a real dev
+        database with real events in it, so the assertions below pass on rows
+        the fixture never seeded, and then fail in CI where that database has
+        nothing recent. Exactly the wrong-reason pass this class was rewritten
+        to stop happening.
+        """
+        import app.api.admin as admin
+
+        monkeypatch.setattr(admin, "AsyncSessionLocal", _Maker(db_session))
 
     @staticmethod
     async def _frames(n: int = 6) -> list[str]:
