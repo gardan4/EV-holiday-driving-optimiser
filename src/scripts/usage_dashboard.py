@@ -403,6 +403,54 @@ def _retention(s: UsageStats) -> str:
     </div>"""
 
 
+def _profiles(s: UsageStats) -> str:
+    """The opt-in username, stock beside flow.
+
+    Rendered as a fraction for the same reason retention is: `published` on its
+    own rises whenever the app gets busier, which is not the same as anybody
+    using the feature. The stock counts carry their own label because they
+    ignore the window — a figure that does not move when the range narrows
+    reads as a broken filter unless it says so.
+    """
+    p = s.profiles
+    if not (p.live or p.claimed or p.released):
+        return '<div class="empty">Nobody has claimed a username yet.</div>'
+
+    rate = 100.0 * p.publish_rate if p.publish_rate is not None else None
+    share = (
+        f"""
+    <div class="ratio">
+      <span class="n">{rate:.0f}%</span>
+      <span class="d">{p.published:,} of {p.trips:,} trips in this window were
+      planned under a name</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill" style="width:{min(rate, 100.0):.1f}%"></div></div>"""
+        if rate is not None
+        else '<div class="empty">No trips planned in this window.</div>'
+    )
+    return f"""{share}
+    <div style="margin-top:16px">{_hbars(
+        [
+            ("names right now (all-time)", p.live),
+            ("…of those, publish something", p.with_trips),
+            ("claimed in window", p.claimed),
+            ("released in window", p.released),
+            ("public lists opened", p.list_views),
+        ],
+        empty="",
+    )}</div>
+    {'<div style="margin-top:16px">' + _hbars(
+        [(r.label, r.count) for r in p.per_name], empty="") + '</div>'
+     if p.per_name else ''}
+    <div class="note">
+      The first two rows are <strong>all-time stock</strong> and do not move with
+      the window; the rest is the window. Claims count names that still exist, so
+      one claimed and released inside it shows up only as a release. Releases and
+      list views come from events, so they start the day counting shipped and
+      miss anyone who opted out.
+    </div>"""
+
+
 def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> str:
     counts = {f.label: f.count for f in s.funnel}
     funnel_rows = [(nice, counts.get(key, 0)) for key, nice in FUNNEL_ORDER]
@@ -573,6 +621,10 @@ def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> s
       deploy. Origins and destinations are rounded to a ~20&nbsp;&times;&nbsp;25&nbsp;km
       box, which is why they read as coordinates rather than town names.
     </div>
+    {f'<div class="note"><strong>{s.trips_deleted:,} trip(s) were deleted during '
+     'this window</strong> and are gone from every corridor above — these count '
+     'rows that still exist, so that count is the only trace left of them.</div>'
+     if s.trips_deleted else ''}
   </div>
 
   <div class="card">
@@ -622,6 +674,11 @@ def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> s
       <h2>Cars</h2>
       {_hbars([(r.label, r.count) for r in s.top_cars], empty="No trips planned yet.")}
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Usernames</h2>
+    {_profiles(s)}
   </div>
 
   <div class="card">

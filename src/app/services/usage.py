@@ -29,11 +29,12 @@ from app.api.schemas import (
     CorridorOut,
     DayCount,
     LabelCount,
+    ProfilesOut,
     ProviderOut,
     UsageStats,
 )
 from app.models import AppEvent, Trip, TripRun
-from app.services import corridors, quota
+from app.services import corridors, counting, profiles, quota
 from app.services.analytics import Filters, breakdown, retention, timeseries
 
 
@@ -46,8 +47,9 @@ def _corridor_out(c: corridors.Corridor) -> CorridorOut:
         stops_per_100km=c.stops_per_100km,
     )
 
-# The funnel, and nothing else. Adding one here is deliberate; it should stay
-# possible to read this list and know everything the app records.
+# The funnel, plus the two things a delete would otherwise erase. Adding one
+# here is deliberate; it should stay possible to read this list and know
+# everything the app records.
 ALLOWED_EVENTS = frozenset(
     {
         "page_view",       # a page was opened
@@ -55,6 +57,12 @@ ALLOWED_EVENTS = frozenset(
         "trip_planned",    # …and a plan came back
         "plan_failed",     # …or it didn't (how often planning breaks is worth knowing)
         "drive_started",   # somebody actually drove one
+        # Neither of these is a funnel stage — they are counted because the row
+        # they describe stops existing, so nothing else can witness them. Both
+        # are server-written and refused from the public endpoint; see
+        # `services/counting.py` for why that is not a new tracking surface.
+        "trip_deleted",       # somebody erased a trip (and its stats, and its drives)
+        "username_released",  # …or gave up a name (the profile row is gone)
     }
 )
 
@@ -213,6 +221,13 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     # inside it — now lives in `analytics.retention`, with the reasoning.
     seen = await retention(db, f)
 
+    # The opt-in username, through the same reader the dashboard uses. Note the
+    # mix of stock and flow this deliberately carries — see `ProfilesOut`.
+    prof = await profiles.summary(db, cutoff)
+    # …and what was erased during the window, which is the caveat on every
+    # trip-derived number above it: those count rows that still exist.
+    gone = await counting.erasures(db, cutoff)
+
     return UsageStats(
         days=days,
         generated_at=now,
@@ -245,4 +260,18 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
         campaigns=campaigns,
         providers=providers,
         failure_reasons=failure_reasons,
+        profiles=ProfilesOut(
+            live=prof.live,
+            claimed=prof.claimed,
+            released=gone.usernames_released,
+            with_trips=prof.with_trips,
+            empty=prof.empty,
+            published=prof.published,
+            trips=prof.trips,
+            list_views=prof.list_views,
+            per_name=[LabelCount(label=k, count=n) for k, n in prof.per_name],
+            publish_rate=prof.publish_rate,
+            active_rate=prof.active_rate,
+        ),
+        trips_deleted=gone.trips_deleted,
     )

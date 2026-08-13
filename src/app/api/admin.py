@@ -45,7 +45,15 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_fernet
 from app.models import AppEvent
-from app.services import corridors, drives, quota, trip_shape, upstream_health
+from app.services import (
+    corridors,
+    counting,
+    drives,
+    profiles,
+    quota,
+    trip_shape,
+    upstream_health,
+)
 from app.services.analytics import (
     FILTERABLE,
     BadQuery,
@@ -380,6 +388,11 @@ async def journeys(
     drive = await drives.summary(db, cutoff)
     stops = await drives.charge_stops(db, cutoff)
     pva = await drives.plan_vs_actual(db, cutoff)
+    prof = await profiles.summary(db, cutoff)
+    # Deletions belong on this payload rather than the overview: they are the
+    # caveat on the corridor and trip numbers beside them, which count rows
+    # that still exist.
+    gone = await counting.erasures(db, cutoff)
 
     def corr(c) -> dict:
         return {
@@ -443,6 +456,25 @@ async def journeys(
             {"label": name, "value": n, "avg_optimum_kph": speed}
             for name, n, speed in cars
         ],
+        # The opt-in username. Stock (`live`, `with_trips`, `empty`) is
+        # all-time; everything else is the window. The panel labels which is
+        # which, because on a tile the two look identical — and a stock figure
+        # that does not move when the date range narrows reads as a broken
+        # filter rather than as the state of a table.
+        "profiles": {
+            "live": prof.live,
+            "claimed": prof.claimed,
+            "released": gone.usernames_released,
+            "with_trips": prof.with_trips,
+            "empty": prof.empty,
+            "published": prof.published,
+            "trips": prof.trips,
+            "publish_rate": prof.publish_rate,
+            "active_rate": prof.active_rate,
+            "list_views": prof.list_views,
+            "per_name": [{"label": k, "value": n} for k, n in prof.per_name],
+        },
+        "erased": {"trips_deleted": gone.trips_deleted},
     }
 
 

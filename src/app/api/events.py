@@ -175,7 +175,12 @@ def normalize_referrer_path(raw: str | None) -> str | None:
 # for. Left acceptable here, anyone could post reasonless failures and inflate
 # the count — and the funnel total would stop matching the reason breakdown,
 # which is the one cross-check that says the failure numbers are real.
-SERVER_ONLY_EVENTS = frozenset({"plan_failed"})
+#
+# The other two are the erasures (`services.counting`). They exist to explain a
+# table that shrank, so they are only worth anything if they match it: a count
+# anybody can post is not a cross-check on `trips` and `profiles`, it is a
+# second number that happens to sit next to them.
+SERVER_ONLY_EVENTS = frozenset({"plan_failed", "trip_deleted", "username_released"})
 
 # A campaign tag: lowercase letters, digits and dashes. Deliberately narrow —
 # this arrives on a public endpoint and is written to the database, so the

@@ -28,8 +28,17 @@ from sqlalchemy import Float, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import TripStat, Vehicle
+from app.services.analytics.queries import histogram
 from app.services.geo import geohash_bbox
 from app.services.simulator import _default_country_caps
+
+# "How many trips does one planner plan", in buckets. Shared with
+# `services/profiles.py`, which asks the same question of named planners — the
+# two lists sit side by side on the dashboard, and a reader comparing "6+" in
+# one against "5+" in the other would be comparing nothing. One definition, so
+# they cannot drift.
+TRIP_COUNT_EDGES = [2.0, 3.0, 6.0]
+TRIP_COUNT_LABELS = ["1 trip", "2 trips", "3–5 trips", "6+ trips"]
 
 
 @dataclass(frozen=True)
@@ -98,6 +107,19 @@ def _to_corridor(r) -> Corridor:
 
 def _window(q, cutoff: datetime | None):
     return q.where(TripStat.created_at >= cutoff) if cutoff else q
+
+
+def trip_count_buckets(counts) -> list[tuple[str, int]]:
+    """Bucket a per-planner trip count, empty buckets dropped.
+
+    Empties go because a bar chart reading "2 trips: 0" next to "1 trip: 3"
+    spends half its height saying nothing.
+    """
+    return [
+        (s.label, s.value)
+        for s in histogram(list(counts), TRIP_COUNT_EDGES, TRIP_COUNT_LABELS)
+        if s.value
+    ]
 
 
 async def headline(db: AsyncSession, cutoff: datetime | None) -> tuple[int, int, float]:
@@ -260,16 +282,4 @@ async def repeat_planners(
             )
         )
     ).all()
-    if not rows:
-        return []
-    buckets = {"1 trip": 0, "2 trips": 0, "3–5 trips": 0, "6+ trips": 0}
-    for r in rows:
-        n = int(r.trips)
-        key = (
-            "1 trip" if n == 1
-            else "2 trips" if n == 2
-            else "3–5 trips" if n <= 5
-            else "6+ trips"
-        )
-        buckets[key] += 1
-    return [(k, v) for k, v in buckets.items() if v]
+    return trip_count_buckets(float(r.trips) for r in rows)

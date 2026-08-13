@@ -543,8 +543,10 @@ class AppEvent(Base):
     at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
-    # Allowlisted in api/events.py — page_view, plan_submitted, trip_planned,
-    # plan_failed, drive_started.
+    # Allowlisted in services/usage.py — page_view, plan_submitted,
+    # trip_planned, plan_failed, drive_started, and the two erasures
+    # (trip_deleted, username_released) the server writes because the row they
+    # describe is gone by the time they land. See `services/counting.py`.
     name: Mapped[str] = mapped_column(String(32), nullable=False)
     # Normalised route pattern ("/", "/trip/:id"), never a real URL.
     path: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)

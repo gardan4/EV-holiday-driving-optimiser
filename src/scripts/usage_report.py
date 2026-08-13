@@ -203,6 +203,30 @@ def _format(s: UsageStats, source: str) -> str:
     _block("Trips per planner", s.repeat_planners,
            "nobody has planned a trip with a persistent id yet.")
 
+    p = s.profiles
+    lines.append("")
+    if p.live or p.claimed or p.released:
+        rate = f"{100.0 * p.publish_rate:.0f}%" if p.publish_rate is not None else "–"
+        lines += [
+            "  Usernames (stock is all-time; the rest is the window):",
+            f"    names right now           {p.live:>6}   "
+            f"({p.with_trips} publish something, {p.empty} hold nothing)",
+            f"    claimed in window         {p.claimed:>6}",
+            f"    released in window        {p.released:>6}",
+            f"    trips published           {p.published:>6}   "
+            f"of {p.trips} planned ({rate})",
+            f"    public lists opened       {p.list_views:>6}",
+        ]
+        if p.per_name:
+            width = max(len(b.label) for b in p.per_name)
+            lines.append("    trips per name:")
+            for b in p.per_name:
+                lines.append(f"      {b.label:<{width}}  {b.count:>4}")
+        lines.append("    (claims count names that still exist — one claimed and")
+        lines.append("     released inside the window shows only in the release)")
+    else:
+        lines.append("  Usernames: nobody has claimed one yet.")
+
     lines += [
         "",
         "  From the trips table (real history, predates event counting):",
@@ -210,6 +234,12 @@ def _format(s: UsageStats, source: str) -> str:
         f"    drives started in window  {s.drives_started:>6}",
         f"    trips planned ever        {s.trips_planned_since_launch:>6}",
     ]
+    if s.trips_deleted:
+        lines += [
+            f"    trips DELETED in window   {s.trips_deleted:>6}",
+            "    (gone from the corridor numbers above too — they count rows",
+            "     that still exist, so this is the only trace left)",
+        ]
     return "\n".join(lines)
 
 

@@ -116,6 +116,27 @@ export type Journeys = {
   }
   planners: Row[]
   cars: (Row & { avg_optimum_kph: number | null })[]
+  /** The opt-in username. `live`, `with_trips` and `empty` are all-time stock —
+   *  they do not move with the date range — and everything else is the window.
+   *  The panel says which is which; conflating them makes a stock number look
+   *  like it collapsed whenever the window narrows. */
+  profiles: {
+    live: number
+    claimed: number
+    released: number
+    with_trips: number
+    empty: number
+    published: number
+    trips: number
+    publish_rate: number | null
+    active_rate: number | null
+    list_views: number
+    per_name: Row[]
+  }
+  /** What was taken away during the window. Everything else on this payload
+   *  counts rows that still exist, so a corridor that shrank has no other
+   *  explanation. */
+  erased: { trips_deleted: number }
 }
 
 export type DayHealth = {

@@ -118,6 +118,14 @@ export default function PrivacyPage() {
           address after a <em>?</em>.
           <br />
           <br />
+          Two more things are counted, both of them bare counts: that a trip was
+          deleted, and that a username was released. Neither records which trip
+          or which name — by the time we count it, the trip or the username is
+          already gone. They exist because everything else we count is a count
+          of things that still exist, so without them a summary that shrank
+          would look like people had stopped using the app.
+          <br />
+          <br />
           A visit also records your country, whether you are on a phone, tablet
           or computer, which browser, and how wide the window is to the nearest
           band. That is stored as a handful of words (<em>mobile</em>,{" "}

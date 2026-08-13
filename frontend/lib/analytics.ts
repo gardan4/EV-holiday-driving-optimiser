@@ -30,9 +30,12 @@ import { uuidV4 } from "./uuid"
 
 /** What the browser is allowed to report.
  *
- *  `plan_failed` is deliberately absent: the server records it, with the
- *  reason it actually failed for, and the events endpoint refuses it from a
- *  client. Firing it from here too would double every failure. */
+ *  Three names are deliberately absent, and the endpoint refuses all three
+ *  from a client. `plan_failed` is recorded by the server with the reason it
+ *  actually failed for, so firing it here too would double every failure.
+ *  `trip_deleted` and `username_released` are recorded where the deletion
+ *  happens: they exist to explain a table that shrank, which only works while
+ *  they match it, and a count a page can fire is one an ad blocker can drop. */
 export type EventName =
   | "page_view"
   | "plan_submitted"

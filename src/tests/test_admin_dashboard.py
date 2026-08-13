@@ -239,6 +239,31 @@ class TestQueries:
         assert "name" not in meta["filterable"]
 
     @pytest.mark.asyncio
+    async def test_journeys_carries_the_username_numbers(self, client: AsyncClient):
+        """The console and `scripts.usage_report` read the same functions, so
+        the shape is pinned here rather than the arithmetic (which
+        `test_profile_reporting.py` owns). An empty database must still answer
+        with every key the panel reads — a missing one renders as NaN."""
+        await _signed_in(client)
+        body = (await client.get("/api/journeys?days=7")).json()
+        assert set(body["profiles"]) == {
+            "live",
+            "claimed",
+            "released",
+            "with_trips",
+            "empty",
+            "published",
+            "trips",
+            "publish_rate",
+            "active_rate",
+            "list_views",
+            "per_name",
+        }
+        # No trips at all: a share of nothing is withheld, not drawn as 0%.
+        assert body["profiles"]["publish_rate"] is None
+        assert body["erased"]["trips_deleted"] == 0
+
+    @pytest.mark.asyncio
     async def test_modelled_countries_come_from_the_simulator(
         self, client: AsyncClient
     ):

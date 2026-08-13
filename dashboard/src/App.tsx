@@ -21,6 +21,7 @@ import { WorldMap } from "./components/WorldMap"
 import { Login } from "./components/Login"
 import { Upstream as UpstreamPanel } from "./components/UpstreamPanel"
 import { Drives } from "./components/Drives"
+import { Profiles } from "./components/Profiles"
 
 export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
@@ -254,6 +255,19 @@ export function App() {
               ? "Corridors come from trip_stats, which carries no device or campaign — the chips above do not apply here. Only the date range does."
               : "Endpoints are geohash-4 centres. Colour is charging difficulty, width is volume."
           }
+          // Deletions belong here rather than in a tile of their own: this map
+          // counts rows that still exist, so without the number beside it a
+          // corridor that shrank reads as people who stopped driving it.
+          right={
+            journeys?.erased.trips_deleted ? (
+              <span
+                className="figure shrink-0 text-[11px] text-ink-mute"
+                title="Trips erased during this window. They are gone from every corridor, stat and drive above — this count is the only trace left."
+              >
+                {group(journeys.erased.trips_deleted)} deleted
+              </span>
+            ) : null
+          }
         >
           {journeys ? (
             <WorldMap
@@ -399,7 +413,10 @@ export function App() {
             )}
           </Panel>
 
-          <Panel title="trips per planner">
+          <Panel
+            title="trips per planner"
+            hint="Anonymous planners, by the persistent id. Named ones are counted below."
+          >
             <Bars rows={journeys?.planners ?? []} empty="No trips yet." />
           </Panel>
 
@@ -421,6 +438,11 @@ export function App() {
             )}
           </Panel>
         </div>
+
+        {/* The opt-in username. Directly under "trips per planner", because the
+            two answer the same question of two populations and share their
+            buckets — anonymous browsers above, people who picked a name below. */}
+        {journeys && <Profiles journeys={journeys} />}
 
         {/* Trip shape — the charge-share number is the product's own thesis. */}
         {journeys && (

@@ -62,6 +62,14 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   `services/trip_shape.py` (distance and charge-share distributions, departure
   month, transit countries) and `services/upstream_health.py` (ORS/OCM as a
   trend, with latency percentiles).
+- **What the username publishes** `services/profiles.py` — the one reader of
+  `profiles` and `trips.owner_hash`, shared by `scripts.usage_report` and the
+  dashboard, on the `corridors.py` rule. Stock (how many names exist, how many
+  publish anything) next to flow (what share of a window's trips carry one) and
+  reach (how often a public list is opened, from `app_events`), with the labels
+  saying which is which. `services/counting.py` is the other half: the two
+  server-written events without which those numbers cannot be read honestly —
+  see the design decision below.
 - **The admin dashboard** `src/app/api/admin.py` + `dashboard/` — its own
   process role, its own origin, its own auth. See the design decision below.
 - **Models** `src/app/models/__init__.py` — `Vehicle` (curated catalog with
@@ -400,6 +408,21 @@ the pipeline is green before infra exists. Infra deploy is manual
   numbers are real. The client no longer fires it at all, so a request that
   never reaches the server shows up as the gap between `plan_submitted` and
   `trip_planned + plan_failed`, which is exactly where it belongs.
+- **What a delete erases is counted, because nothing else can witness it**
+  (`services/counting.py`). Every other number in the reporting is a count of
+  rows that are still there — so a released username reads as a name nobody
+  ever claimed, and a deleted trip as a corridor people stopped driving. Two
+  server-written events (`username_released`, `trip_deleted`) are the only
+  trace left, which is why both are in `SERVER_ONLY_EVENTS`: a count anyone
+  could post is not a cross-check on a table that shrank, it is a second number
+  sitting next to it. **Claiming a name is deliberately NOT one of them.**
+  `profiles.created_at` already answers it exactly, and an event landing within
+  a second of that row would let two timestamps join a name somebody chose to a
+  day of their browsing — the correlation `events._USERNAME_PATH_RE` exists to
+  prevent. The erasure events may carry the ordinary daily pseudonym precisely
+  because the profile and the trip are gone by the time the row lands, so there
+  is nothing left to line the timestamp up against. Neither carries a path, a
+  username or a trip id.
 - **`UpstreamCall.ok` means "the provider failed us", not "the answer was
   negative".** ORS saying there is no road between two points is a successful
   call with a disappointing result: it still spends a request (`calls=1`), but

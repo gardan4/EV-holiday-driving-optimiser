@@ -28,9 +28,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.failures import PlanError, reason_of
 from app.core.rate_limit import limiter
-from app.core.visitor import request_client_id, request_owner_hash, request_visitor
-from app.models import AppEvent, Profile, Trip, TripEvent, TripRun, TripStat, Vehicle
+from app.core.visitor import request_client_id, request_owner_hash
+from app.models import Profile, Trip, TripEvent, TripRun, TripStat, Vehicle
 from app.services import chargers as chargers_svc
+from app.services import counting
 from app.services import routing
 from app.services.geo import polyline_encode
 from app.services.simulator import (
@@ -130,31 +131,13 @@ async def _record_plan_failure(db: AsyncSession, request: Request, reason: str) 
     old client-side count was measured against a different population than the
     trips table it was compared with.
 
-    Rolls back first: the request is failing, whatever partial work the session
-    is holding is being discarded anyway, and a session left in a failed state
-    cannot write this row.
-
-    Never raises. A missing telemetry row is worth less than a clean error
-    response, and turning a 422 into a 500 because the counter broke would be
-    the counter causing the outage it exists to warn about.
+    `rollback=True` because the request is failing: whatever partial work the
+    session is holding is being discarded anyway, and a session left in a failed
+    state cannot write this row. Like every server-witnessed event it never
+    raises — turning a 422 into a 500 because the counter broke would be the
+    counter causing the outage it exists to warn about.
     """
-    try:
-        await db.rollback()
-        db.add(
-            AppEvent(
-                name="plan_failed",
-                # No path: this is an API call, not a page, and `KNOWN_PATHS`
-                # is an allowlist of pages. Leaving it null keeps the page
-                # breakdown honest instead of inventing a "/api/trips" entry.
-                path=None,
-                visitor=request_visitor(request),
-                client_id=request_client_id(request),
-                reason=reason,
-            )
-        )
-        await db.commit()
-    except Exception:  # noqa: BLE001 — never turn a handled failure into a 500
-        logger.warning("could not record plan failure (%s)", reason, exc_info=True)
+    await counting.record(db, request, "plan_failed", reason=reason, rollback=True)
 
 
 @router.post("", response_model=TripOut)
@@ -466,4 +449,11 @@ async def delete_trip(
     await db.delete(trip)
     await db.commit()
     logger.info("deleted trip %s… and %d drive(s)", str(tid)[:8], len(run_ids))
+
+    # The one number a delete would otherwise erase. Everything the reporting
+    # says about trips is a count of rows that are still there, so without this
+    # a corridor that shrinks looks like people stopped driving it. The event
+    # holds nothing about which trip — the id is the capability that opens it,
+    # and pairing it with a pseudonym is the join this app is built to avoid.
+    await counting.record(db, request, counting.TRIP_DELETED)
     return Response(status_code=204)

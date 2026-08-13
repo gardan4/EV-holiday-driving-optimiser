@@ -488,6 +488,31 @@ class CorridorOut(BaseModel):
     stops_per_100km: Optional[float] = None
 
 
+class ProfilesOut(BaseModel):
+    """What the opt-in username is doing.
+
+    Stock and flow in one struct, so read the labels: `live`, `with_trips` and
+    `empty` are all-time state, and the rest is the window. `published` over
+    `trips` is the number that matters — a count of stamped trips on its own
+    goes up when the app gets busier, which is not the same as the feature
+    being used.
+
+    Nothing here is per-name. This counts names, never who holds them.
+    """
+
+    live: int = 0
+    claimed: int = 0
+    released: int = 0
+    with_trips: int = 0
+    empty: int = 0
+    published: int = 0
+    trips: int = 0
+    list_views: int = 0
+    per_name: list[LabelCount] = []
+    publish_rate: Optional[float] = None
+    active_rate: Optional[float] = None
+
+
 class UsageStats(BaseModel):
     """The answer to "is anyone using this?".
 
@@ -541,3 +566,11 @@ class UsageStats(BaseModel):
     # server-side, so this counts every failure rather than only the ones a
     # browser was able to report.
     failure_reasons: list[LabelCount] = []
+
+    # The opt-in username, and what it publishes.
+    profiles: ProfilesOut = ProfilesOut()
+    # How much of the history above was taken away during the window. Both come
+    # from server-written events (`services.counting`) because the rows they
+    # describe are gone: without them a deleted trip reads as a corridor people
+    # stopped driving, and a released name as one nobody ever claimed.
+    trips_deleted: int = 0

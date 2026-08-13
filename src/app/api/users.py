@@ -51,6 +51,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.visitor import request_owner_hash
 from app.models import Profile, Trip
+from app.services import counting
 
 logger = logging.getLogger(__name__)
 
@@ -369,4 +370,12 @@ async def release_username(
     await db.delete(profile)
     await db.commit()
     logger.info("username released: %s", name)
+
+    # Counted here because nothing else can: the profile row is gone, so a
+    # release leaves no trace in `profiles` and the stock count simply drops
+    # with no record of whether a name was given up or never claimed. The event
+    # carries no username — only that one release happened — and it is safe for
+    # it to carry the ordinary pseudonym precisely because the row it describes
+    # no longer exists to line the timestamp up against. See `services.counting`.
+    await counting.record(db, request, counting.USERNAME_RELEASED)
     return Response(status_code=204)
