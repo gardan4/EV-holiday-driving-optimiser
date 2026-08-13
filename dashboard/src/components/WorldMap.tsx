@@ -207,6 +207,14 @@ export function WorldMap({
   const [hover, setHover] = useState<string | null>(null)
   const [whole, setWhole] = useState(false)
   const [dragging, setDragging] = useState(false)
+  // Focus is taken on pointerdown so the arrow keys work straight after a
+  // click — but a ring drawn around the frame every time somebody grabs the map
+  // reads as "the map got selected", which is the thing being fixed here. So
+  // the ring is shown only when focus arrived from the keyboard. `:focus-visible`
+  // is not usable for this: focus() called from a pointer handler still matches
+  // it, which was verified rather than assumed.
+  const [keyFocus, setKeyFocus] = useState(false)
+  const pointerFocus = useRef(false)
   const svgRef = useRef<SVGSVGElement | null>(null)
   const drag = useRef<{ x: number; y: number; box: Box; moved: boolean } | null>(null)
 
@@ -344,6 +352,7 @@ export function WorldMap({
     // whole dashboard flash blue mid-pan. preventDefault is what stops that;
     // it also drops the implicit focus, so focus is taken explicitly.
     e.preventDefault()
+    pointerFocus.current = true
     e.currentTarget.focus({ preventScroll: true })
     e.currentTarget.setPointerCapture(e.pointerId)
     drag.current = { x: e.clientX, y: e.clientY, box, moved: false }
@@ -511,7 +520,7 @@ export function WorldMap({
         ref={svgRef}
         viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
         preserveAspectRatio="xMidYMid meet"
-        className="mx-auto block h-auto w-full max-w-[940px] rounded-lg outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#43c389]"
+        className="mx-auto block h-auto w-full max-w-[940px] rounded-lg outline-none"
         style={{
           aspectRatio: "16 / 10",
           background: "#0d1523",
@@ -528,10 +537,19 @@ export function WorldMap({
           // Safari/Chrome on touch otherwise flash a grey box over the whole
           // frame on every tap.
           WebkitTapHighlightColor: "transparent",
+          outline: keyFocus ? "1px solid #43c389" : undefined,
         }}
         role="img"
         aria-label="Planned corridors on a world map. Drag to pan, scroll to zoom. When focused, arrow keys pan and + / - zoom."
         tabIndex={0}
+        onFocus={() => {
+          setKeyFocus(!pointerFocus.current)
+          pointerFocus.current = false
+        }}
+        onBlur={() => {
+          setKeyFocus(false)
+          pointerFocus.current = false
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
