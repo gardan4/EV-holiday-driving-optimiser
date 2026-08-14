@@ -208,7 +208,7 @@ export default function DepartureField({ value, onChange }: DepartureFieldProps)
                     aria-label={`${p.label}, ${fmtDeparture(p.iso)}`}
                     aria-pressed={on}
                     onClick={() => onChange(p.iso)}
-                    className={`flex h-[3.5rem] flex-col items-center justify-center rounded-xl border px-2 transition-all ${
+                    className={`flex h-[3.5rem] flex-col items-center justify-center rounded-xl border px-2 transition-[transform,border-color,background-color,box-shadow] duration-150 ease-out active:scale-[0.97] ${
                       on
                         ? "border-brand-400 bg-brand-50 ring-2 ring-brand-200"
                         : "border-transparent bg-ink-100 hover:bg-ink-200"
@@ -273,7 +273,7 @@ export default function DepartureField({ value, onChange }: DepartureFieldProps)
                   // scrolls at 3.5rem a cell, but a shorter strip (a picked
                   // date sitting on its own week) spreads across the full row
                   // instead of huddling at the left.
-                  className={`flex h-[3.5rem] min-w-[3.5rem] flex-1 shrink-0 snap-start flex-col items-center justify-center rounded-xl border transition-all ${
+                  className={`flex h-[3.5rem] min-w-[3.5rem] flex-1 shrink-0 snap-start flex-col items-center justify-center rounded-xl border transition-[transform,border-color,background-color,box-shadow] duration-150 ease-out active:scale-[0.97] ${
                     on
                       ? "border-brand-400 bg-brand-50 ring-2 ring-brand-200"
                       : weekend

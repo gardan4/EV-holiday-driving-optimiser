@@ -437,7 +437,13 @@ export default function TripForm() {
       <button
         type="submit"
         disabled={!ready}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-ink-900 px-6 py-3.5 font-display text-base font-semibold text-white transition-all hover:bg-ink-700 disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-400"
+        // The press is answered on the way down. This button submits a form and
+        // then navigates, so its hover state is gone before anything visible
+        // happens — without `:active` the only feedback for the app's primary
+        // action is the page eventually changing. 0.98 rather than 0.97: it is
+        // full-width, and the same ratio reads as a bigger movement the wider
+        // the element gets.
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-ink-900 px-6 py-3.5 font-display text-base font-semibold text-white transition-[transform,background-color,color] duration-150 ease-out hover:bg-ink-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-400 disabled:active:scale-100"
       >
         {submitting ? (
           <>

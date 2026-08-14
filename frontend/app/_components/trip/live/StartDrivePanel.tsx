@@ -114,7 +114,7 @@ export default function StartDrivePanel({
             <div className="mt-2 flex items-center gap-2">
               <Big label="−5" onClick={() => setSoc((s) => clamp(s - 5))} />
               <div className="flex-1 text-center">
-                <div className="font-display text-5xl font-bold tabular-nums text-ink-900">
+                <div className="font-display text-5xl font-bold tabular-nums tracking-tight text-ink-900">
                   {soc}
                   <span className="text-2xl text-ink-400">%</span>
                 </div>

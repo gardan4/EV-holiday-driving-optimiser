@@ -167,7 +167,10 @@ function LegCard({
     <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className={`rounded-2xl border bg-white p-3.5 transition-all ${
+      // Not pressable — it highlights from the chart's hover, so the properties
+      // that move are the border and the ring/shadow pair, and naming them
+      // keeps `all` from animating the padding and colour a variant changes.
+      className={`rounded-2xl border bg-white p-3.5 transition-[border-color,box-shadow] duration-150 ease-out ${
         highlighted
           ? "border-brand-400 shadow-md shadow-brand-500/10 ring-2 ring-brand-200"
           : "border-ink-100 shadow-sm"

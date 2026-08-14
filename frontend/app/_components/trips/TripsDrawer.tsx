@@ -187,13 +187,63 @@ function usePanelMorph(
   return { ref, ghost }
 }
 
-/** How far right, and how fast, counts as "take it away". A third of the panel
- *  is a deliberate commitment; a flick is a third of that at speed, because the
- *  gesture people actually make is fast and short. */
+/** How far right counts as "take it away" — a third of the panel is a
+ *  deliberate commitment. It is measured against where the gesture is GOING,
+ *  not where the finger let go (see `project`), which is what lets a short fast
+ *  flick dismiss and a long slow drag think better of it. */
 const DISMISS_FRACTION = 0.32
-const DISMISS_VELOCITY = 0.45 // px per ms
 const SWIPE_SLOP = 10 // px before a touch is a drag and not a tap
 const SETTLE_MS = 200
+const SETTLE_CURVE = "cubic-bezier(0.16, 1, 0.3, 1)"
+/** Initial slope of `SETTLE_CURVE` — dy/dx at t=0 is y1/x1 = 1/0.16. Used to
+ *  solve the settle duration that makes the animation LEAVE the finger at the
+ *  speed the finger was moving. */
+const SETTLE_SLOPE = 1 / 0.16
+const SETTLE_MIN_MS = 120
+const SETTLE_MAX_MS = 420
+
+/**
+ * Where a flick is going to end up, given how fast it was travelling.
+ *
+ * Exponential decay, the same shape a scroll view decelerates with — NOT the
+ * textbook `v²/2a`. `v` here is px per ms, so the rate factor is applied
+ * directly; at 0.998 a release at 0.5 px/ms projects about 250px, which on a
+ * 340px panel is the difference between a flick that lets go at 10% and a
+ * dismissal.
+ */
+function project(v: number, decelerationRate = 0.998) {
+  return (v * decelerationRate) / (1 - decelerationRate)
+}
+
+/**
+ * Progressive resistance past a boundary, instead of a wall.
+ *
+ * Dragging LEFT has nothing to reveal — the panel is against the right edge and
+ * the page is behind it. The honest answer to that is not to ignore the finger
+ * (which reads as the panel having frozen, i.e. as the gesture having broken)
+ * but to follow it less and less. `dimension` is the budget the resistance
+ * asymptotes to, so a hard shove opens a tenth of the panel and no more.
+ */
+function rubberband(overshoot: number, dimension: number, constant = 0.55) {
+  return (
+    (overshoot * dimension * constant) /
+    (dimension + constant * Math.abs(overshoot))
+  )
+}
+
+/** The panel's live on-screen X, mid-animation if it is mid-animation.
+ *  `getComputedStyle` reports the PRESENTATION value during a transition, which
+ *  is the whole point: a gesture that starts here starts from what the eye can
+ *  see, not from where the last animation was aiming. */
+function presentationX(el: HTMLElement) {
+  const t = getComputedStyle(el).transform
+  if (!t || t === "none") return 0
+  try {
+    return new DOMMatrixReadOnly(t).m41
+  } catch {
+    return 0
+  }
+}
 
 /**
  * Push the panel off to the right with your thumb.
@@ -224,6 +274,7 @@ function useSwipeDismiss(
     id: number
     x0: number
     y0: number
+    base: number
     x: number
     t: number
     v: number
@@ -239,31 +290,60 @@ function useSwipeDismiss(
     []
   )
 
-  const paint = (dx: number) => {
+  const paint = (x: number) => {
     const el = panelRef.current
     if (!el) return
     el.style.transition = "none"
-    el.style.transform = `translateX(${dx}px)`
+    el.style.transform = `translateX(${x}px)`
     const scrim = scrimRef.current
     if (scrim && drag.current) {
-      scrim.style.opacity = String(Math.max(0, 1 - dx / drag.current.w))
+      // Clamped at both ends: a rubber-banded drag to the left produces a
+      // negative x, and an un-clamped ratio would push the scrim past opaque.
+      scrim.style.opacity = String(
+        Math.min(1, Math.max(0, 1 - x / drag.current.w))
+      )
     }
   }
 
-  const end = (dismiss: boolean, dx: number) => {
+  /**
+   * Hand the gesture over to an animation without a seam.
+   *
+   * A fixed-duration settle is the seam: let go at speed and the panel visibly
+   * slows to somebody else's timing at the moment your thumb leaves it. There
+   * is no initial-velocity input on a CSS transition, so the duration is solved
+   * for instead — with the curve's initial slope known, `distance · slope / v`
+   * is the duration whose first frame moves at exactly `v`. Clamped, because a
+   * near-zero release would ask for an animation minutes long, and only used
+   * when the release was actually travelling towards the target; a settle that
+   * reverses direction has no velocity to inherit.
+   */
+  const settleDuration = (distance: number, v: number, towards: number) => {
+    if (distance <= 0.5) return SETTLE_MIN_MS
+    const speed = Math.sign(v) === Math.sign(towards) ? Math.abs(v) : 0
+    if (speed < 0.05) return SETTLE_MS
+    return Math.min(
+      SETTLE_MAX_MS,
+      Math.max(SETTLE_MIN_MS, (distance * SETTLE_SLOPE) / speed)
+    )
+  }
+
+  const end = (dismiss: boolean, from: number, v: number) => {
     const el = panelRef.current
     const scrim = scrimRef.current
     const w = drag.current?.w ?? 0
     drag.current = null
     if (!el) return
-    el.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`
-    el.style.transform = dismiss ? `translateX(${w}px)` : "translateX(0px)"
+    const to = dismiss ? w : 0
+    const ms = settleDuration(Math.abs(to - from), v, to - from)
+    el.style.transition = `transform ${ms}ms ${SETTLE_CURVE}`
+    el.style.transform = `translateX(${to}px)`
     if (scrim) {
-      scrim.style.transition = `opacity ${SETTLE_MS}ms ease-out`
+      scrim.style.transition = `opacity ${ms}ms ease-out`
       scrim.style.opacity = dismiss ? "0" : "1"
     }
     if (timer.current) window.clearTimeout(timer.current)
     timer.current = window.setTimeout(() => {
+      timer.current = null
       if (dismiss) {
         onDismiss()
       } else if (el) {
@@ -276,7 +356,7 @@ function useSwipeDismiss(
         scrim.style.transition = ""
         scrim.style.opacity = ""
       }
-    }, SETTLE_MS)
+    }, ms)
   }
 
   return {
@@ -286,10 +366,25 @@ function useSwipeDismiss(
       if (!open || e.pointerType !== "touch") return
       const el = panelRef.current
       if (!el) return
+      // A panel that is already settling is caught where it is, not where it
+      // was heading. Three things have to happen together or the grab reads as
+      // a jump: the pending settle is cancelled (it would otherwise fire
+      // `onDismiss` under the finger), the live transform is frozen in place,
+      // and the gesture measures from that value rather than from zero.
+      const base = presentationX(el)
+      if (timer.current) {
+        window.clearTimeout(timer.current)
+        timer.current = null
+      }
+      el.style.transition = "none"
+      el.style.transform = `translateX(${base}px)`
+      const scrim = scrimRef.current
+      if (scrim) scrim.style.transition = "none"
       drag.current = {
         id: e.pointerId,
         x0: e.clientX,
         y0: e.clientY,
+        base,
         x: e.clientX,
         t: e.timeStamp,
         v: 0,
@@ -331,9 +426,11 @@ function useSwipeDismiss(
         d.x = e.clientX
         d.t = e.timeStamp
       }
-      // Rightwards only. Dragging left would open a gap at the screen edge and
-      // there is nothing behind the panel on that side to reveal.
-      paint(Math.max(0, dx))
+      // Rightwards is free travel; leftwards resists. There is nothing behind
+      // the panel on that side to reveal, but refusing to move at all is what
+      // makes a gesture feel like it has hit a fault rather than a limit.
+      const x = d.base + dx
+      paint(x >= 0 ? x : rubberband(x, d.w * 0.1))
     },
     onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
       const d = drag.current
@@ -342,7 +439,7 @@ function useSwipeDismiss(
         drag.current = null
         return
       }
-      const dx = Math.max(0, e.clientX - d.x0)
+      const x = Math.max(0, d.base + (e.clientX - d.x0))
       // The drag ends on whatever was under the thumb — a trip card, usually,
       // which is a link. Swallow the click this gesture is about to produce.
       const swallow = (ev: MouseEvent) => {
@@ -354,7 +451,11 @@ function useSwipeDismiss(
         () => window.removeEventListener("click", swallow, { capture: true }),
         0
       )
-      end(dx > d.w * DISMISS_FRACTION || d.v > DISMISS_VELOCITY, dx)
+      // Decided on where the gesture is going, not on where it stopped. One
+      // test replaces the old distance-OR-speed pair, and it is the same test
+      // a scroll view makes: carry the release velocity forward to a resting
+      // point, then ask which side of the threshold that lands on.
+      end(x + project(d.v) > d.w * DISMISS_FRACTION, x, d.v)
     },
     onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => {
       const d = drag.current
@@ -363,7 +464,8 @@ function useSwipeDismiss(
         drag.current = null
         return
       }
-      end(false, 0)
+      const el = panelRef.current
+      end(false, el ? presentationX(el) : 0, 0)
     },
   }
 }

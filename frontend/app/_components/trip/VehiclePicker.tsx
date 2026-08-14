@@ -134,7 +134,7 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
               role="radio"
               aria-checked={selected}
               onClick={() => onChange(v.id)}
-              className={`rounded-xl border px-3 py-2.5 text-left transition-all ${
+              className={`rounded-xl border px-3 py-2.5 text-left transition-[transform,border-color,background-color,box-shadow] duration-150 ease-out active:scale-[0.98] ${
                 selected
                   ? "border-brand-400 bg-brand-50 ring-2 ring-brand-200"
                   : "border-ink-200 bg-white hover:border-ink-300"

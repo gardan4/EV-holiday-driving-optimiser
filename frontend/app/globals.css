@@ -70,17 +70,90 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+/* Opacity only — the reduced-motion stand-in for `fade-in-up`, which is the
+   same arrival without the 16px of travel. */
+@keyframes fade-in-quiet {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @layer utilities {
   .animate-float { animation: float 8s ease-in-out infinite; }
   .animate-fade-in-up { animation: fade-in-up 0.6s ease-out both; }
   .animate-pulse-soft { animation: pulse-soft 1.6s ease-in-out infinite; }
   .animate-panel-rise { animation: panel-rise 0.42s cubic-bezier(0.16, 1, 0.3, 1) both; }
-  .font-display { font-family: var(--font-display), var(--font-sans), sans-serif; }
+  /* `font-optical-sizing: auto` because the display face is the one used at
+     hero sizes: a variable font with an optical-size axis draws thinner strokes
+     and tighter apertures as it grows, which is the shape correction that stops
+     a 60px heading reading as a blown-up 16px one. Inert on a face without the
+     axis, so it costs nothing where it does not apply. */
+  .font-display {
+    font-family: var(--font-display), var(--font-sans), sans-serif;
+    font-optical-sizing: auto;
+  }
 }
 
-/* Somebody who has asked for less motion gets the panel, not the performance.
-   The morph itself is turned off in `TripsDrawer`, which checks the same query
-   — this covers the cascade, which is pure CSS and would otherwise survive. */
+/* Less motion, not less feedback.
+ *
+ * Three different answers, because "reduce" is not "remove":
+ *
+ *  - `float` GOES. Two blurred blobs drifting 20px on an 8s loop is 0.125Hz —
+ *    inside the band that provokes motion sickness — and it is a moving
+ *    background behind the whole landing page, which is the other named
+ *    trigger. Nothing is lost: they are decoration with no state in them.
+ *  - `fade-in-up` loses its travel and keeps its fade. The arrival still reads.
+ *  - `pulse-soft` STAYS. It is opacity, not movement, and it is the only thing
+ *    saying "loading" on the geocoder and "charging" on the live HUD. Removing
+ *    it would take away information from the people this query is meant to
+ *    help, which is the failure mode a blanket `animation: none` walks into.
+ *
+ * The panel morph itself is turned off in `TripsDrawer`, which checks the same
+ * query — `panel-rise` here covers the cascade, which is pure CSS and would
+ * otherwise survive it.
+ */
 @media (prefers-reduced-motion: reduce) {
   .animate-panel-rise { animation: none; }
+  .animate-float { animation: none; }
+  .animate-fade-in-up { animation: fade-in-quiet 0.2s ease-out both; }
+}
+
+/* Glass is a material, and a material has to have a solid form to fall back to.
+ *
+ * The app leans on `backdrop-filter` for hierarchy — cards, the sticky header,
+ * the trips panel, the HUD chips over the 3D scene — and every one of those
+ * pairs the blur with a background that is deliberately not opaque. Turning the
+ * blur off on its own is the worst of the three states: the wash stays
+ * see-through and now nothing is smoothing what shows through it, so the text
+ * sits directly on whatever is behind. Both properties have to move together.
+ *
+ * Matched on the class attribute rather than on a shared component, because
+ * these surfaces are Tailwind utilities spread over a dozen files; requiring
+ * the pair only where a blur was actually declared is what keeps it from
+ * flattening the washes that were never materials (`bg-white/70` on a button).
+ */
+@media (prefers-reduced-transparency: reduce) {
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  [class*="backdrop-blur"][class*="bg-white/"] { background-color: #ffffff !important; }
+  [class*="backdrop-blur"][class*="bg-black/"] { background-color: #0b1626 !important; }
+}
+
+/* More contrast: solid ground and an edge that is actually drawn. The borders
+   on these surfaces are hairlines at 12–60% alpha, which is a lighting cue and
+   not a boundary — at this setting the boundary is the point. */
+@media (prefers-contrast: more) {
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  [class*="backdrop-blur"][class*="bg-white/"] {
+    background-color: #ffffff !important;
+    border-color: var(--color-ink-700) !important;
+  }
+  [class*="backdrop-blur"][class*="bg-black/"] {
+    background-color: #06101c !important;
+    border-color: #ffffff !important;
+  }
 }

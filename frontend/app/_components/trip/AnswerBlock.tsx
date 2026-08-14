@@ -127,7 +127,7 @@ export default function AnswerBlock({
         </div>
         <div>
           <div
-            className={`font-display text-4xl font-bold leading-none sm:text-5xl ${
+            className={`font-display text-4xl font-bold leading-none tracking-tight sm:text-5xl ${
               mint ? "text-brand-600" : "text-ink-900"
             }`}
           >

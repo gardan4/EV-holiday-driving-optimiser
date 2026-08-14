@@ -26,6 +26,20 @@ const SIZE_CLASSES: Record<Size, string> = {
   lg: "text-base px-5 py-2.5 rounded-xl",
 }
 
+/**
+ * The press is answered on the way DOWN, not on the click.
+ *
+ * `:active` fires on pointer-down, so the 3% scale lands while the finger is
+ * still on the control rather than after the handler has run — which is the
+ * difference between a button that feels like it heard you and one that feels
+ * like it is deciding. It is the only feedback some of these buttons have:
+ * `primary` submits a form and navigates, so its own hover state is gone by
+ * the time anything happens.
+ *
+ * The property list is spelled out rather than `all` — `all` also animates the
+ * layout properties a variant or a caller's `className` might change, off the
+ * GPU and at this same 150ms.
+ */
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = "primary", size = "md", className = "", ...rest },
   ref,
@@ -33,7 +47,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <button
       ref={ref}
-      className={`inline-flex items-center justify-center gap-1.5 font-semibold transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 font-semibold transition-[transform,background-color,border-color,color,box-shadow,opacity] duration-150 ease-out active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
       {...rest}
     />
   )

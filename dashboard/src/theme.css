@@ -204,12 +204,32 @@ body::before {
   background: #33456180;
 }
 
+/* Opacity-only `deck-rise`, for the reduced-motion branch below. */
+@keyframes deck-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Reduce the motion, keep the feedback.
+ *
+ * This used to be the blanket `*, *::before, *::after { animation-duration:
+ * 0.001ms; transition-duration: 0.001ms }` recipe, and on a console it is the
+ * wrong trade twice over. It takes out the colour transitions on the filter
+ * chips and the panel controls, which are how the console says a chip is armed
+ * — comprehension, not decoration, and the setting is not asking for that. And
+ * it flattens `.rise` to nothing when the honest answer is to keep the arrival
+ * and drop the travel: panels and the ticker's newest row use it, and on a
+ * screen that refetches every ten seconds a row that appears with no transition
+ * at all is hard to distinguish from one that was always there.
+ *
+ * `.rise` is the only motion on this console. The `deck-pulse`, `deck-dash` and
+ * `deck-travel` keyframes above it are unreferenced. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+  .rise {
+    animation: deck-fade 200ms ease-out both;
   }
 }
