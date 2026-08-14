@@ -1,7 +1,12 @@
 {
-  // Ordered by how often you actually reach for them. Two prefixes only:
-  // "Mission control" for the dashboard, "Usage" for the production numbers
-  // you cannot get locally.
+  // Ordered by how often you actually reach for them. Three prefixes:
+  // "Mission control" for the dashboard, "Usage" for the production numbers as
+  // a report, and "Azure SQL" for the firewall rule that lets the console read
+  // production at all.
+  //
+  // Plain "Mission control" is your LOCAL database — dev rows and whatever a
+  // session seeded to build the panels. Every real number needs one of the
+  // production tasks.
   //
   // ⇧⌘B → Run app.  ⇧⌘P → "Tasks: Run Task" → everything else.
   "version": "2.0.0",
@@ -32,7 +37,7 @@
     },
     {
       "label": "Mission control",
-      "detail": "The live dashboard on :8101 — builds the UI if needed, waits for the DB, opens the browser. Reads your LOCAL database. Sign in with STATS_TOKEN from .env. Ctrl-C stops it.",
+      "detail": "The live dashboard on :8101 — builds the UI if needed, waits for the DB, opens the browser. Reads your LOCAL database, which holds dev and seeded rows, not real traffic. For the live site use 'Mission control: production'. Sign in with STATS_TOKEN from .env. Ctrl-C stops it.",
       "type": "shell",
       "command": "./scripts/dashboard.sh",
       "options": { "cwd": "${workspaceFolder}" },
@@ -43,6 +48,38 @@
         "clear": true,
         "focus": true
       }
+    },
+    {
+      "label": "Mission control: production",
+      "detail": "The same console on :8101, reading the LIVE database. Resolves the connection string from the API App Service (needs az login) and never writes it down. Requires 'Azure SQL: allow my IP' first — Azure SQL only admits the App Service.",
+      "type": "shell",
+      "command": "./scripts/dashboard.sh --remote",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "focus": true
+      }
+    },
+    {
+      "label": "Azure SQL: allow my IP",
+      "detail": "Open the production SQL firewall to this machine's current public IP, under a rule named after the machine. Run it again after switching networks — the IP moves. Needs az login.",
+      "type": "shell",
+      "command": "./scripts/sql_allow_me.sh",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "Azure SQL: revoke my IP",
+      "detail": "Close it again. Do this when you're done — the rule is one address on the public internet with a database behind it.",
+      "type": "shell",
+      "command": "./scripts/sql_allow_me.sh --remove",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
       "label": "Mission control: rebuild the UI",
