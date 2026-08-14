@@ -946,7 +946,12 @@ def consumption_factor_for_temp(temp_c: float) -> float:
     power draw, and lives in `aux_kw_for_temp`.
     """
     if temp_c < 15.0:
-        return min(1.20, 1.0 + (15.0 - temp_c) * 0.005)
+        # The ceiling is set ABOVE the coldest temperature the API accepts
+        # (-30 °C, `PlanRequest.temperature_c`) on purpose. At 1.20 it bound
+        # from -25 °C down, so every trip colder than that got an identical
+        # answer and the model stopped being a function of temperature exactly
+        # where people most doubt it.
+        return min(1.25, 1.0 + (15.0 - temp_c) * 0.005)
     return 1.0
 
 
@@ -960,7 +965,11 @@ def aux_kw_for_temp(temp_c: float) -> float:
     air-conditioning is the much smaller summer equivalent.
     """
     if temp_c < 15.0:
-        return min(4.5, (15.0 - temp_c) * 0.13)
+        # Cap raised past the coldest accepted input for the same reason as
+        # `consumption_factor_for_temp`: at 4.5 kW it bound from -19.6 °C, so a
+        # -30 °C plan was given a -20 °C heater. ~5.9 kW at -30 is a resistive
+        # heater and a pack warmer both working, which is what that is.
+        return min(6.0, (15.0 - temp_c) * 0.13)
     if temp_c > 28.0:
         return min(1.5, (temp_c - 28.0) * 0.12)
     return 0.0
@@ -979,4 +988,12 @@ def charge_power_factor_for_temp(temp_c: float) -> float:
         return 1.0 - (15.0 - temp_c) * (0.20 / 15.0)
     if temp_c >= -10.0:
         return 0.80 - (-temp_c) * (0.25 / 10.0)
-    return 0.45
+    # Below -10 this used to return a flat 0.45, which did two wrong things at
+    # once. It was DISCONTINUOUS — the branch above reaches 0.55 at -10.0, so a
+    # plan at -10.1 °C charged 18% slower than one at -10.0, a cliff no pack
+    # has and one that lands mid-range for a Nordic winter. And it was flat, so
+    # -12 °C and -30 °C were the same answer across the coldest 20 degrees the
+    # API accepts. Now it continues the taper from 0.55 to 0.35 at -30 and
+    # floors there: cars warm the pack as they drive and many precondition, so
+    # the curve bottoms out rather than heading for zero.
+    return max(0.35, 0.55 - (-temp_c - 10.0) * (0.20 / 20.0))

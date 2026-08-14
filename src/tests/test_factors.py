@@ -414,6 +414,69 @@ def test_temperature_reproduces_the_presets_it_replaced() -> None:
     assert charge_power_factor_for_temp(-10.0) == pytest.approx(0.55, abs=0.01)
 
 
+# The coldest temperature `PlanRequest.temperature_c` accepts. Every weather
+# curve has to still be a curve here, not a plateau it reached degrees ago.
+COLDEST_INPUT_C = -30.0
+
+
+def test_the_charge_derate_has_no_cliff_at_minus_ten() -> None:
+    """-10.1 °C must not charge dramatically slower than -10.0 °C.
+
+    The branch boundary used to step from 0.55 to a flat 0.45, an 18% drop
+    across a tenth of a degree — landing in the middle of the range a Nordic
+    winter actually occupies, so two plans for the same evening could disagree
+    wildly on the strength of a rounding.
+    """
+    from app.services.simulator import charge_power_factor_for_temp
+
+    below, above = charge_power_factor_for_temp(-10.001), charge_power_factor_for_temp(-9.999)
+    assert below == pytest.approx(above, abs=0.005), (
+        f"charge derate jumps from {above:.3f} to {below:.3f} across -10 °C."
+    )
+
+
+@pytest.mark.parametrize("factor_name", ["consumption", "aux", "charge"])
+def test_weather_curves_still_move_at_the_coldest_input(factor_name: str) -> None:
+    """None of the three may have flatlined before the coldest accepted input.
+
+    Each used to hit its ceiling early — aux at -19.6 °C, consumption at -25,
+    the charge derate at -10 — so a -30 °C plan silently got a warmer car's
+    answer. A model that stops responding is worse than a wrong one, because it
+    looks confident in exactly the conditions people distrust it in.
+    """
+    from app.services.simulator import (
+        aux_kw_for_temp,
+        charge_power_factor_for_temp,
+        consumption_factor_for_temp,
+    )
+
+    fn = {"consumption": consumption_factor_for_temp,
+          "aux": aux_kw_for_temp,
+          "charge": charge_power_factor_for_temp}[factor_name]
+    colder, milder = fn(COLDEST_INPUT_C), fn(COLDEST_INPUT_C + 5.0)
+    assert colder != pytest.approx(milder, abs=1e-9), (
+        f"{factor_name} gives the same answer at {COLDEST_INPUT_C} °C as at "
+        f"{COLDEST_INPUT_C + 5} °C ({colder}). It has plateaued inside the "
+        "range the API accepts."
+    )
+
+
+def test_cold_is_monotone_all_the_way_down() -> None:
+    """Colder is never cheaper, and never charges faster."""
+    from app.services.simulator import (
+        aux_kw_for_temp,
+        charge_power_factor_for_temp,
+        consumption_factor_for_temp,
+    )
+
+    temps = [t / 2.0 for t in range(int(COLDEST_INPUT_C * 2), 31)]
+    for warm, cold in zip(temps, temps[1:]):
+        warm, cold = cold, warm  # iterate warm → cold
+        assert consumption_factor_for_temp(cold) >= consumption_factor_for_temp(warm) - 1e-9
+        assert aux_kw_for_temp(cold) >= aux_kw_for_temp(warm) - 1e-9
+        assert charge_power_factor_for_temp(cold) <= charge_power_factor_for_temp(warm) + 1e-9
+
+
 def test_conditioning_costs_less_per_km_the_faster_you_go() -> None:
     """Heating is a power draw, not a tax on distance.
 
@@ -452,7 +515,12 @@ def test_temperature_factors_are_monotonic_and_bounded() -> None:
     temps = [t / 2 for t in range(-60, 90)]
     charge = [charge_power_factor_for_temp(t) for t in temps]
     assert charge == sorted(charge), "colder must never charge faster"
-    assert all(0.4 <= c <= 1.0 for c in charge)
+    # Floor is 0.35, not 0.45: the old value was a flat branch below -10 °C that
+    # made the coldest 20 degrees the API accepts indistinguishable. The bound
+    # here is the FLOOR of the taper, so it must track it — but it must stay
+    # well above zero, because a pack warms as you drive and many cars
+    # precondition, so charging gets slow rather than stopping.
+    assert all(0.35 <= c <= 1.0 for c in charge)
 
     cold = [consumption_factor_for_temp(t) for t in temps if t <= 10]
     assert cold == sorted(cold, reverse=True), "colder must never use less energy"
