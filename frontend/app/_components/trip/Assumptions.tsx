@@ -359,7 +359,11 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               <b className="font-semibold text-ink-700">Weather.</b> Consumption is a
               per-car fit from public range tests, scaled by the temperature above. Cold
               also slows <em>charging</em>, the bigger of the two effects on a winter
-              trip, so it derates the charge curve as well.
+              trip, so it derates the charge curve as well. Winter tyres, if you tick
+              them, add a further 5-10%. The cold model is fitted to motorway cruising,
+              where the heater is spread over a lot of kilometres — on short hops in the
+              same weather it will read optimistic, and drivers report we are a little
+              light below freezing generally.
             </li>
             <li>
               <b className="font-semibold text-ink-700">Cost.</b>{" "}

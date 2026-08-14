@@ -29,6 +29,7 @@ export default function TripForm() {
   const [departSoc, setDepartSoc] = useState(100)
   const [targetSoc, setTargetSoc] = useState(10)
   const [tempC, setTempC] = useState(20)
+  const [winterTyres, setWinterTyres] = useState(false)
   const [overCap, setOverCap] = useState(15)
   const [motorwayCap, setMotorwayCap] = useState(130)
   const [noLimits, setNoLimits] = useState(false)
@@ -87,6 +88,7 @@ export default function TripForm() {
         depart_soc: departSoc,
         target_soc: targetSoc,
         temperature_c: tempC,
+        winter_tyres: winterTyres,
         autobahn_open_share: autobahnShare / 100,
         motorway_cap_kph: motorwayCap,
         ignore_speed_limits: noLimits,
@@ -155,6 +157,27 @@ export default function TripForm() {
           readout={describeTemp(tempC)}
         />
         </div>
+        {/* Deliberately its own control rather than something inferred from the
+            temperature above: tyres are fitted for a season, so a mild wet day
+            on winter rubber still pays for them, and somebody driving through
+            an Alpine February on summer tyres should not be charged for grip
+            they do not have. */}
+        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl bg-ink-100 px-3.5 py-3 transition-colors hover:bg-ink-200">
+          <input
+            type="checkbox"
+            checked={winterTyres}
+            onChange={(e) => setWinterTyres(e.target.checked)}
+            className="h-5 w-5 shrink-0 accent-brand-500"
+          />
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink-900">
+            On winter tyres
+            <InfoTip>
+              Softer compound and deeper tread cost roughly 5-10% in energy, and
+              more the slower you go, because it is a cost per kilometre rather
+              than a fight with the air. A heavier car pays more of it.
+            </InfoTip>
+          </span>
+        </label>
       </FieldGroup>
 
       <FieldGroup title="What you’re carrying" hint="weight costs energy on every climb">
