@@ -262,11 +262,21 @@ export function ModelCaveats() {
   )
 }
 
+/** Marks a curve rebuilt from the CC BY measured-profile dataset; see
+ *  `scripts/refit_curves.py`. Matching on the DOI rather than on prose means a
+ *  reworded note cannot silently turn a modelled curve into a measured claim. */
+const MEASURED_MARK = "doi:10.1184/R1/30570653"
+
 export function Provenance({ variants }: { variants: Vehicle[] }) {
   // Deduped: variants on one platform share the opening paragraph, and printing
   // it three times reads as padding rather than provenance.
   const notes = [...new Set(variants.map((x) => x.source_note).filter(Boolean))]
   if (notes.length === 0) return null
+  // Some curves are digitised from measured charging sessions and some are
+  // still fitted by hand to published tests. The page states every other
+  // assumption it makes, so staying quiet about which kind you are reading
+  // would be the one place it overclaims.
+  const measured = notes.some((note) => note?.includes(MEASURED_MARK))
   return (
     <>
       <h2 className={H2}>Where these numbers come from</h2>
@@ -275,6 +285,13 @@ export function Provenance({ variants }: { variants: Vehicle[] }) {
           {note}
         </p>
       ))}
+      {!measured && (
+        <p className={LEAD}>
+          This curve is modelled from published charging tests rather than
+          digitised from a measured session, so read the stop times as an
+          estimate.
+        </p>
+      )}
     </>
   )
 }
