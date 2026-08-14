@@ -145,7 +145,7 @@ export default function FeedbackLink() {
         // double gap and the button floats mid-page. 8px on a phone, except
         // where there is a home indicator to clear (toolbar hidden, or
         // installed to the home screen), which is what the max() picks up.
-        className={`fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-4 z-40 inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/95 px-4 py-2.5 text-sm font-semibold text-ink-700 shadow-lg shadow-ink-900/10 backdrop-blur transition-[transform,box-shadow,color,border-color] duration-150 hover:-translate-y-0.5 hover:border-brand-300 hover:text-brand-700 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:bottom-4 ${
+        className={`fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-4 z-40 inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/95 px-4 py-2.5 text-sm font-semibold text-ink-700 shadow-lg shadow-ink-900/10 backdrop-blur transition-[transform,box-shadow,color,border-color] duration-150 hover-lift hover:border-brand-300 hover:text-brand-700 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:bottom-4 ${
           open ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
       >

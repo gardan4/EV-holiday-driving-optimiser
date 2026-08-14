@@ -121,16 +121,35 @@ export function App() {
   // carry coordinates — trip_stats is where corridors live and events are not
   // joined to it — so this is honest ambience rather than a claim about which
   // corridor: it says "a trip was planned just now", which is true.
+  //
+  // Gated on `prefers-reduced-motion` HERE, in JavaScript, and that is not a
+  // stylistic choice. The pulse is an SVG SMIL `<animateMotion>` (WorldMap.tsx),
+  // and SMIL is not CSS: no media query reaches it, so the `@media
+  // (prefers-reduced-motion: reduce)` block in `theme.css` leaves the single
+  // most vestibular thing on this console — a dot travelling the width of the
+  // world map, on a loop as fast as traffic arrives — running at full strength.
+  // Not rendering the element is the only off switch it has.
   const [pulses, setPulses] = useState<number[]>([])
   const arcCount = journeys?.corridors.top.length ?? 0
+  const [wantsMotion, setWantsMotion] = useState(true)
   useEffect(() => {
+    const q = window.matchMedia("(prefers-reduced-motion: reduce)")
+    const read = () => setWantsMotion(!q.matches)
+    read()
+    // Listened to rather than read once: this console is left open for hours,
+    // and the setting can change under it.
+    q.addEventListener("change", read)
+    return () => q.removeEventListener("change", read)
+  }, [])
+  useEffect(() => {
+    if (!wantsMotion) return
     const latest = live.events[0]
     if (!latest || latest.name !== "trip_planned" || arcCount === 0) return
     const idx = Math.floor(Math.random() * arcCount)
     setPulses((p) => [...p, idx])
     const t = window.setTimeout(() => setPulses((p) => p.slice(1)), 1500)
     return () => window.clearTimeout(t)
-  }, [live.beat, live.events, arcCount])
+  }, [live.beat, live.events, arcCount, wantsMotion])
 
   const totals = overview?.totals
   const counters = live.counters

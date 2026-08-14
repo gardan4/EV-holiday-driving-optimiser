@@ -35,6 +35,25 @@
   --color-chart-charge: #d98e1f;
 }
 
+/* The app's motion curves, named once.
+ *
+ * `expo` is the curve the trips panel's morph, its swipe settle and the content
+ * cascade were each spelling out by hand — three copies of the same nine
+ * characters in two files, which is how a curve drifts. The value is unchanged:
+ * expo-out is the deliberate choice, because a panel that leaves its trigger
+ * fast and settles slowly reads as one object moving rather than a box being
+ * resized. `drawer` is the iOS sheet curve, for surfaces that come off an edge.
+ *
+ * A plain `@theme` rather than the `@theme inline` above: `inline` substitutes
+ * the value into the utility and leaves no custom property behind, and these
+ * have to be readable as `var(--ease-expo)` from the inline styles that
+ * `TripsDrawer` builds in JavaScript.
+ */
+@theme {
+  --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
@@ -81,7 +100,7 @@ body {
   .animate-float { animation: float 8s ease-in-out infinite; }
   .animate-fade-in-up { animation: fade-in-up 0.6s ease-out both; }
   .animate-pulse-soft { animation: pulse-soft 1.6s ease-in-out infinite; }
-  .animate-panel-rise { animation: panel-rise 0.42s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-panel-rise { animation: panel-rise 0.42s var(--ease-expo) both; }
   /* `font-optical-sizing: auto` because the display face is the one used at
      hero sizes: a variable font with an optical-size axis draws thinner strokes
      and tighter apertures as it grows, which is the shape correction that stops
@@ -90,6 +109,118 @@ body {
   .font-display {
     font-family: var(--font-display), var(--font-sans), sans-serif;
     font-optical-sizing: auto;
+  }
+}
+
+/* Hover that MOVES something, only where hovering is real.
+ *
+ * A touch browser has no hover state, so it fakes one on tap and leaves it
+ * stuck until you tap elsewhere — which on these controls means the button you
+ * just pressed stays lifted or enlarged, reading as "still selected" long after
+ * the tap. Colour changes get away with it; a transform does not, because it is
+ * the thing that says "the pointer is here" and there is no pointer.
+ *
+ * This is a utility rather than `hover:scale-105` because Tailwind's `hover:`
+ * variant in this build compiles to a bare `:hover` with no capability query —
+ * verified in the emitted stylesheet, not assumed — so there is nothing to
+ * configure and no variant to reach for.
+ */
+ * These deliberately declare no `transition` of their own — each call site
+ * already has one covering the properties it changes, and a second declaration
+ * here would silently drop the colour and shadow from that list.
+ */
+@layer utilities {
+  @media (hover: hover) and (pointer: fine) {
+    .hover-lift:hover { transform: translateY(-2px); }
+    .hover-grow:hover { transform: scale(1.05); }
+    .hover-grow-sm:hover { transform: scale(1.01); }
+  }
+}
+
+/* Overlays that arrive and leave, instead of appearing and vanishing.
+ *
+ * Both dialogs in this app were conditionally rendered, which gave them no
+ * motion in either direction: a scrim and a sheet blinking into existence over
+ * the form. A dialog is the one surface where that matters most — it takes the
+ * whole screen away from what you were doing, and with no transition there is
+ * no moment that says so.
+ *
+ * The ENTRANCE is `@starting-style`: the browser paints the "before" state on
+ * the element's first frame and transitions off it, with no JavaScript and,
+ * more to the point, no `requestAnimationFrame` — which `TripsDrawer` records
+ * as unreliable in an unpainted tab. Browsers without it (pre-117 Chrome,
+ * pre-17.5 Safari) simply get today's instant appearance; nothing breaks.
+ *
+ * The EXIT is `data-leaving`, set by `useOverlayPresence` in `lib/overlay.ts`,
+ * which is what keeps the element mounted long enough for this to run.
+ *
+ * Enter and exit are the same path in reverse — the sheet leaves through the
+ * edge it came from — because a surface that arrives from the bottom and exits
+ * upward reads as two different objects.
+ */
+@layer utilities {
+  .overlay-scrim {
+    opacity: 1;
+    transition: opacity 200ms ease-out;
+  }
+  @starting-style {
+    .overlay-scrim { opacity: 0; }
+  }
+  .overlay-scrim[data-leaving="true"] { opacity: 0; }
+
+  /* Bottom sheet — travels its own height, so it does not need to know it. */
+  .overlay-sheet {
+    opacity: 1;
+    transform: translateY(0);
+    transition: transform 260ms var(--ease-drawer), opacity 200ms ease-out;
+  }
+  @starting-style {
+    .overlay-sheet { opacity: 0; transform: translateY(100%); }
+  }
+  .overlay-sheet[data-leaving="true"] { opacity: 0; transform: translateY(100%); }
+
+  /* Bottom sheet on a phone, centred card from `sm` up — the same element, and
+     it must not rise from the bottom of a wide screen when it is sitting in the
+     middle of one. A modal is the documented exception to origin-awareness: it
+     is anchored to nothing, so it scales from its own centre. */
+  @media (min-width: 640px) {
+    .overlay-sheet {
+      transition: transform 200ms ease-out, opacity 160ms ease-out;
+    }
+    @starting-style {
+      .overlay-sheet { opacity: 0; transform: scale(0.96); }
+    }
+    .overlay-sheet[data-leaving="true"] { opacity: 0; transform: scale(0.96); }
+  }
+}
+
+/* A disclosure that opens instead of jumping.
+ *
+ * `<details>` has no transition of its own: the assumptions panel is a tall
+ * two-column grid, and it appeared between one frame and the next, shoving the
+ * page under it. The chevron already rotated, which made it worse — one half of
+ * the control animated and the other teleported.
+ *
+ * `height` is the animated property, which is normally a defect. It is the
+ * sanctioned exception for a collapse: there is no transform that reveals
+ * content, and scaling one would squash the text inside it.
+ *
+ * Behind `@supports` and scoped to a class rather than set on `:root`.
+ * `interpolate-size` inherits, and switching keyword interpolation on for the
+ * whole document would silently change every `height: auto` transition anyone
+ * writes later. Browsers without it keep today's instant open.
+ */
+@supports (interpolate-size: allow-keywords) {
+  .disclosure {
+    interpolate-size: allow-keywords;
+  }
+  .disclosure::details-content {
+    block-size: 0;
+    overflow: hidden;
+    transition: block-size 260ms ease-out, content-visibility 260ms allow-discrete;
+  }
+  .disclosure[open]::details-content {
+    block-size: auto;
   }
 }
 
@@ -115,6 +246,29 @@ body {
   .animate-panel-rise { animation: none; }
   .animate-float { animation: none; }
   .animate-fade-in-up { animation: fade-in-quiet 0.2s ease-out both; }
+
+  /* The overlays keep their fade and lose their travel — the scrim is
+     unchanged, since a dimming layer arriving is comprehension, not motion. */
+  .overlay-sheet,
+  .overlay-sheet[data-leaving="true"] {
+    transform: none;
+  }
+  .overlay-sheet {
+    transition: opacity 160ms ease-out;
+  }
+
+  /* Hover feedback becomes non-positional. The colour and shadow on these
+     controls are declared at the call site and survive. */
+  .hover-lift:hover,
+  .hover-grow:hover,
+  .hover-grow-sm:hover {
+    transform: none;
+  }
+
+  /* A collapse that grows is pure movement, and a tall one is the worst case. */
+  .disclosure::details-content {
+    transition: none;
+  }
 }
 
 /* Glass is a material, and a material has to have a solid form to fall back to.

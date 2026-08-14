@@ -51,7 +51,7 @@ export default function LiveHud({
       {browsing && (
         <button
           onClick={onBackToNow}
-          className="mb-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white px-4 py-2.5 text-sm font-semibold text-ink-900 shadow-lg transition-transform hover:scale-[1.01]"
+          className="hover-grow-sm mb-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white px-4 py-2.5 text-sm font-semibold text-ink-900 shadow-lg transition-transform duration-150 ease-out"
         >
           <Undo2 className="h-4 w-4" />
           Back to the car
@@ -136,7 +136,7 @@ export default function LiveHud({
             href={`https://www.google.com/maps/search/?api=1&query=${live.nextStop.lat},${live.nextStop.lon}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white/95 px-3 text-xs font-semibold text-ink-900 transition-transform hover:scale-105"
+            className="hover-grow flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white/95 px-3 text-xs font-semibold text-ink-900 transition-transform duration-150 ease-out"
           >
             <Navigation className="h-3.5 w-3.5" />
             Navigate

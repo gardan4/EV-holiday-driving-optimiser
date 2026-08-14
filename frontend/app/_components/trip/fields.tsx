@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
+import { useOverlayPresence } from "@/lib/overlay"
 
 /**
  * Shared form controls. Used by the planner form and by the editable
@@ -34,6 +35,9 @@ export function InfoTip({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false)
   const [peek, setPeek] = useState(false)
   const [mounted, setMounted] = useState(false)
+  // 260ms: the sheet's own travel in `globals.css`. It outlasts the 200ms
+  // opacity, so it is the one that decides when the element may go.
+  const sheet = useOverlayPresence(open, 260)
 
   useEffect(() => setMounted(true), [])
 
@@ -73,34 +77,44 @@ export function InfoTip({ children }: { children: React.ReactNode }) {
           Visibility comes from state rather than a `group-hover/group-focus-
           within` pair: those stopped applying here and cost an hour to not
           explain, and one boolean is both simpler and testable. */}
+      {/* Grows out of the "i", rather than materialising under it. A tooltip is
+          anchored to the thing that explains it, so the default centre origin
+          is wrong here: this one hangs BELOW the trigger, which makes its top
+          edge the point it is attached by. Scaling from there — and from 0.97,
+          never from 0, because nothing in the world appears out of nothing —
+          is what makes the panel read as belonging to the button rather than
+          arriving on top of it. The x-translation is the centring, and the two
+          transforms compose. */}
       <span
         role="tooltip"
-        className={`pointer-events-none absolute left-1/2 top-full z-40 mt-2 hidden w-64 -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-xl shadow-ink-900/10 transition-opacity duration-150 sm:block ${
-          peek ? "opacity-100" : "opacity-0"
+        className={`pointer-events-none absolute left-1/2 top-full z-40 mt-2 hidden w-64 origin-top -translate-x-1/2 rounded-xl border border-ink-200 bg-white p-3 text-[11px] font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-xl shadow-ink-900/10 transition-[opacity,transform] duration-150 ease-out sm:block ${
+          peek ? "scale-100 opacity-100" : "scale-[0.97] opacity-0"
         }`}
       >
         {children}
       </span>
 
       {mounted &&
-        open &&
+        sheet.present &&
         createPortal(
           <div
-            className="fixed inset-0 z-[70] flex items-end bg-ink-900/30 backdrop-blur-[1px] sm:hidden"
+            data-leaving={sheet.leaving}
+            className="overlay-scrim fixed inset-0 z-[70] flex items-end bg-ink-900/30 backdrop-blur-[1px] sm:hidden"
             onClick={() => setOpen(false)}
             role="dialog"
             aria-modal="true"
             aria-label="What does this mean?"
           >
             <div
-              className="w-full rounded-t-2xl border-t border-ink-100 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-left text-sm font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-2xl"
+              data-leaving={sheet.leaving}
+              className="overlay-sheet w-full rounded-t-2xl border-t border-ink-100 bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] text-left text-sm font-normal normal-case leading-relaxed tracking-normal text-ink-600 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               {children}
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="mt-4 w-full rounded-xl border border-ink-200 py-3 text-sm font-semibold text-ink-700"
+                className="mt-4 w-full rounded-xl border border-ink-200 py-3 text-sm font-semibold text-ink-700 transition-transform duration-150 ease-out active:scale-[0.98]"
               >
                 Got it
               </button>

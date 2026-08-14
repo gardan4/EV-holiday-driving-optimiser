@@ -27,6 +27,7 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2, Trash2 } from "lucide-react"
 import { deleteTrip } from "@/lib/client"
+import { useOverlayPresence } from "@/lib/overlay"
 
 export default function DeleteTrip({
   tripId,
@@ -42,6 +43,9 @@ export default function DeleteTrip({
 }) {
   const router = useRouter()
   const [arming, setArming] = useState(false)
+  // 260ms, the sheet's travel on a phone — the longer of the two exits in
+  // `globals.css`, so it is the one that decides when this may unmount.
+  const dialog = useOverlayPresence(arming, 260)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -95,9 +99,10 @@ export default function DeleteTrip({
         {!compact && <span className="sr-only sm:not-sr-only">Delete</span>}
       </button>
 
-      {arming && (
+      {dialog.present && (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-ink-900/40 p-4 backdrop-blur-[2px] sm:items-center"
+          data-leaving={dialog.leaving}
+          className="overlay-scrim fixed inset-0 z-[60] flex items-end justify-center bg-ink-900/40 p-4 backdrop-blur-[2px] sm:items-center"
           onClick={() => !busy && setArming(false)}
           role="dialog"
           aria-modal="true"
@@ -107,7 +112,8 @@ export default function DeleteTrip({
               confirmation should land under the thumb, not at the top of the
               screen. */}
           <div
-            className="w-full max-w-sm rounded-2xl border border-ink-100 bg-white p-5 shadow-2xl"
+            data-leaving={dialog.leaving}
+            className="overlay-sheet w-full max-w-sm rounded-2xl border border-ink-100 bg-white p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="font-display text-lg font-semibold text-ink-900">
@@ -125,14 +131,14 @@ export default function DeleteTrip({
               <button
                 onClick={() => setArming(false)}
                 disabled={busy}
-                className="rounded-xl px-3.5 py-2 text-sm font-medium text-ink-600 transition-colors hover:bg-ink-50 disabled:opacity-60"
+                className="rounded-xl px-3.5 py-2 text-sm font-medium text-ink-600 transition-[transform,background-color] duration-150 ease-out hover:bg-ink-50 active:scale-[0.97] disabled:opacity-60 disabled:active:scale-100"
               >
                 Keep it
               </button>
               <button
                 onClick={() => void confirm()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-3.5 py-2 text-sm font-semibold text-white transition-[transform,background-color] duration-150 ease-out hover:bg-red-700 active:scale-[0.97] disabled:opacity-60 disabled:active:scale-100"
               >
                 {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 Delete

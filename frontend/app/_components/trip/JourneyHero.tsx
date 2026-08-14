@@ -592,7 +592,7 @@ export default function JourneyHero({
         <div className="pointer-events-auto mx-auto flex max-w-5xl flex-wrap items-center gap-3 rounded-2xl border border-white/12 bg-black/45 px-3 py-2.5 backdrop-blur-md">
           <button
             onClick={() => setPlaying((p) => !p)}
-            className="flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-ink-900 transition-transform hover:scale-105"
+            className="hover-grow flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 text-ink-900 transition-transform duration-150 ease-out"
             aria-label={playing ? "Pause the preview" : "Preview the drive"}
           >
             {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
@@ -646,11 +646,22 @@ export default function JourneyHero({
             <BatteryCharging
               className={`h-4 w-4 shrink-0 ${hud.charging ? "animate-pulse-soft text-brand-400" : "text-white/40"}`}
             />
+            {/* Scaled, not resized. `shownSoc` is repainted every 120ms for
+                the whole playback (see the `hudTick` throttle above), and a
+                150ms transition on `width` is therefore never allowed to
+                finish — it re-targets on every tick, so the browser runs
+                layout, paint and composite continuously, on the one page that
+                also has a WebGL scene drawing at 60fps. `scaleX` is a
+                compositor-only property: same picture, no layout.
+
+                The fill drops its own `rounded-full` because a scaled radius
+                stretches into an ellipse; the parent already clips to a pill,
+                so the shape survives and only the geometry moves. */}
             <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/15">
               <div
-                className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-150"
+                className="absolute inset-0 origin-left transition-transform duration-150 ease-out"
                 style={{
-                  width: `${shownSoc}%`,
+                  transform: `scaleX(${Math.max(0, Math.min(100, shownSoc)) / 100})`,
                   background: shownSoc < 15 ? "#e8a33d" : MINT,
                 }}
               />

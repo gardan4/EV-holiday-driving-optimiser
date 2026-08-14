@@ -63,7 +63,7 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9-]{1,22}[a-z0-9]$/
  *  rather than as a box being resized. */
 const OPEN_CLIP = "inset(0px 0px 0px 0px round 0px)"
 const MORPH_TRANSITION =
-  `clip-path ${MORPH_MS}ms cubic-bezier(0.16, 1, 0.3, 1),` +
+  `clip-path ${MORPH_MS}ms var(--ease-expo),` +
   ` opacity 180ms ease-out, visibility ${MORPH_MS}ms`
 
 /**
@@ -194,10 +194,11 @@ function usePanelMorph(
 const DISMISS_FRACTION = 0.32
 const SWIPE_SLOP = 10 // px before a touch is a drag and not a tap
 const SETTLE_MS = 200
-const SETTLE_CURVE = "cubic-bezier(0.16, 1, 0.3, 1)"
-/** Initial slope of `SETTLE_CURVE` — dy/dx at t=0 is y1/x1 = 1/0.16. Used to
+const SETTLE_CURVE = "var(--ease-expo)"
+/** Initial slope of `SETTLE_CURVE` — `--ease-expo` is
+ *  `cubic-bezier(0.16, 1, 0.3, 1)`, so dy/dx at t=0 is y1/x1 = 1/0.16. Used to
  *  solve the settle duration that makes the animation LEAVE the finger at the
- *  speed the finger was moving. */
+ *  speed the finger was moving. Retune this if the token's curve ever changes. */
 const SETTLE_SLOPE = 1 / 0.16
 const SETTLE_MIN_MS = 120
 const SETTLE_MAX_MS = 420

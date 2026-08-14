@@ -74,7 +74,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
     )
 
   return (
-    <details className="group mt-6 rounded-2xl border border-ink-100 bg-white px-4 py-3 transition-colors hover:border-ink-200 sm:px-5">
+    <details className="disclosure group mt-6 rounded-2xl border border-ink-100 bg-white px-4 py-3 transition-colors hover:border-ink-200 sm:px-5">
       <summary className="flex cursor-pointer select-none list-none items-center gap-3 marker:content-['']">
         <ChevronRight className="h-4 w-4 shrink-0 text-brand-700 transition-transform group-open:rotate-90" />
         <span className="min-w-0 flex-1">

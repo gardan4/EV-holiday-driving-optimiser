@@ -32,6 +32,11 @@
   --color-s-rose: #d9534f;
 
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* The console's one motion curve, named so the next panel does not invent a
+   * fourth near-identical ease. Crisp rather than expressive: this is a
+   * dashboard, and the app's showier expo-out belongs to the planner. */
+  --ease-deck: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 /* Bricolage Grotesque is the app's display face, but it is self-hosted by
@@ -186,7 +191,7 @@ body::before {
   animation: deck-pulse 900ms ease-out 1;
 }
 .rise {
-  animation: deck-rise 380ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: deck-rise 380ms var(--ease-deck) both;
 }
 
 ::-webkit-scrollbar {
@@ -226,8 +231,11 @@ body::before {
  * screen that refetches every ten seconds a row that appears with no transition
  * at all is hard to distinguish from one that was always there.
  *
- * `.rise` is the only motion on this console. The `deck-pulse`, `deck-dash` and
- * `deck-travel` keyframes above it are unreferenced. */
+ * `.rise` is the only motion this block can reach. The world map's corridor
+ * pulses are SVG SMIL (`<animateMotion>`), which no media query touches — they
+ * are gated in JavaScript instead, in `App.tsx`, by not rendering the element.
+ * The `deck-pulse`, `deck-dash` and `deck-travel` keyframes above are
+ * unreferenced. */
 @media (prefers-reduced-motion: reduce) {
   .rise {
     animation: deck-fade 200ms ease-out both;

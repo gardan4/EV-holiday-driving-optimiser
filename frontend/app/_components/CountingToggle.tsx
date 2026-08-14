@@ -54,9 +54,13 @@ export default function CountingToggle() {
           on ? "bg-brand-500" : "bg-ink-300"
         }`}
       >
+        {/* The knob travels on `transform`, not on `left`. Same 1.25rem of
+            movement, but off the layout path — and `left` could not be eased
+            with the rest of the switch anyway, since the track animates its
+            colour and the two would run on separate property lists. */}
         <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-[left] ${
-            on ? "left-[1.375rem]" : "left-0.5"
+          className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-150 ease-out ${
+            on ? "translate-x-[1.25rem]" : "translate-x-0"
           }`}
         />
       </button>

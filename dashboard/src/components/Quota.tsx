@@ -50,10 +50,18 @@ export function Quota({ providers }: { providers: Provider[] }) {
                 No published daily ceiling — calls are counted, headroom is not invented.
               </p>
             ) : (
+              // Scaled rather than resized: `width` is a layout property, so
+              // every refresh of this panel re-runs layout and paint for each
+              // bar. `scaleX` is composited. The fill drops its own radius —
+              // a scaled corner stretches into an ellipse, and the parent
+              // already clips to a pill.
               <div className="h-2 overflow-hidden rounded-full bg-deck-line-soft">
                 <div
-                  className="h-2 rounded-full transition-[width] duration-700"
-                  style={{ width: `${Math.max(1, used * 100)}%`, background: tone }}
+                  className="h-2 w-full origin-left transition-transform duration-500 ease-out"
+                  style={{
+                    transform: `scaleX(${Math.max(0.01, Math.min(1, used))})`,
+                    background: tone,
+                  }}
                 />
               </div>
             )}

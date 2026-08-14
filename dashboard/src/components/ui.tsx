@@ -66,10 +66,23 @@ export function Odometer({ value, className = "" }: { value: number; className?:
     }
   }, [value])
 
+  // Instant in, slow out.
+  //
+  // A flash marks the instant a number moved, so it has to arrive ON that
+  // instant. With one symmetric 600ms `ease` on both directions the mint was
+  // still fading UP at 300ms and only fully arrived at 600 — two thirds of the
+  // way through the 900ms the bump lasts — so the highlight peaked as it was
+  // already being taken away, and what the eye caught was a vague greenish
+  // wash rather than a change landing. Dropping the transition on the way in
+  // makes the colour land on the same frame as the value; the decay keeps a
+  // curve, because that half is ambience and wants to be unobtrusive.
   return (
     <span
       className={`figure ${className}`}
-      style={{ color: bumped ? "var(--color-s-mint)" : undefined, transition: "color 600ms ease" }}
+      style={{
+        color: bumped ? "var(--color-s-mint)" : undefined,
+        transition: bumped ? "none" : "color 900ms ease-out",
+      }}
     >
       {group(shown)}
     </span>
@@ -181,11 +194,15 @@ export function Bars({
               >
                 {r.label}
               </span>
-              <span className="h-2 rounded-full bg-deck-line-soft">
+              {/* scaleX, not width — these bars redraw on every ten-second
+                  refetch, and `width` puts each one through layout and paint.
+                  The radius lives on the clipping parent so a scaled corner
+                  cannot stretch into an ellipse. */}
+              <span className="block h-2 overflow-hidden rounded-full bg-deck-line-soft">
                 <span
-                  className="block h-2 rounded-full transition-[width] duration-500"
+                  className="block h-2 w-full origin-left transition-transform duration-500 ease-out"
                   style={{
-                    width: `${Math.max(2, (100 * r.value) / top)}%`,
+                    transform: `scaleX(${Math.max(0.02, r.value / top)})`,
                     background: on
                       ? "var(--color-s-mint)"
                       : "color-mix(in oklab, var(--color-s-drive) 88%, transparent)",
