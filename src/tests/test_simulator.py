@@ -4,6 +4,7 @@ Born NL→Austria scenario that motivates the whole product. Zero network."""
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -36,14 +37,32 @@ CONSTANT_100KW = VehicleParams(
 
 class TestChargeMinutes:
     def test_constant_curve_matches_analytic(self):
-        # 10% → 80% of 58 kWh = 40.6 kWh at a flat 100 kW = 0.406 h = 24.36 min.
+        # 10% → 80% of 58 kWh = 40.6 kWh INTO THE BATTERY. The curve is what the
+        # cable delivers, so at a flat 100 kW and 92% efficiency the battery
+        # banks 92 kW: 40.6 / 92 h = 26.48 min.
         got = charge_minutes(CONSTANT_100KW, 10.0, 80.0, site_kw=150.0)
-        assert got == pytest.approx(24.36, abs=0.01)
+        assert got == pytest.approx(26.48, abs=0.01)
 
     def test_site_power_clamps_the_curve(self):
         # Site limited to 50 kW → exactly twice as slow as the flat 100 kW curve.
+        # The cable → battery loss applies at a slow post too, so it is 2x the
+        # analytic figure above, not 2x an unlossy one.
         got = charge_minutes(CONSTANT_100KW, 10.0, 80.0, site_kw=50.0)
-        assert got == pytest.approx(48.72, abs=0.02)
+        assert got == pytest.approx(52.96, abs=0.02)
+
+    def test_charge_time_carries_the_cable_to_battery_loss(self):
+        """Charge TIME must scale with 1/efficiency, not just energy billed.
+
+        The curve is measured at the cable and `usable_kwh` is battery-side, so
+        dividing one by the other with no loss term makes every car in the
+        catalog charge ~7% faster than any published test. That shipped once;
+        this pins it.
+        """
+        lossless = replace(CONSTANT_100KW, charge_efficiency=1.0)
+        lossy = replace(CONSTANT_100KW, charge_efficiency=0.90)
+        a = charge_minutes(lossless, 10.0, 80.0, site_kw=150.0)
+        b = charge_minutes(lossy, 10.0, 80.0, site_kw=150.0)
+        assert b == pytest.approx(a / 0.90, rel=1e-9)
 
     def test_monotone_in_delta_soc(self):
         prev = 0.0

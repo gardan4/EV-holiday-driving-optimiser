@@ -104,6 +104,16 @@ _VOLVO_CMA_NOTE = (
     "Fastned model guide + P3 Charging Index style tests."
 )
 
+# Cars whose curve came from the CC BY 4.0 measured-profile dataset rather than
+# from a hand fit. Appended to that car's own note, so the platform sentence and
+# the per-car sentence above it still make every note unique.
+_MEASURED_CURVE_NOTE = (
+    "Charge curve measured, not drawn: digitized from published Fastned and "
+    "InsideEVs plots by Morin et al., figshare doi:10.1184/R1/30570653 "
+    "(CC BY 4.0), then reduced to anchor points that reproduce its charge "
+    "times to within 2%."
+)
+
 VEHICLES: list[dict] = [
     {
         "slug": "vw-id3-pro-58",
@@ -371,17 +381,30 @@ VEHICLES: list[dict] = [
         "usable_kwh": 77.0,
         "consumption": {"model": "quadratic", "a_wh_km": 61.0, "b_wh_km_per_kph2": 0.0133},
         "charge_curve": [
-            [0, 74], [5, 166], [10, 175], [37, 175], [47, 133], [57, 102],
-            [67, 79], [77, 60], [87, 42], [97, 28], [100, 14],
+            [0, 175],
+            [4, 165.1],
+            [10, 175],
+            [15, 174.9],
+            [18, 175],
+            [24, 151.8],
+            [40, 115.1],
+            [70, 68.4],
+            [73, 66.5],
+            [82, 69.6],
+            [100, 8],
         ],
         "max_dc_kw": 175.0,
         "mass_kg": 2325.0,
         "top_speed_kph": 180.0,
-        "source_note": _MEB_2025_NOTE
-        + " Fitted to the MY24-26 Q4 45, which shares the ID.4 Pro's pack and"
-        + " curve exactly. What differs is the body: it is the least slippery"
-        + " car on this platform, so it pays more per kilometre for the same"
-        + " charge.",
+        "source_note": (
+            _MEB_2025_NOTE
+            + " Fitted to the MY24-26 Q4 45, which shares the ID.4 Pro's pack and"
+            + " curve exactly. What differs is the body: it is the least slippery"
+            + " car on this platform, so it pays more per kilometre for the same"
+            + " charge."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "audi-q6-etron",
@@ -485,14 +508,28 @@ VEHICLES: list[dict] = [
         "usable_kwh": 75.0,
         "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0100},
         "charge_curve": [
-            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
-            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+            [0, 250],
+            [8, 227.4],
+            [14, 195.6],
+            [21, 176.6],
+            [28, 170.8],
+            [38, 135.9],
+            [53, 95.8],
+            [60, 82.1],
+            [74, 66.6],
+            [80, 48.2],
+            [83, 49.2],
+            [100, 8],
         ],
         "max_dc_kw": 250.0,
         "mass_kg": 2180.0,
         "top_speed_kph": 217.0,
-        "source_note": "Model 3 Long Range pack and curve in a taller body: same "
-        "charging, noticeably more drag. Curated from Fastned/InsideEVs tests.",
+        "source_note": (
+            "Model 3 Long Range pack and curve in a taller body: same "
+            "charging, noticeably more drag."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "tesla-modely-performance",
@@ -522,14 +559,24 @@ VEHICLES: list[dict] = [
         "usable_kwh": 95.0,
         "consumption": {"model": "quadratic", "a_wh_km": 52.0, "b_wh_km_per_kph2": 0.0089},
         "charge_curve": [
-            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
-            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+            [0, 250],
+            [3, 148.8],
+            [9, 213.3],
+            [35, 227.6],
+            [52, 141.9],
+            [76, 75.2],
+            [89, 50.3],
+            [100, 8],
         ],
         "max_dc_kw": 250.0,
         "mass_kg": 2110.0,
         "top_speed_kph": 250.0,
-        "source_note": "Big pack, low drag: one of the few cars here that can hold a "
-        "high cruise without the stops multiplying. Curated from Fastned/InsideEVs tests.",
+        "source_note": (
+            "Big pack, low drag: one of the few cars here that can hold a "
+            "high cruise without the stops multiplying."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "tesla-models-plaid",
@@ -540,14 +587,25 @@ VEHICLES: list[dict] = [
         "usable_kwh": 95.0,
         "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0097},
         "charge_curve": [
-            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
-            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+            [0, 250],
+            [2, 133.2],
+            [9, 204.7],
+            [35, 218.4],
+            [44, 167.1],
+            [55, 127],
+            [75, 74.9],
+            [88, 51.5],
+            [100, 8],
         ],
         "max_dc_kw": 250.0,
         "mass_kg": 2190.0,
         "top_speed_kph": 262.0,
-        "source_note": "Fast enough to run off the top of the sweep, so the answer is "
-        "usually still a long way below what it will do. Curated from Fastned/InsideEVs tests.",
+        "source_note": (
+            "Fast enough to run off the top of the sweep, so the answer is "
+            "usually still a long way below what it will do."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "tesla-modelx-lr",
@@ -558,14 +616,25 @@ VEHICLES: list[dict] = [
         "usable_kwh": 95.0,
         "consumption": {"model": "quadratic", "a_wh_km": 68.0, "b_wh_km_per_kph2": 0.0122},
         "charge_curve": [
-            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
-            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+            [0, 250],
+            [2, 135.9],
+            [9, 209.5],
+            [35, 223.5],
+            [44, 171.9],
+            [53, 136.4],
+            [78, 69.4],
+            [88, 52],
+            [100, 8],
         ],
         "max_dc_kw": 250.0,
         "mass_kg": 2455.0,
         "top_speed_kph": 250.0,
-        "source_note": "Model S pack in a much bigger body, and the drag difference is "
-        "the whole story between the two. Curated from Fastned/InsideEVs tests.",
+        "source_note": (
+            "Model S pack in a much bigger body, and the drag difference is "
+            "the whole story between the two."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "tesla-modelx-plaid",
@@ -576,15 +645,26 @@ VEHICLES: list[dict] = [
         "usable_kwh": 95.0,
         "consumption": {"model": "quadratic", "a_wh_km": 72.0, "b_wh_km_per_kph2": 0.0129},
         "charge_curve": [
-            [0, 90], [10, 250], [20, 210], [30, 180], [40, 150], [50, 120],
-            [60, 95], [70, 75], [80, 55], [90, 35], [100, 15],
+            [0, 250],
+            [2, 132.6],
+            [9, 204.7],
+            [35, 218.5],
+            [44, 166.8],
+            [52, 136.5],
+            [77, 70],
+            [88, 51],
+            [100, 8],
         ],
         "max_dc_kw": 250.0,
         "mass_kg": 2535.0,
         "top_speed_kph": 262.0,
-        "source_note": "Curated from Fastned/InsideEVs tests of the 2023 Model X"
-        " Plaid. Two and a half tonnes behind the largest frontal area in the"
-        " Tesla range, which is what the quadratic term here is really saying.",
+        "source_note": (
+            "Curated from Fastned/InsideEVs tests of the 2023 Model X"
+            " Plaid. Two and a half tonnes behind the largest frontal area in the"
+            " Tesla range, which is what the quadratic term here is really saying."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "tesla-cybertruck-awd",
@@ -614,14 +694,30 @@ VEHICLES: list[dict] = [
         "usable_kwh": 81.3,
         "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0100},
         "charge_curve": [
-            [0, 85], [10, 200], [20, 205], [35, 180], [45, 150], [55, 120],
-            [65, 95], [75, 70], [85, 45], [95, 22], [100, 10],
+            [0, 205],
+            [5, 198.8],
+            [15, 205],
+            [21, 182.8],
+            [36, 159.4],
+            [42, 123.9],
+            [53, 96.5],
+            [74, 68.9],
+            [78, 57.1],
+            [84, 57],
+            [86, 47.8],
+            [93, 47.8],
+            [97, 40.8],
+            [100, 8],
         ],
         "max_dc_kw": 205.0,
         "mass_kg": 2305.0,
         "top_speed_kph": 190.0,
-        "source_note": "Big 81 kWh usable pack with a broad 205 kW plateau, so long legs "
-        "and few stops. Curated from Fastned model guide + P3 Charging Index style tests.",
+        "source_note": (
+            "Big 81 kWh usable pack with a broad 205 kW plateau, so long legs "
+            "and few stops."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "bmw-ix1-edrive20",
@@ -632,16 +728,27 @@ VEHICLES: list[dict] = [
         "usable_kwh": 65.2,
         "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0117},
         "charge_curve": [
-            [0, 55], [5, 124], [10, 130], [42, 130], [52, 99], [62, 75],
-            [72, 58], [82, 44], [92, 31], [100, 10],
+            [0, 130],
+            [2, 125.4],
+            [14, 127.9],
+            [30, 122.4],
+            [50, 85.1],
+            [78, 50.2],
+            [81, 38.5],
+            [94, 40.6],
+            [100, 8],
         ],
         "max_dc_kw": 130.0,
         "mass_kg": 2120.0,
         "top_speed_kph": 170.0,
-        "source_note": "BMW iX1 eDrive20 (MY26): 130 kW and thirty minutes for 10-80%, on a "
-        "65 kWh pack that is small next to the i4's 84. It is the efficient "
-        "one of the pair at motorway speed, which narrows the range gap more "
-        "than the pack sizes imply. Curve fitted to EV Database's figures.",
+        "source_note": (
+            "BMW iX1 eDrive20 (MY26): 130 kW and thirty minutes for 10-80%, on a "
+            "65 kWh pack that is small next to the i4's 84. It is the efficient "
+            "one of the pair at motorway speed, which narrows the range gap more "
+            "than the pack sizes imply. Curve fitted to EV Database's figures."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "bmw-i5-edrive40",
@@ -652,18 +759,31 @@ VEHICLES: list[dict] = [
         "usable_kwh": 81.2,
         "consumption": {"model": "quadratic", "a_wh_km": 55.0, "b_wh_km_per_kph2": 0.0114},
         "charge_curve": [
-            [0, 87], [5, 196], [10, 206], [32, 206], [42, 157], [52, 119],
-            [62, 93], [72, 70], [82, 49], [92, 33], [100, 16],
+            [0, 206],
+            [7, 197.5],
+            [16, 206],
+            [17, 206],
+            [25, 176.3],
+            [42, 144.1],
+            [60, 98.2],
+            [71, 84.7],
+            [80, 66.3],
+            [91, 55],
+            [100, 8],
         ],
         "max_dc_kw": 206.0,
         "mass_kg": 2375.0,
         "top_speed_kph": 193.0,
-        "source_note": "BMW i5 eDrive40 Sedan (MY25), and the interesting thing about it is how "
-        "little separates it from the i4 above: 81 kWh against 81, 206 kW "
-        "against 205, both about half an hour for 10-80%. What differs is the "
-        "car around them, and at 130 km/h the bigger i5 uses about 9% more per "
-        "kilometre. Same pack, same stop, less range. Curve fitted to EV "
-        "Database's published figures.",
+        "source_note": (
+            "BMW i5 eDrive40 Sedan (MY25), and the interesting thing about it is how "
+            "little separates it from the i4 above: 81 kWh against 81, 206 kW "
+            "against 205, both about half an hour for 10-80%. What differs is the "
+            "car around them, and at 130 km/h the bigger i5 uses about 9% more per "
+            "kilometre. Same pack, same stop, less range. Curve fitted to EV "
+            "Database's published figures."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "mercedes-eqa-250-plus",
@@ -857,13 +977,27 @@ VEHICLES: list[dict] = [
         "usable_kwh": 60.0,
         "consumption": {"model": "quadratic", "a_wh_km": 54.0, "b_wh_km_per_kph2": 0.0102},
         "charge_curve": [
-            [0, 45], [10, 130], [30, 125], [40, 105], [50, 90], [60, 70],
-            [70, 55], [80, 40], [90, 25], [100, 10],
+            [0, 130],
+            [2, 124.7],
+            [13, 130],
+            [19, 128.3],
+            [40, 86.6],
+            [50, 73],
+            [58, 66.1],
+            [63, 65.6],
+            [73, 53],
+            [79, 52.4],
+            [86, 46.9],
+            [100, 8],
         ],
         "max_dc_kw": 130.0,
         "mass_kg": 1890.0,
         "top_speed_kph": 160.0,
-        "source_note": "Curated from Fastned model guide; modest 130 kW peak with early taper.",
+        "source_note": (
+            "Curated from Fastned model guide; modest 130 kW peak with early taper."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "renault-5-52",
@@ -956,14 +1090,27 @@ VEHICLES: list[dict] = [
         "usable_kwh": 72.6,
         "consumption": {"model": "quadratic", "a_wh_km": 62.0, "b_wh_km_per_kph2": 0.0128},
         "charge_curve": [
-            [0, 70], [10, 220], [45, 220], [55, 180], [65, 120], [75, 80],
-            [80, 60], [90, 35], [100, 10],
+            [0, 220],
+            [8, 206.1],
+            [45, 220],
+            [46, 220],
+            [48, 175.8],
+            [57, 180.5],
+            [62, 172.4],
+            [71, 113.5],
+            [83, 115.5],
+            [87, 58.7],
+            [100, 8],
         ],
         "max_dc_kw": 220.0,
         "mass_kg": 2280.0,
         "top_speed_kph": 185.0,
-        "source_note": "800 V platform: ~220 kW held nearly flat to ~45-50% SoC, then "
-        "steep taper. Curated from Fastned/P3 tests.",
+        "source_note": (
+            "800 V platform: ~220 kW held nearly flat to ~45-50% SoC, then "
+            "steep taper. Curated from Fastned/P3 tests."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "hyundai-ioniq5-84",
@@ -974,16 +1121,27 @@ VEHICLES: list[dict] = [
         "usable_kwh": 80.0,
         "consumption": {"model": "quadratic", "a_wh_km": 62.0, "b_wh_km_per_kph2": 0.0127},
         "charge_curve": [
-            [0, 79], [10, 263], [45, 263], [55, 208], [65, 139], [75, 92],
-            [80, 68], [90, 39], [100, 11],
+            [0, 263],
+            [3, 193.5],
+            [15, 202.6],
+            [22, 242.1],
+            [50, 259.1],
+            [53, 207.3],
+            [70, 164.4],
+            [81, 69],
+            [100, 8],
         ],
         "max_dc_kw": 263.0,
         "mass_kg": 2240.0,
         "top_speed_kph": 185.0,
-        "source_note": _EGMP_NOTE
-        + " Fitted to the MY24 84 kWh RWD, the fastest-charging car in this"
-        + " catalog: 263 kW held to 45% SoC puts 10-80% at eighteen minutes."
-        + " On a long drive that is worth more than its extra range.",
+        "source_note": (
+            _EGMP_NOTE
+            + " Fitted to the MY24 84 kWh RWD, the fastest-charging car in this"
+            + " catalog: 263 kW held to 45% SoC puts 10-80% at eighteen minutes."
+            + " On a long drive that is worth more than its extra range."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "hyundai-ioniq6-74-rwd",
@@ -994,15 +1152,28 @@ VEHICLES: list[dict] = [
         "usable_kwh": 74.0,
         "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0084},
         "charge_curve": [
-            [0, 75], [10, 233], [45, 225], [55, 185], [65, 125], [75, 82],
-            [80, 62], [90, 36], [100, 10],
+            [0, 233],
+            [8, 210.6],
+            [12, 215.7],
+            [46, 224.9],
+            [48, 179.8],
+            [57, 184.3],
+            [62, 175.7],
+            [71, 115.6],
+            [83, 118.1],
+            [88, 53.7],
+            [100, 8],
         ],
         "max_dc_kw": 233.0,
         "mass_kg": 2110.0,
         "top_speed_kph": 185.0,
-        "source_note": _EGMP_NOTE
-        + " Cd 0.21, the slipperiest car in this list, so the speed penalty bites "
-        "later than on the Ioniq 5 it shares a pack with.",
+        "source_note": (
+            _EGMP_NOTE
+            + " Cd 0.21, the slipperiest car in this list, so the speed penalty bites "
+            "later than on the Ioniq 5 it shares a pack with."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "hyundai-kona-64",
@@ -1013,19 +1184,28 @@ VEHICLES: list[dict] = [
         "usable_kwh": 64.0,
         "consumption": {"model": "quadratic", "a_wh_km": 56.0, "b_wh_km_per_kph2": 0.0120},
         "charge_curve": [
-            [0, 34], [5, 70], [10, 77], [40, 77], [50, 58], [62, 50],
-            [72, 41], [80, 34], [90, 23], [100, 8],
+            [0, 77],
+            [52, 71.5],
+            [55, 57.2],
+            [70, 58.9],
+            [78, 25.3],
+            [87, 25.7],
+            [100, 8],
         ],
         "max_dc_kw": 77.0,
         "mass_kg": 1940.0,
         "top_speed_kph": 167.0,
-        "source_note": "Hyundai Kona Electric, first generation (2018-2023): the same name as "
-        "the 2024 car and a different one to plan around: 77 kW peak against "
-        "105, so 10-80% takes forty-six minutes instead of thirty-seven, and a "
-        "long day out needs one more stop or one longer one. Marginally the "
-        "more efficient of the two at a cruise. Charging hardware did not change "
-        "across MY19, MY21 and MY22 facelifts, so one curve covers the "
-        "generation; fitted to EV Database's published figures.",
+        "source_note": (
+            "Hyundai Kona Electric, first generation (2018-2023): the same name as "
+            "the 2024 car and a different one to plan around: 77 kW peak against "
+            "105, so 10-80% takes forty-six minutes instead of thirty-seven, and a "
+            "long day out needs one more stop or one longer one. Marginally the "
+            "more efficient of the two at a cruise. Charging hardware did not change "
+            "across MY19, MY21 and MY22 facelifts, so one curve covers the "
+            "generation; fitted to EV Database's published figures."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "hyundai-kona-65",
@@ -1057,13 +1237,29 @@ VEHICLES: list[dict] = [
         "usable_kwh": 74.0,
         "consumption": {"model": "quadratic", "a_wh_km": 60.0, "b_wh_km_per_kph2": 0.0119},
         "charge_curve": [
-            [0, 75], [10, 240], [45, 230], [55, 185], [65, 125], [75, 82],
-            [80, 60], [90, 35], [100, 10],
+            [0, 240],
+            [2, 221.3],
+            [8, 228.3],
+            [39, 232.6],
+            [52, 240],
+            [53, 240],
+            [55, 180.5],
+            [62, 184.3],
+            [64, 167.8],
+            [68, 171.1],
+            [70, 158.4],
+            [77, 160.9],
+            [86, 68.5],
+            [100, 8],
         ],
         "max_dc_kw": 240.0,
         "mass_kg": 2195.0,
         "top_speed_kph": 185.0,
-        "source_note": _EGMP_NOTE,
+        "source_note": (
+            _EGMP_NOTE
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "kia-ev3-78",
@@ -1074,16 +1270,24 @@ VEHICLES: list[dict] = [
         "usable_kwh": 78.0,
         "consumption": {"model": "quadratic", "a_wh_km": 58.0, "b_wh_km_per_kph2": 0.0125},
         "charge_curve": [
-            [0, 57], [5, 128], [10, 135], [43, 135], [53, 103], [63, 78],
-            [73, 61], [83, 46], [93, 32], [100, 11],
+            [0, 135],
+            [3, 110.6],
+            [10, 121.6],
+            [62, 132.3],
+            [81, 37.4],
+            [100, 8],
         ],
         "max_dc_kw": 135.0,
         "mass_kg": 2065.0,
         "top_speed_kph": 170.0,
-        "source_note": "Kia EV3 (MY25-26): E-GMP underneath but a 400 V pack, so it charges "
-        "nothing like the 800 V EV6 above it: 135 kW and 33 minutes for "
-        "10-80%, against the EV6's 240 kW. Buyers routinely expect otherwise. "
-        "Curve fitted to the 10-80% time published by EV Database.",
+        "source_note": (
+            "Kia EV3 (MY25-26): E-GMP underneath but a 400 V pack, so it charges "
+            "nothing like the 800 V EV6 above it: 135 kW and 33 minutes for "
+            "10-80%, against the EV6's 240 kW. Buyers routinely expect otherwise. "
+            "Curve fitted to the 10-80% time published by EV Database."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "toyota-bz4x-71",
@@ -1348,15 +1552,28 @@ VEHICLES: list[dict] = [
         "usable_kwh": 91.0,
         "consumption": {"model": "quadratic", "a_wh_km": 72.0, "b_wh_km_per_kph2": 0.0128},
         "charge_curve": [
-            [0, 100], [5, 145], [10, 150], [20, 145], [30, 130], [40, 112],
-            [50, 92], [60, 74], [70, 56], [80, 40], [90, 22], [100, 9],
+            [0, 150],
+            [2, 137.3],
+            [5, 150],
+            [8, 105.7],
+            [25, 107.8],
+            [31, 96],
+            [41, 95.2],
+            [48, 76.7],
+            [77, 79.3],
+            [81, 11.9],
+            [100, 8],
         ],
         "max_dc_kw": 150.0,
         "mass_kg": 2200.0,
         "top_speed_kph": 180.0,
-        "source_note": _US_NOTE
-        + " Fitted to the 2023 Extended Range RWD. A modest 150 kW peak that"
-        + " holds unusually flat, so it rewards longer stops than its rivals.",
+        "source_note": (
+            _US_NOTE
+            + " Fitted to the 2023 Extended Range RWD. A modest 150 kW peak that"
+            + " holds unusually flat, so it rewards longer stops than its rivals."
+            + " "
+            + _MEASURED_CURVE_NOTE
+        ),
     },
     {
         "slug": "ford-f150-lightning-er",

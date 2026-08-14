@@ -249,10 +249,51 @@ the pipeline is green before infra exists. Infra deploy is manual
   deliberately **independent**: `evtrip.cid` is deleted when somebody opts out
   of counting, and deleting the owner secret alongside it would silently take
   away a username they asked for.
+- **Usernames are counted, and never listed** (`services/profiles.py`). The
+  drawer shipped measurable by nothing — trips were counted, drives were
+  counted, and the one feature with a stated purpose ("stop people replanning a
+  journey they already planned") had no number at all. Five things make the fix
+  work. **Adoption is read from the `trips` table**, not from `trip_planned`
+  events: the share of trips carrying an `owner_hash` cannot be moved by an ad
+  blocker, and a ratio of two differently-sampled populations would not be a
+  ratio. **Claims and releases are server-side events** (`SERVER_ONLY_EVENTS`),
+  because a claim is a state change only the server can confirm and it is
+  cross-checked against `profiles.created_at` — two counts that can be forged
+  apart are not a cross-check. **A release leaves nothing else behind**: the row
+  is deleted, so without `profile_released` a name claimed and given back inside
+  one window is invisible in both directions. **`trips_opened` is the one
+  browser-sent event**, because the drawer is a panel and not a route, so
+  opening it produces no page view; it counts the deliberate open only, not the
+  restore from localStorage, or a panel left open would answer once per page
+  load instead of once per intention. **Two clocks, both labelled**: claims,
+  releases and adoption are the window; live, dormant, returning and the spread
+  are all-time, because a rare event scoped to seven days reads zero on a quiet
+  week and looks like a dead feature. And the whole surface is aggregate —
+  **no per-name row, no drilldown, no username in `app_events`**, which is the
+  same rule `events.normalize_path` enforces on `/u/<name>` and would be
+  pointless there if the console gave the names back.
 - **No in-app map.** The 3D journey scene is the visualization; per-stop
   Google Maps deep links cover navigation. Keeps CSP self-hosted.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,
   charge to ~60-80%", not hardcode it (tests assert this emerges).
+- **Charge TIME carries the cable→battery loss, and the curves are measured.**
+  The curve is what a charger delivers; `usable_kwh` is what reaches the
+  battery. Dividing one by the other with no loss term made every car in the
+  catalog charge ~7% faster than any published test — `charge_efficiency`
+  existed but was spent only on pricing energy. It is now applied in
+  `charge_minutes` AFTER the site cap (a car pinned at a 50 kW post still banks
+  only ~93% of it) and mirrored in `frontend/lib/vehicles.ts`, or the `/ev`
+  pages publish times the planner disagrees with. Separately, the curves
+  themselves were hand-fitted and drifted up to 26% from measured behaviour in
+  BOTH directions — a Model Y 20% fast, a Model S 21% slow, because one curve
+  served eight Teslas. `scripts/refit_curves.py` rebuilds them from a CC BY 4.0
+  dataset of measured profiles (Morin et al., doi:10.1184/R1/30570653); the
+  licence is attribution-only, hence `_MEASURED_CURVE_NOTE` on every car it
+  touches. Two rules there are load-bearing: a measured peak is NOT adopted as
+  `max_dc_kw` (sessions start where the driver plugged in, so the Model Y
+  profile "peaks" at 230 kW simply because it began at 8% SoC), and any curve
+  disagreeing with the catalog's advertised peak by >3% is refused rather than
+  applied, because that is a product claim and not a curve tweak.
 - **The planner is worldwide, the speed caps are not.** Any place ORS can route
   between is plannable; `simulator._default_country_caps` only knows eight
   western-European countries and everywhere else falls back to

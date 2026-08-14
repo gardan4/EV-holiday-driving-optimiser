@@ -27,6 +27,10 @@ class VehicleOut(BaseModel):
     max_dc_kw: float
     mass_kg: float = 1900.0
     top_speed_kph: float = 180.0
+    # The `/ev` pages recompute charge times from the curve, and the curve is
+    # cable-side while `usable_kwh` is battery-side — so they need the same loss
+    # term the simulator uses or they publish times the planner disagrees with.
+    charge_efficiency: float = 0.92
     source_note: Optional[str] = None
 
 

@@ -201,14 +201,20 @@ export function curvePowerKw(v: Vehicle, soc: number): number {
  * Minutes to charge `socFrom` → `socTo` on a charger fast enough not to be the
  * limit. Midpoint-rule integral over the piecewise-linear curve, as in the
  * simulator — so this is the car's own ceiling, not what a specific site gives.
+ *
+ * The curve is measured at the CABLE and `usable_kwh` is battery-side, so the
+ * delivered power is derated by `charge_efficiency` before it is divided into
+ * battery energy — exactly as `simulator.charge_minutes` does. Without it these
+ * pages publish charge times ~7% faster than the planner and than any test.
  */
 export function chargeMinutes(v: Vehicle, socFrom: number, socTo: number): number {
   if (socTo <= socFrom) return 0
+  const eff = Math.max(v.charge_efficiency ?? 0.92, 0.5)
   let minutes = 0
   let soc = socFrom
   while (soc < socTo - 1e-9) {
     const step = Math.min(INTEGRATION_STEP, socTo - soc)
-    const p = Math.max(curvePowerKw(v, soc + step / 2), 1)
+    const p = Math.max(curvePowerKw(v, soc + step / 2) * eff, 1)
     minutes += (60 * ((v.usable_kwh * step) / 100)) / p
     soc += step
   }

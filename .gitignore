@@ -107,3 +107,6 @@ claude-code-main
 # Shared editor tasks (rest of .vscode stays ignored)
 !.vscode/tasks.json
 !.vscode/settings.json
+
+# Download cache for scripts/refit_curves.py (CC-BY profile dataset)
+src/.cache/

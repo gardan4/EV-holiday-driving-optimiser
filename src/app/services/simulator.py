@@ -375,6 +375,15 @@ def charge_minutes(
 
     `power_factor` derates the car's curve — a cold pack accepts far less than
     the datasheet says, which is the dominant winter effect.
+
+    The curve is measured at the CABLE — public fast-charge tests report what
+    the charger delivers — while `usable_kwh` is what reaches the battery. Not
+    every kW crossing the cable gets stored, so the delivered power is derated
+    by `charge_efficiency` before it is divided into battery-side energy.
+    Without this the whole catalog charges ~7% faster than any published test,
+    on top of whatever a given car's curve gets wrong. The derate is applied
+    AFTER the site cap because the loss is real in both regimes — a car pinned
+    at a 50 kW post still only banks ~93% of those 50 kW.
     """
     if soc_to <= soc_from:
         return 0.0
@@ -383,6 +392,7 @@ def charge_minutes(
     while soc < soc_to - 1e-9:
         step = min(_INTEGRATION_STEP, soc_to - soc)
         p = min(curve_power_kw(soc + step / 2.0, veh) * power_factor, site_kw)
+        p *= max(veh.charge_efficiency, 0.5)  # cable → battery
         p = max(p, 1.0)  # guard against degenerate curves
         minutes += 60.0 * (veh.usable_kwh * step / 100.0) / p
         soc += step
