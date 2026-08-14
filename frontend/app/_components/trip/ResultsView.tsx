@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import Link from "next/link"
 import { Check, Link2, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
-import { LiveRun, SpeedResult, Trip } from "@/lib/client"
+import { LiveRun, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
 import { buildVerdict } from "@/lib/summary"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
@@ -213,12 +213,6 @@ export default function ResultsView({
               onSelect={select}
               restIntervalMin={trip.request.rest_interval_min ?? 0}
             />
-            <SpeedPills
-              speeds={result.speeds}
-              optimumSpeed={result.optimum_speed}
-              selectedSpeed={selectedSpeed}
-              onSelect={select}
-            />
             <CostChart
               speeds={result.speeds}
               optimumSpeed={result.optimum_speed}
@@ -270,53 +264,4 @@ function short(label: string): string {
   return label.split(",")[0]
 }
 
-function SpeedPills({
-  speeds,
-  optimumSpeed,
-  selectedSpeed,
-  onSelect,
-}: {
-  speeds: SpeedResult[]
-  optimumSpeed: number | null
-  selectedSpeed: number
-  onSelect: (speed: number) => void
-}) {
-  return (
-    <div>
-      {/* The pills, the two charts and the journey band at the top of the page
-          are all one selection. Say so once, next to the plainest control. */}
-      <p className="mb-1.5 px-0.5 text-xs text-ink-400">
-        <span className="font-semibold text-ink-500">Cruise speed</span> sets the
-        itinerary, both charts, and the journey you scroll through at the top.
-      </p>
-      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Cruise speed">
-        {speeds.map((s) => {
-          const isSelected = s.speed_kph === selectedSpeed
-          const isBest = s.speed_kph === optimumSpeed
-          return (
-            <button
-              key={s.speed_kph}
-              role="radio"
-              aria-checked={isSelected}
-              disabled={!s.feasible}
-              onClick={() => onSelect(s.speed_kph)}
-              title={!s.feasible ? "Not feasible: charger gaps too large at this speed" : undefined}
-              className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs font-semibold transition-colors ${
-                isSelected
-                  ? "border-ink-900 bg-ink-900 text-white"
-                  : isBest
-                    ? "border-brand-400 bg-brand-50 text-brand-800 hover:bg-brand-100"
-                    : s.feasible
-                      ? "border-ink-200 bg-white text-ink-700 hover:border-ink-300"
-                      : "cursor-not-allowed border-ink-100 bg-ink-100/50 text-ink-300 line-through"
-              }`}
-            >
-              {s.speed_kph}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
