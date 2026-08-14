@@ -42,9 +42,23 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   codec, point→route projection, coarse EU country boxes.
 - **Routers** `src/app/api/` — `vehicles.py`, `geocode.py`, `trips.py`
   (`POST /api/trips` = plan + persist permalink; sweep runs via
-  `asyncio.to_thread`), `feedback.py`, `events.py`, `users.py` (claim/release a
-  public username; the trips list under one). Schemas in `api/schemas.py`
-  mirror `frontend/lib/client.ts`.
+  `asyncio.to_thread`), `runs.py` (the live drive — see below), `feedback.py`,
+  `events.py`, `users.py` (claim/release a public username; the trips list
+  under one). Schemas in `api/schemas.py` mirror `frontend/lib/client.ts`.
+- **The live drive** `src/app/api/runs.py` + `src/app/services/live.py` —
+  following a trip while it is actually being driven. `live.py` is pure like
+  the simulator (plain dicts in, plain dicts out, no DB, no clock): a GPS fix
+  snaps to the polyline, the battery is inferred from progress since the last
+  figure the driver typed in, and the drive is scored against the plan's
+  timeline. `runs.py` supplies persistence and the timestamps, and owns the
+  security model — the **trip id** is a public read capability, the **run id**
+  is the driver's write token, returned exactly once and never in a read
+  response (`tests/test_live_api.py::TestCapabilities` greps every read
+  response for it). Route + chargers are snapshotted at start, so a cache
+  expiry mid-drive cannot change the road being benchmarked against.
+  `POST /runs/{id}/replan` re-sweeps the remaining slice; the ping path stays
+  deliberately cheap (one route profile, two lerps) so it can sit on the event
+  loop.
 - **Usage counting** `src/app/api/events.py` + `src/app/core/visitor.py` +
   `src/app/services/usage.py` — first-party, no third-party script, no CSP
   change. `POST /api/events` takes an allowlisted event name; the read side is
@@ -62,6 +76,9 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   `services/trip_shape.py` (distance and charge-share distributions, departure
   month, transit countries) and `services/upstream_health.py` (ORS/OCM as a
   trend, with latency percentiles).
+- **Usernames as numbers** `services/profiles.py` — the one reader of
+  `profiles` + `trips.owner_hash` for reporting, behind `GET /api/names`, the
+  terminal report and `usage_stats`. Counts only; see the design decision below.
 - **The admin dashboard** `src/app/api/admin.py` + `dashboard/` — its own
   process role, its own origin, its own auth. See the design decision below.
 - **Models** `src/app/models/__init__.py` — `Vehicle` (curated catalog with
@@ -128,6 +145,11 @@ running it — `npm --prefix dashboard run build` also runs `tsc --noEmit`.
   mechanic, so depth costs no extra UI.
 - `lib/useStream.ts` is the `EventSource` layer (capped ticker, rolling
   counters, reconnect state). Panels refetch on a beat, throttled to 10s.
+- `components/Names.tsx` — the username row, from `GET /api/names`. Like the
+  map it reads tables with no facets on them, so the chips do not narrow it and
+  the panels say which numbers are the window and which are all-time. It is the
+  one row on the console with **no drilldown**, deliberately: the next question
+  after "how many names" is "which names", and that is a list of people.
 - `components/WorldMap.tsx` — corridors as arcs over **the whole world**, drawn
   with **`d3-geo`** (`geoNaturalEarth1` + `geoPath` + `geoInterpolate`).
   Geometry is **Natural Earth, public domain**, simplified to ~0.18° and bundled
@@ -276,6 +298,35 @@ the pipeline is green before infra exists. Infra deploy is manual
   Google Maps deep links cover navigation. Keeps CSP self-hosted.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,
   charge to ~60-80%", not hardcode it (tests assert this emerges).
+- **A drive is simulated under the assumptions its own plan was made with, and
+  there is ONE function that says what those are.** `trips.sim_params_for` is
+  the only place a `PlanRequest` becomes a `SimParams`; `runs._sim_params`
+  calls it and adds nothing but `run_factor`, the consumption calibration this
+  drive has learned from the driver's own SoC readings. It used to be a second
+  copy of the same mapping, which is only correct on the day it is written: it
+  was missing `motorway_cap_kph` and `ignore_speed_limits`, both added to the
+  planner later and neither wired into the drive, and **nothing failed either
+  time** — both halves still ran, they just stopped being about the same
+  journey. The cost is not visible in a diff. The replan was benchmarked
+  against a promise made under other speed rules, so a trip planned with the
+  limits ignored was re-planned under legal caps and `benchmark.delta_min`
+  reported a delay nobody took; and `live.advance` prices every segment through
+  these same params, so the inferred battery went with it. Adding a planning
+  field therefore means adding it to `sim_params_for` and nowhere else, and
+  `tests/test_live_api.py::TestPlanParity` fails until every field on
+  `PlanRequest` is classified as reaching the simulator directly, reaching it
+  transformed, or not being a simulator setting — because that decision being
+  implicit is what the bug was.
+- **The phone drives the plan the reader chose, not the optimum.** "Drive this"
+  hands `/trip/[id]/drive?speed=` to the phone, appended only when the
+  selection is not `optimum_speed` so ordinary links and the QR for an
+  untouched plan stay bare. It matters because the drive is *followed and
+  benchmarked* against that plan: starting the optimum for somebody who
+  deliberately dialled down swaps their journey silently. The parameter is
+  resolved against the trip's OWN feasible speeds rather than parsed as a
+  number — it is a public URL that gets scanned, forwarded and edited, and a
+  speed the trip never simulated has no itinerary behind it — with the optimum
+  as the fallback, which is what the button did before it existed.
 - **Charge TIME carries the cable→battery loss, and the curves are measured.**
   The curve is what a charger delivers; `usable_kwh` is what reaches the
   battery. Dividing one by the other with no loss term made every car in the
@@ -479,12 +530,27 @@ the pipeline is green before infra exists. Infra deploy is manual
 - **The dashboard is LOCAL ONLY, and is a process role rather than an app.**
   `PROCESS_ROLE=dashboard` (`./scripts/dashboard.sh`, or the "Mission control"
   VS Code task) serves the console on :8101 against whatever `DATABASE_URL`
-  says — in practice the local database, since Azure SQL only admits the App
-  Service outbound IPs. **Production numbers therefore still come from
-  `usage_report --remote` / `usage_dashboard --remote`**, which read the
-  token-gated `GET /api/events/stats`. Closing that gap means either putting
-  the console on an App Service after all (see below) or adding your own IP to
-  `sqlAllowedIps` — a real firewall change, not a convenience.
+  says. Plain `dashboard.sh` is the **local** database, which holds dev rows and
+  whatever a session seeded to build the panels — not traffic, and mistaking one
+  for the other is a real hazard on a screen that looks this authoritative, so
+  the task descriptions say so.
+  **`./scripts/dashboard.sh --remote` reads production**, and three things make
+  that safe rather than convenient. The connection string is **resolved from the
+  API App Service at run time** (`az webapp config appsettings list`) instead of
+  copied into `.env` — a second copy of a production DB password on a laptop
+  goes stale, gets committed, or gets pasted, and `az login` is an authorisation
+  gate that a file is not. The console **never migrates**: `_run_common_startup`
+  skips `init_db()` for this role, because `create_all` is idempotent but not
+  read-only — from a checkout ahead of the deployment it silently creates tables
+  outside the migration history. And the firewall hole is **its own deliberate
+  command** (`./scripts/sql_allow_me.sh`, ⇧⌘P → "Azure SQL: allow my IP"), a
+  named per-machine rule that `--remove` takes away. It is deliberately **not**
+  `sqlAllowedIps`: that parameter is resolved by the infra job from the live App
+  Service's outbound set, so a laptop added there is wiped on the next deploy
+  and makes the source claim an App Service IP that is really somebody's
+  kitchen table. Incremental deployments leave the separate rule alone.
+  `usage_report --remote` / `usage_dashboard --remote` are still the
+  no-firewall path, through the token-gated `GET /api/events/stats`.
   Nothing about it is in `infra/` or `deploy.yml`: no App Service, no image
   content, no CI step, and `src/dashboard_static/` is gitignored so the API
   image never carries the bundle. **If that ever changes**, three things come
@@ -561,13 +627,17 @@ uv run python -m scripts.usage_dashboard            # local HTML snapshot; --rem
 # password is STATS_TOKEN from .env; empty means every route 404s by design.
 # VS Code: ⇧⌘P → "Mission control".
 #
-# It reads DATABASE_URL, i.e. your LOCAL database — Azure SQL is firewalled to
-# the App Service outbound IPs, so a laptop cannot reach it. For PRODUCTION use
-# `usage_report --remote` / `usage_dashboard --remote` (above), which go
-# through the token-gated GET /api/events/stats instead.
+# Plain, it reads DATABASE_URL — your LOCAL database, i.e. dev rows and seeded
+# demo data, NOT traffic. `--remote` reads production instead: it resolves the
+# connection string from the API App Service (needs `az login`, never stores
+# it) and needs the SQL firewall opened to this machine first. The console
+# never migrates in either mode.
 ./scripts/dashboard.sh
 ./scripts/dashboard.sh --build        # force a UI rebuild first
 ./scripts/dashboard.sh --build-only   # compile the UI, don't serve
+./scripts/sql_allow_me.sh             # let this machine through Azure SQL…
+./scripts/dashboard.sh --remote       # …then the console on LIVE data
+./scripts/sql_allow_me.sh --remove    # close it again when you're done
 npm --prefix dashboard run dev        # Vite on 5273 w/ HMR, proxying /api to 8101
 # Post launch links tagged: https://…/?src=r-electricvehicles (see CAMPAIGN_SOURCES)
 
