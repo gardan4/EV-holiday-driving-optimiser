@@ -10,17 +10,22 @@ it" is that the run id never leaves the response that creates it.
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api.runs import _sim_params
+from app.api.schemas import PlanRequest
+from app.api.trips import sim_params_for
 from app.core.database import Base, get_db
 from app.main import app
 from app.models import Vehicle
 from app.services.geo import RouteGeometry
 from app.services.routing import RouteData
-from app.services.simulator import ChargerNode
+from app.services.simulator import ChargerNode, SimParams
 from tests.fixtures import nl_to_austria_route
 from tests.test_api import BORN_SEED, plan_body
 
@@ -103,10 +108,10 @@ async def client(db_session, monkeypatch):
     app.dependency_overrides.clear()
 
 
-async def make_trip(client) -> dict:
+async def make_trip(client, **overrides) -> dict:
     vehicles = await client.get("/api/vehicles")
     vid = vehicles.json()[0]["id"]
-    resp = await client.post("/api/trips", json=plan_body(vid))
+    resp = await client.post("/api/trips", json=plan_body(vid, **overrides))
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -584,6 +589,156 @@ class TestReplanning:
         live = (await client.get(f"/api/trips/{trip['id']}/live")).json()
         assert live["plan"] is not None
         assert live["plan"]["plan_version"] == 1
+
+
+class TestPlanParity:
+    """A drive must be simulated under the assumptions its plan was made with.
+
+    This is the seam that has broken twice. A field is added to `PlanRequest`,
+    wired into the planner, and NOT into the live path — and nothing fails,
+    because both halves still run. The drive just quietly plans a different
+    journey than the driver is on: the mid-drive replan benchmarks against a
+    promise made under other rules, and `live.advance` prices every segment
+    through the same params, so the battery estimate goes with it.
+    `motorway_cap_kph` and `ignore_speed_limits` were both missing this way.
+
+    So the guard is not "these two agree today" — it is that there is one
+    builder, and that every field on `PlanRequest` has been consciously placed
+    on one side of the line.
+    """
+
+    # request field → the `SimParams` field it becomes, unchanged.
+    DIRECT = {
+        "depart_soc": "depart_soc",
+        "target_soc": "target_soc",
+        "autobahn_open_share": "autobahn_open_share",
+        "motorway_cap_kph": "default_country_cap_kph",
+        "ignore_speed_limits": "ignore_speed_limits",
+        "over_cap_kph": "over_cap_kph",
+        "over_freeflow_factor": "over_freeflow_factor",
+        "site_power_factor": "site_power_factor",
+        "queue_min": "queue_min",
+        "stop_overhead_min": "stop_overhead_min",
+        "rest_interval_min": "rest_interval_min",
+        "rest_min": "rest_min",
+        "price_per_kwh": "price_per_kwh",
+        "winter_tyres": "winter_tyres",
+    }
+
+    # Reaches the simulator, but transformed on the way — asserted by value
+    # below rather than by name.
+    DERIVED = {
+        "temperature_c",       # → consumption_factor, charge_power_factor, aux_kw
+        "conditions_factor",   # → consumption_factor, when no temperature is given
+        "charge_power_factor",  # → charge_power_factor, likewise
+        "occupants",           # ┐
+        "luggage_kg",          # ┘→ extra_mass_kg
+    }
+
+    # Not simulator settings: they choose the route, the car, or which speeds
+    # to sweep, none of which a `SimParams` carries.
+    NOT_SIM = {
+        "origin",
+        "dest",
+        "vehicle_id",
+        "departure_iso",
+        "speed_min",
+        "speed_max",
+        "speed_step",
+    }
+
+    # Every direct field, set to something that is NOT the simulator's own
+    # default — so a mapping that silently falls back to the default fails.
+    LOUD = {
+        "depart_soc": 90.0,
+        "target_soc": 25.0,
+        "autobahn_open_share": 0.85,
+        "motorway_cap_kph": 112.0,
+        "ignore_speed_limits": True,
+        "over_cap_kph": 14.0,
+        "over_freeflow_factor": 1.12,
+        "site_power_factor": 0.62,
+        "queue_min": 7.0,
+        "stop_overhead_min": 11.0,
+        "rest_interval_min": 210.0,
+        "rest_min": 33.0,
+        "price_per_kwh": 0.81,
+        "winter_tyres": True,
+    }
+
+    def _request(self, **overrides) -> PlanRequest:
+        return PlanRequest.model_validate(
+            plan_body("f1a0e4d2-0000-4000-8000-000000000000", **{**self.LOUD, **overrides})
+        )
+
+    def test_every_request_field_is_classified(self):
+        """Adding a field to `PlanRequest` fails this until somebody decides
+        whether a drive needs it. That decision being implicit is the bug."""
+        classified = set(self.DIRECT) | self.DERIVED | self.NOT_SIM
+        assert set(PlanRequest.model_fields) == classified
+
+    def test_every_direct_field_reaches_the_simulator(self):
+        p = sim_params_for(self._request())
+        defaults = SimParams()
+        for req_field, sim_field in self.DIRECT.items():
+            want = self.LOUD[req_field]
+            # Guard against a vacuous pass: if the "loud" value ever equals the
+            # simulator default, this test would hold with nothing wired up.
+            assert getattr(defaults, sim_field) != want, req_field
+            assert getattr(p, sim_field) == want, f"{req_field} → {sim_field}"
+
+    def test_the_derived_fields_reach_it_too(self):
+        warm = sim_params_for(self._request(temperature_c=20.0, occupants=2, luggage_kg=30.0))
+        cold = sim_params_for(self._request(temperature_c=-12.0, occupants=5, luggage_kg=120.0))
+        assert cold.consumption_factor > warm.consumption_factor
+        assert cold.charge_power_factor < warm.charge_power_factor
+        assert cold.aux_kw > warm.aux_kw
+        assert cold.extra_mass_kg > warm.extra_mass_kg
+
+        # Without a temperature the legacy multipliers are used as given, and
+        # no conditioning load is implied.
+        legacy = sim_params_for(
+            self._request(temperature_c=None, conditions_factor=1.25, charge_power_factor=0.7)
+        )
+        assert legacy.consumption_factor == pytest.approx(1.25)
+        assert legacy.charge_power_factor == pytest.approx(0.7)
+        assert legacy.aux_kw == 0.0
+
+    def test_the_drive_builds_the_same_params_as_the_plan(self):
+        req = self._request()
+        assert _sim_params(req) == sim_params_for(req)
+
+    def test_the_learned_calibration_is_the_only_difference(self):
+        """`run_factor` is what a drive knows that a plan cannot — this car, on
+        this day, in this wind. It must be the ONLY thing it changes."""
+        req = self._request()
+        plan = sim_params_for(req)
+        drive = _sim_params(req, 1.3)
+        assert drive.consumption_factor == pytest.approx(plan.consumption_factor * 1.3)
+        for f in fields(SimParams):
+            if f.name == "consumption_factor":
+                continue
+            assert getattr(drive, f.name) == getattr(plan, f.name), f.name
+
+    async def test_a_replan_honours_the_what_if_the_plan_was_made_under(self, client):
+        """End to end, through the endpoints: the same drive, replanned, is
+        faster on a trip planned with the limits ignored. This is the assertion
+        that would have caught the original bug — the mapping was fine in
+        isolation and wrong where it was used."""
+
+        async def replan_total(**plan_overrides) -> float:
+            trip = await make_trip(client, **plan_overrides)
+            run = await start_run(client, trip)
+            await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+            resp = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+            assert resp.status_code == 200, resp.text
+            return resp.json()["remaining"]["total_min"]
+
+        # Same cruise speed band either way, so the only thing that can move
+        # the answer is whether the caps are being applied.
+        legal = await replan_total(speed_min=140.0, speed_max=140.0)
+        free = await replan_total(speed_min=140.0, speed_max=140.0, ignore_speed_limits=True)
+        assert free < legal
 
 
 class TestReview:

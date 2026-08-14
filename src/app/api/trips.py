@@ -157,6 +157,57 @@ async def _record_plan_failure(db: AsyncSession, request: Request, reason: str) 
         logger.warning("could not record plan failure (%s)", reason, exc_info=True)
 
 
+def sim_params_for(plan: PlanRequest, *, run_factor: float = 1.0) -> SimParams:
+    """The simulator settings a `PlanRequest` asks for. One function, two
+    callers: `_plan` here, and `api/runs._sim_params` for a drive.
+
+    Deliberately one function rather than two that agree. This mapping is where
+    a new planning field has to land twice — once for the plan, once for the
+    drive that follows it — and the second one is easy to miss because nothing
+    fails when it is: the drive simply plans a different journey than the one
+    the driver is on. `motorway_cap_kph` and `ignore_speed_limits` were both
+    missed exactly that way, which cost the mid-drive replan its benchmark AND
+    the live battery estimate, since `live.advance` prices every segment
+    through these same params. With one builder there is nowhere to miss.
+
+    `run_factor` is the consumption calibration a live drive has learned from
+    the driver's own SoC readings; 1.0 for a plan made from the form.
+    """
+    base = (
+        consumption_factor_for_temp(plan.temperature_c)
+        if plan.temperature_c is not None
+        else plan.conditions_factor
+    )
+    return SimParams(
+        depart_soc=plan.depart_soc,
+        target_soc=plan.target_soc,
+        consumption_factor=base * run_factor,
+        charge_power_factor=(
+            charge_power_factor_for_temp(plan.temperature_c)
+            if plan.temperature_c is not None
+            else plan.charge_power_factor
+        ),
+        # Only a real temperature implies a conditioning load; the legacy
+        # conditions_factor path is a bare Wh/km multiplier and carries none.
+        aux_kw=(
+            aux_kw_for_temp(plan.temperature_c) if plan.temperature_c is not None else 0.0
+        ),
+        extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
+        winter_tyres=plan.winter_tyres,
+        autobahn_open_share=plan.autobahn_open_share,
+        default_country_cap_kph=plan.motorway_cap_kph,
+        ignore_speed_limits=plan.ignore_speed_limits,
+        over_cap_kph=plan.over_cap_kph,
+        over_freeflow_factor=plan.over_freeflow_factor,
+        site_power_factor=plan.site_power_factor,
+        queue_min=plan.queue_min,
+        stop_overhead_min=plan.stop_overhead_min,
+        rest_interval_min=plan.rest_interval_min,
+        rest_min=plan.rest_min,
+        price_per_kwh=plan.price_per_kwh,
+    )
+
+
 @router.post("", response_model=TripOut)
 @limiter.limit(settings.RATE_LIMIT_PLAN)
 async def plan_trip(
@@ -215,38 +266,7 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
     charger_nodes = await chargers_svc.chargers_for_route(db, route)
 
     veh = VehicleParams.from_vehicle(vehicle)
-    params = SimParams(
-        depart_soc=plan.depart_soc,
-        target_soc=plan.target_soc,
-        consumption_factor=(
-            consumption_factor_for_temp(plan.temperature_c)
-            if plan.temperature_c is not None
-            else plan.conditions_factor
-        ),
-        charge_power_factor=(
-            charge_power_factor_for_temp(plan.temperature_c)
-            if plan.temperature_c is not None
-            else plan.charge_power_factor
-        ),
-        # Only a real temperature implies a conditioning load; the legacy
-        # conditions_factor path is a bare Wh/km multiplier and carries none.
-        aux_kw=(
-            aux_kw_for_temp(plan.temperature_c) if plan.temperature_c is not None else 0.0
-        ),
-        extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
-        winter_tyres=plan.winter_tyres,
-        autobahn_open_share=plan.autobahn_open_share,
-        default_country_cap_kph=plan.motorway_cap_kph,
-        ignore_speed_limits=plan.ignore_speed_limits,
-        over_cap_kph=plan.over_cap_kph,
-        over_freeflow_factor=plan.over_freeflow_factor,
-        site_power_factor=plan.site_power_factor,
-        queue_min=plan.queue_min,
-        stop_overhead_min=plan.stop_overhead_min,
-        rest_interval_min=plan.rest_interval_min,
-        rest_min=plan.rest_min,
-        price_per_kwh=plan.price_per_kwh,
-    )
+    params = sim_params_for(plan)
     # Never simulate past what the car can actually do — the Born tops out at
     # 160, so a "175 is optimal" answer would be fiction.
     speeds = [

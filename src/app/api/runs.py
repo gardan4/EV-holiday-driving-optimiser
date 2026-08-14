@@ -44,7 +44,7 @@ from app.api.schemas import (
     StartRunRequest,
     TimelinePoint,
 )
-from app.api.trips import MAX_SWEEP_POINTS, _result_out
+from app.api.trips import MAX_SWEEP_POINTS, _result_out, sim_params_for
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter, run_key
@@ -55,7 +55,6 @@ from app.services.simulator import (
     SimParams,
     VehicleParams,
     optimum,
-    payload_extra_kg,
     slice_route,
     sweep_slice,
 )
@@ -188,43 +187,16 @@ def _timeline_tuples(speed: dict) -> list[tuple[float, float, float]]:
 def _sim_params(req: PlanRequest, run_factor: float = 1.0) -> SimParams:
     """The plan's own assumptions, with the calibration the drive has learned.
 
-    Mirrors `trips.plan_trip` — the revised plan has to rest on the same
-    footing as the one it is replacing, or the comparison is meaningless.
+    Literally `trips.sim_params_for` — the revised plan has to rest on the same
+    footing as the one it is replacing, or the comparison is meaningless. This
+    used to be a second copy of that mapping, which is how it came to be
+    missing `motorway_cap_kph` and `ignore_speed_limits`: they were added to
+    the planner and nothing here failed, so a drive silently ran under
+    different speed rules than the plan it was being benchmarked against —
+    both in the replan and in `live.advance`, which prices every segment
+    through these same params.
     """
-    from app.services.simulator import (
-        aux_kw_for_temp,
-        charge_power_factor_for_temp,
-        consumption_factor_for_temp,
-    )
-
-    base = (
-        consumption_factor_for_temp(req.temperature_c)
-        if req.temperature_c is not None
-        else req.conditions_factor
-    )
-    return SimParams(
-        target_soc=req.target_soc,
-        consumption_factor=base * run_factor,
-        charge_power_factor=(
-            charge_power_factor_for_temp(req.temperature_c)
-            if req.temperature_c is not None
-            else req.charge_power_factor
-        ),
-        aux_kw=(
-            aux_kw_for_temp(req.temperature_c) if req.temperature_c is not None else 0.0
-        ),
-        extra_mass_kg=payload_extra_kg(req.occupants, req.luggage_kg),
-        winter_tyres=req.winter_tyres,
-        autobahn_open_share=req.autobahn_open_share,
-        over_cap_kph=req.over_cap_kph,
-        over_freeflow_factor=req.over_freeflow_factor,
-        site_power_factor=req.site_power_factor,
-        queue_min=req.queue_min,
-        stop_overhead_min=req.stop_overhead_min,
-        rest_interval_min=req.rest_interval_min,
-        rest_min=req.rest_min,
-        price_per_kwh=req.price_per_kwh,
-    )
+    return sim_params_for(req, run_factor=run_factor)
 
 
 def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
