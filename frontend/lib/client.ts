@@ -75,6 +75,8 @@ export interface PlanRequest {
   rest_interval_min?: number
   rest_min?: number
   price_per_kwh?: number
+  /** Winter tyres: a per-km rolling cost, not a weather setting. */
+  winter_tyres?: boolean
   /** People aboard, driver included. Defaults to 2. */
   occupants?: number
   /** Luggage in the boot. Defaults to 30 kg. */

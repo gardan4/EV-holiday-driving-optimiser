@@ -214,6 +214,7 @@ def _sim_params(req: PlanRequest, run_factor: float = 1.0) -> SimParams:
             aux_kw_for_temp(req.temperature_c) if req.temperature_c is not None else 0.0
         ),
         extra_mass_kg=payload_extra_kg(req.occupants, req.luggage_kg),
+        winter_tyres=req.winter_tyres,
         autobahn_open_share=req.autobahn_open_share,
         over_cap_kph=req.over_cap_kph,
         over_freeflow_factor=req.over_freeflow_factor,

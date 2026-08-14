@@ -138,6 +138,22 @@ _ROLLING_WH_KM_PER_KG = (
     ROLLING_CRR * GRAVITY * 1000.0 / 3600.0 / DRIVETRAIN_EFFICIENCY
 )
 
+# Winter tyres trade rolling resistance for grip: softer compound, deeper tread
+# blocks that squirm under load. Published tests put the energy cost at roughly
+# 5-10%, and a Crr of ~0.012 against the 0.010 assumed above lands there.
+#
+# It is modelled as EXTRA ROLLING RESISTANCE, not as a multiplier on Wh/km, for
+# the same reason payload is: rolling drag is per-kilometre and near enough
+# independent of speed, while Wh/km is dominated by the v² aero term. Scaling
+# this with drag would claim the tyres cost three times as much at 160 as at 90
+# and would tilt the recommended speed for a reason that is not physical. It
+# scales with MASS instead, so a loaded SUV pays more for them than a hatchback,
+# which is also what happens on the road.
+WINTER_TYRE_CRR_DELTA = 0.002
+_WINTER_TYRE_WH_KM_PER_KG = (
+    WINTER_TYRE_CRR_DELTA * GRAVITY * 1000.0 / 3600.0 / DRIVETRAIN_EFFICIENCY
+)
+
 
 def payload_extra_kg(occupants: int, luggage_kg: float) -> float:
     """Payload beyond the nominal load already inside `VehicleParams.mass_kg`.
@@ -172,6 +188,11 @@ class SimParams:
     # of speed. A multiplier on `a + b·v²` would instead scale with the drag
     # term, claiming a full car costs three times as much at 160 as at 90.
     extra_mass_kg: float = 0.0
+    # Winter tyres, as a per-kilometre rolling cost rather than a multiplier —
+    # see `WINTER_TYRE_CRR_DELTA`. Deliberately separate from the temperature
+    # factors: people fit them for a season, not for the afternoon's weather,
+    # and a driver on winter tyres in +8 °C rain is paying for them too.
+    winter_tyres: bool = False
     # What fraction of a charger's RATED power you actually receive. A 350 kW
     # cabinet shared with the car next to you delivers nowhere near 350, and a
     # busy Supercharger splits a stall pair. Distinct from queue_min: this is
@@ -467,6 +488,11 @@ class RouteProfile:
             # extra mgh on every climb. Both fall out of the same kilograms.
             e += _ROLLING_WH_KM_PER_KG * p.extra_mass_kg * dist_km / 1000.0
             e += grade_kwh(seg, veh, p.extra_mass_kg)
+            # Winter tyres bill the whole rolling mass, car included — unlike
+            # payload, which is only what you added to it.
+            if p.winter_tyres:
+                e += (_WINTER_TYRE_WH_KM_PER_KG * (veh.mass_kg + p.extra_mass_kg)
+                      * dist_km / 1000.0)
             # Conditioning is billed by the hour, not by the kilometre — which
             # is the whole point of keeping it out of the Wh/km term.
             e += p.aux_kw * (dist_km / eff)

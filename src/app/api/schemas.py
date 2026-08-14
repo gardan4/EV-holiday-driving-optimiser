@@ -116,6 +116,10 @@ class PlanRequest(BaseModel):
     # before these fields existed, and old permalinks keep their answers.
     occupants: int = Field(default=2, ge=1, le=9)
     luggage_kg: float = Field(default=30.0, ge=0.0, le=400.0)
+    # Winter tyres cost 5-10% in energy. Separate from `temperature_c` on
+    # purpose: they are fitted for a season, not for the afternoon's weather,
+    # so a mild day on winter rubber still pays for them.
+    winter_tyres: bool = False
 
 
 class StopOut(BaseModel):

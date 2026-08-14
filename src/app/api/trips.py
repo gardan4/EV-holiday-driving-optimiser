@@ -234,6 +234,7 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
             aux_kw_for_temp(plan.temperature_c) if plan.temperature_c is not None else 0.0
         ),
         extra_mass_kg=payload_extra_kg(plan.occupants, plan.luggage_kg),
+        winter_tyres=plan.winter_tyres,
         autobahn_open_share=plan.autobahn_open_share,
         default_country_cap_kph=plan.motorway_cap_kph,
         ignore_speed_limits=plan.ignore_speed_limits,

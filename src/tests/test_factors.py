@@ -419,6 +419,61 @@ def test_temperature_reproduces_the_presets_it_replaced() -> None:
 COLDEST_INPUT_C = -30.0
 
 
+class TestWinterTyres:
+    """A per-kilometre rolling cost, not a tax on drag."""
+
+    def _energy(self, *, winter: bool, kph: float, veh=None) -> float:
+        """Energy CONSUMED driving 300 km, from the simulator's own profile.
+
+        Deliberately not `SpeedResult.energy_kwh`: that is what gets bought at
+        chargers, which moves in whole stops and cannot resolve a 5% effect.
+        """
+        from app.services.simulator import RouteProfile, SimParams
+        from tests.fixtures import BORN_58, flat_motorway
+
+        p = SimParams(winter_tyres=winter)
+        prof = RouteProfile(flat_motorway(300), kph, veh or BORN_58, p)
+        return prof.kwh[-1]
+
+    def test_they_cost_energy(self) -> None:
+        assert self._energy(winter=True, kph=120.0) > self._energy(winter=False, kph=120.0)
+
+    def test_the_penalty_is_a_smaller_SHARE_the_faster_you_go(self) -> None:
+        """The absolute cost per km is flat, so its share must shrink with speed.
+
+        This is the property that keeps winter tyres out of the speed
+        recommendation. Modelled as a multiplier on Wh/km they would grow with
+        the v² aero term, claim roughly three times the cost at 160 as at 90,
+        and push the recommended speed down for a reason that is not physical —
+        the same mistake `aux_kw` and `extra_mass_kg` are each kept out of.
+        """
+        slow = self._energy(winter=True, kph=90.0) / self._energy(winter=False, kph=90.0) - 1
+        fast = self._energy(winter=True, kph=150.0) / self._energy(winter=False, kph=150.0) - 1
+        assert slow > fast, (
+            f"winter tyres cost {slow:.1%} at 90 km/h and {fast:.1%} at 150. A "
+            "flat per-km cost must be a SMALLER share of a bigger number."
+        )
+
+    def test_the_penalty_is_in_the_published_range(self) -> None:
+        """5-10% at a normal cruise is what tyre tests report."""
+        share = self._energy(winter=True, kph=120.0) / self._energy(winter=False, kph=120.0) - 1
+        assert 0.03 <= share <= 0.10, f"winter tyres cost {share:.1%} at 120 km/h"
+
+    def test_a_heavier_car_pays_more(self) -> None:
+        """Rolling resistance scales with mass, so the SUV pays for grip."""
+        from dataclasses import replace
+
+        from app.services.simulator import SimParams, simulate
+        from tests.fixtures import BORN_58, chargers_every, flat_motorway
+
+        segs = flat_motorway(300)
+        heavy = replace(BORN_58, mass_kg=BORN_58.mass_kg * 1.5)
+        def pen(veh):
+            return (self._energy(winter=True, kph=120.0, veh=veh)
+                    - self._energy(winter=False, kph=120.0, veh=veh))
+        assert pen(heavy) > pen(BORN_58)
+
+
 def test_the_charge_derate_has_no_cliff_at_minus_ten() -> None:
     """-10.1 °C must not charge dramatically slower than -10.0 °C.
 
