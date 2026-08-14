@@ -27,6 +27,7 @@ import { UUID_V4_RE, uuidV4 } from "./uuid"
 
 const OWNER_KEY = "evtrip.owner"
 const USERNAME_KEY = "evtrip.owner.name"
+const COUNT_KEY = "evtrip.trips.n"
 
 /**
  * The secret for this browser.
@@ -83,26 +84,76 @@ export function setStoredUsername(name: string | null): void {
 }
 
 /**
- * Adopt a secret copied from another device.
+ * A pasted device code, in its stored form, or null if it is not one.
  *
  * Validated against the same pattern the server enforces, so a truncated paste
- * fails visibly in the form rather than being stored as a key that authorises
- * nothing and reports no error.
+ * fails visibly in the form rather than being sent as a key that authorises
+ * nothing.
  *
- * Overwrites whatever this browser had. That is the intent — you are telling it
- * "this is the same person as over there" — and it is why the drawer asks for
- * confirmation when a username is already set.
+ * Separate from `adoptSecret` on purpose: the shape of a code and the question
+ * of whether it holds a username are two different checks, and the flow has to
+ * pass the second one before it is allowed to act on the first.
  */
-export function adoptSecret(raw: string): boolean {
-  if (typeof window === "undefined") return false
+export function readDeviceCode(raw: string): string | null {
   const secret = (raw || "").trim().toLowerCase()
+  return UUID_V4_RE.test(secret) ? secret : null
+}
+
+/**
+ * Adopt a secret copied from another device.
+ *
+ * Overwrites whatever this browser had — that is the intent, you are telling it
+ * "this is the same person as over there" — and that is exactly why it must be
+ * called ONLY after `whoAmI(code)` has confirmed the code resolves to a name.
+ * It used to be called first and asked afterwards, which meant a bad paste on a
+ * phone that already held a username replaced the only copy of the secret
+ * behind it: the code was rejected, the message said so, and the username was
+ * gone with nothing on screen admitting it.
+ */
+export function adoptSecret(secret: string): boolean {
+  if (typeof window === "undefined") return false
   if (!UUID_V4_RE.test(secret)) return false
   try {
     window.localStorage.setItem(OWNER_KEY, secret)
     window.localStorage.removeItem(USERNAME_KEY)
+    window.localStorage.removeItem(COUNT_KEY)
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * How many trips the list held the last time we looked.
+ *
+ * A cache of a number, and the only reason it exists is the badge on the header
+ * button: "alpine-driver · 3" is a reason to open the panel and a bare glyph is
+ * not, so the number has to be there on the first paint. The honest alternative
+ * — fetching the list on every page load to render one integer — is a request
+ * per page view for a value that changes at exactly one moment, when a trip is
+ * planned. So this is written whenever the real list loads, nudged by
+ * `noteTripPlanned` when a trip is added, and corrected the next time the panel
+ * is opened. It is never sent anywhere; nothing server-side knows it exists.
+ */
+export function storedTripCount(): number | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(COUNT_KEY)
+    if (raw === null) return null
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) && n >= 0 ? n : null
+  } catch {
+    return null
+  }
+}
+
+export function setStoredTripCount(n: number | null): void {
+  if (typeof window === "undefined") return
+  try {
+    if (n === null) window.localStorage.removeItem(COUNT_KEY)
+    else window.localStorage.setItem(COUNT_KEY, String(n))
+  } catch {
+    /* the badge just starts empty */
   }
 }
 
@@ -112,4 +163,7 @@ export function adoptSecret(raw: string): boolean {
  *  can claim another one without becoming a new person first. */
 export function forgetUsername(): void {
   setStoredUsername(null)
+  // The cached count belongs to the name, not to the browser. Leaving it behind
+  // puts a badge on a button whose panel is back to asking you to pick a name.
+  setStoredTripCount(null)
 }

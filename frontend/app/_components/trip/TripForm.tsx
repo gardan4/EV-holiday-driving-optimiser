@@ -14,11 +14,13 @@ import { InfoTip, NumberField, useNumberFieldValidity } from "./fields"
 import DepartureField from "./DepartureField"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
+import { useTrips } from "../trips/TripsContext"
 
 
 /** The planner form. On submit: POST /api/trips → navigate to the permalink. */
 export default function TripForm() {
   const router = useRouter()
+  const { noteTripPlanned } = useTrips()
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [origin, setOrigin] = useState<PlacePoint | null>(null)
   const [dest, setDest] = useState<PlacePoint | null>(null)
@@ -100,6 +102,10 @@ export default function TripForm() {
         luggage_kg: luggageKg,
       })
       track("trip_planned")
+      // The badge on the header button, kept honest without a fetch. Under a
+      // username the server has just stamped this trip onto the list, so the
+      // count is one higher whether or not anybody opens the panel to see it.
+      noteTripPlanned()
       router.push(`/trip/${trip.id}`)
     } catch (err) {
       // Deliberately not counted here. The server records `plan_failed` with

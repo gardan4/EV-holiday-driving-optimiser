@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The left bar: the trips you have planned.
+ * The right bar: the trips you have planned.
  *
  * The problem it solves is mundane and real — a trip's share link is the only
  * handle it has, so a plan you made last week lives wherever you last pasted
@@ -19,9 +19,15 @@
  *    consequence — the list becomes public at /u/<name> — above the button, not
  *    in a tooltip.
  *
- * Mounted-guard, like `CountingToggle`: the username lives in localStorage,
- * which the server cannot see, so the first client render has to match the
- * server's "nothing yet" and correct itself a frame later.
+ * State lives in `TripsContext`, not here, because the way in is now a button
+ * in `AppHeader` — a different tree. What is left in this file is the panel and
+ * the three forms inside it.
+ *
+ * It comes in from the RIGHT, which is not a preference: it is the edge the
+ * button that opens it sits on. A panel that flies out of the opposite side of
+ * the screen from the control you just pressed makes you look for it. Same
+ * reason the close control points right and the whole thing eases out of that
+ * corner rather than simply appearing.
  *
  * An overlay rather than a column that reflows the page. The landing page is a
  * centred hero and the trip page is a chart beside an itinerary; a panel that
@@ -29,7 +35,7 @@
  * the sake of a list you open occasionally.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
 import {
@@ -38,89 +44,377 @@ import {
   Link2,
   Loader2,
   MapPinned,
-  PanelLeftClose,
-  Route,
+  PanelRightClose,
   X,
 } from "lucide-react"
-import {
-  adoptSecret,
-  forgetUsername,
-  ownerSecret,
-  setStoredUsername,
-  storedUsername,
-} from "@/lib/account"
-import {
-  claimUsername,
-  getUserTrips,
-  releaseUsername,
-  whoAmI,
-  type TripSummary,
-} from "@/lib/client"
+import { adoptSecret, ownerSecret, readDeviceCode } from "@/lib/account"
+import { claimUsername, releaseUsername, whoAmI } from "@/lib/client"
 import DeleteTrip from "../trip/DeleteTrip"
 import TripSummaryCard from "./TripSummaryCard"
-
-const OPEN_KEY = "evtrip.drawer"
+import { ChipFace, chipSkin } from "./TripsButton"
+import { MORPH_MS, useTrips, type OriginRect } from "./TripsContext"
 
 /** The server's rule, mirrored so a bad name fails in the form instead of as a
  *  422 the person has to interpret. `api/users.py` is still the authority. */
 const USERNAME_RE = /^[a-z0-9][a-z0-9-]{1,22}[a-z0-9]$/
 
+/** Expo-out. The panel leaves the button fast and settles slowly, which is what
+ *  makes a rectangle growing across half the screen read as one object moving
+ *  rather than as a box being resized. */
+const OPEN_CLIP = "inset(0px 0px 0px 0px round 0px)"
+const MORPH_TRANSITION =
+  `clip-path ${MORPH_MS}ms cubic-bezier(0.16, 1, 0.3, 1),` +
+  ` opacity 180ms ease-out, visibility ${MORPH_MS}ms`
+
+/**
+ * The panel grows out of the button that opened it.
+ *
+ * A container transform, done with `clip-path` rather than by animating a
+ * clone: the panel is already in the DOM at its final size, so the only thing
+ * changing is how much of it is revealed, and nothing has to be measured,
+ * duplicated and swapped at the end. The shape starts as a pill the size and
+ * shape of the chip, sitting exactly where the chip is, and opens to the full
+ * panel.
+ *
+ * A shape on its own is not a morph, though, and the first version proved it:
+ * clipping a white panel to a pill gives you a blank pill with a sliver of the
+ * close button in it, so what you saw was the chip vanishing and an empty
+ * lozenge growing where it had been. The missing half is the CONTENT handover,
+ * which is why this returns `ghost` — the rectangle, in panel-local
+ * coordinates, where a copy of the chip's face is drawn inside the panel. That
+ * copy holds the first ~140ms, the panel's real contents fade up behind it, and
+ * the button itself is hidden outright rather than faded. Three surfaces, one
+ * apparent object.
+ *
+ * Two conditions, and it silently falls back to the plain slide otherwise:
+ *
+ *  - **Motion is welcome.** `prefers-reduced-motion` is asking for less of
+ *    exactly this.
+ *  - **We know where the button was.** Escape and the scrim close without ever
+ *    having touched one; on a page that opened from a stale rect the slide is
+ *    a better answer than a morph out of the wrong corner.
+ *
+ * Screen size is deliberately NOT one of them. The same chip in the same
+ * corner opens the same panel on a phone, and a small control growing into a
+ * full screen is the transition phones are built around — a sheet sliding up
+ * from nowhere is the compromise, not the native idea. What the phone changes
+ * is the surface underneath (see the panel's background classes), because the
+ * cost of this animation is not its geometry.
+ *
+ * The panel geometry is computed rather than measured — `offsetWidth` and the
+ * viewport, never `getBoundingClientRect()`. The closed panel carries the
+ * fallback's `translate-x-full`, so its measured rectangle is a screen's width
+ * to the right of where it will actually be.
+ *
+ * The opening is a hand-rolled FLIP and it is written imperatively for a
+ * reason: the collapsed shape has to be COMMITTED before the expanded one is
+ * set, or the browser coalesces both into one style change and there is
+ * nothing to transition from. `void el.offsetWidth` forces that commit
+ * synchronously. The obvious React version — set the collapsed shape, wait two
+ * animation frames, set the expanded one — was written first and is wrong in a
+ * way worth recording: in a tab that is not being painted, nested
+ * `requestAnimationFrame` callbacks never run, so the panel opened as a pill
+ * and stayed one until the tab was looked at. A reflow does not care whether
+ * anybody is watching.
+ */
+function usePanelMorph(
+  open: boolean,
+  origin: OriginRect | null,
+  morphing: boolean
+) {
+  const ref = useRef<HTMLDivElement>(null)
+  // Where the chip's copy goes, in the panel's own coordinates. Stored from
+  // the same measurement that builds the clip, so the copy and the shape it
+  // sits in can never disagree by a pixel — computing it twice is how a
+  // container transform ends up with a face floating next to its container.
+  const [ghost, setGhost] = useState<OriginRect | null>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (!morphing || !origin) {
+      el.style.clipPath = ""
+      el.style.transition = ""
+      if (open) el.style.transform = ""
+      setGhost(null)
+      return
+    }
+    // Measured, not derived. Deriving the panel's left edge from the viewport
+    // width cost two bugs: `window.innerWidth` includes the classic scrollbar
+    // and a `fixed right-0` element is laid out without it, so everything sat
+    // 5px left on any page long enough to scroll; and `offsetWidth` is rounded
+    // to whole pixels, so at `90vw` on a 375px phone — 337.5 — it lied by half
+    // a pixel. The rect knows both. It is only trustworthy because the panel
+    // carries NO transform while morphing (the slide's classes are off, which
+    // is what `morphing` guarantees) — under the fallback this same call would
+    // return a box a screen's width to the right.
+    const box = el.getBoundingClientRect()
+    const x = origin.left - box.left
+    const y = origin.top - box.top
+    const w = box.width
+    const h = box.height
+    const collapsed = `inset(${y}px ${w - (x + origin.width)}px ${
+      h - (y + origin.height)
+    }px ${x}px round ${origin.height / 2}px)`
+    // The clip is measured from the panel's BORDER box; an absolutely
+    // positioned child is placed from its PADDING box. The panel has a 1px
+    // left border, so the copy needs that back or it sits one pixel inside the
+    // shape it is supposed to be filling.
+    setGhost({
+      top: y - el.clientTop,
+      left: x - el.clientLeft,
+      width: origin.width,
+      height: origin.height,
+    })
+
+    if (!open) {
+      el.style.transition = MORPH_TRANSITION
+      el.style.clipPath = collapsed
+      return
+    }
+    // A swipe that dismissed the panel left it parked off to the right, and it
+    // is deliberately not cleaned up there — clearing it mid-close would snap
+    // the panel back into view for the length of its fade. Opening is where it
+    // gets undone, before anything is measured.
+    el.style.transform = ""
+    el.style.transition = "none"
+    el.style.clipPath = collapsed
+    void el.offsetWidth
+    el.style.transition = MORPH_TRANSITION
+    el.style.clipPath = OPEN_CLIP
+  }, [open, origin, morphing])
+
+  return { ref, ghost }
+}
+
+/** How far right, and how fast, counts as "take it away". A third of the panel
+ *  is a deliberate commitment; a flick is a third of that at speed, because the
+ *  gesture people actually make is fast and short. */
+const DISMISS_FRACTION = 0.32
+const DISMISS_VELOCITY = 0.45 // px per ms
+const SWIPE_SLOP = 10 // px before a touch is a drag and not a tap
+const SETTLE_MS = 200
+
+/**
+ * Push the panel off to the right with your thumb.
+ *
+ * Touch only. A mouse has the scrim, the close button and Escape; a pointer
+ * drag on a desktop is how you select text, and taking that over to duplicate
+ * three existing affordances is a bad trade. On a phone the panel is 90% of
+ * the screen, the close control is a small target in the far corner, and this
+ * is how every sheet on the device already behaves.
+ *
+ * It moves with a `transform`, not with the clip the morph animates. The clip
+ * is a window onto the panel, so shrinking it during a drag would wipe the
+ * contents away rather than move them, and the shape would stop matching where
+ * your finger is. Transform moves the whole thing, which is what a hand does.
+ *
+ * `touch-action: pan-y` on the panel is what makes this coexist with the list
+ * inside it: the browser keeps vertical scrolling and hands us horizontal, so
+ * scrolling never stutters waiting to find out whether a gesture was a swipe.
+ * The axis check is still needed for the diagonal start.
+ */
+function useSwipeDismiss(
+  panelRef: React.RefObject<HTMLDivElement | null>,
+  scrimRef: React.RefObject<HTMLDivElement | null>,
+  open: boolean,
+  onDismiss: () => void
+) {
+  const drag = useRef<{
+    id: number
+    x0: number
+    y0: number
+    x: number
+    t: number
+    v: number
+    axis: "none" | "x" | "y"
+    w: number
+  } | null>(null)
+  const timer = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current)
+    },
+    []
+  )
+
+  const paint = (dx: number) => {
+    const el = panelRef.current
+    if (!el) return
+    el.style.transition = "none"
+    el.style.transform = `translateX(${dx}px)`
+    const scrim = scrimRef.current
+    if (scrim && drag.current) {
+      scrim.style.opacity = String(Math.max(0, 1 - dx / drag.current.w))
+    }
+  }
+
+  const end = (dismiss: boolean, dx: number) => {
+    const el = panelRef.current
+    const scrim = scrimRef.current
+    const w = drag.current?.w ?? 0
+    drag.current = null
+    if (!el) return
+    el.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`
+    el.style.transform = dismiss ? `translateX(${w}px)` : "translateX(0px)"
+    if (scrim) {
+      scrim.style.transition = `opacity ${SETTLE_MS}ms ease-out`
+      scrim.style.opacity = dismiss ? "0" : "1"
+    }
+    if (timer.current) window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => {
+      if (dismiss) {
+        onDismiss()
+      } else if (el) {
+        // Back where it started, and the inline styles handed back so the
+        // classes and the morph own the element again.
+        el.style.transform = ""
+        el.style.transition = ""
+      }
+      if (scrim) {
+        scrim.style.transition = ""
+        scrim.style.opacity = ""
+      }
+    }, SETTLE_MS)
+  }
+
+  return {
+    // `touch-action` is set in the class list, not here — this only decides
+    // what to do with the events the browser has already agreed to send.
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!open || e.pointerType !== "touch") return
+      const el = panelRef.current
+      if (!el) return
+      drag.current = {
+        id: e.pointerId,
+        x0: e.clientX,
+        y0: e.clientY,
+        x: e.clientX,
+        t: e.timeStamp,
+        v: 0,
+        axis: "none",
+        w: el.getBoundingClientRect().width,
+      }
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || e.pointerId !== d.id) return
+      const dx = e.clientX - d.x0
+      const dy = e.clientY - d.y0
+      if (d.axis === "none") {
+        if (Math.abs(dy) > SWIPE_SLOP && Math.abs(dy) > Math.abs(dx)) {
+          // A scroll. Let go of it completely rather than watching it, or a
+          // fast flick down that drifts sideways starts moving the panel.
+          drag.current = null
+          return
+        }
+        if (Math.abs(dx) < SWIPE_SLOP) return
+        d.axis = "x"
+        try {
+          panelRef.current?.setPointerCapture(d.id)
+        } catch {
+          // The pointer can already be gone by the time we decide it was a
+          // drag. Capture is an improvement on the gesture, not a requirement:
+          // without it the events keep coming from the element itself.
+        }
+      }
+      // Velocity over a real window, never over the last pair of events. A
+      // browser can deliver several moves inside one millisecond — coalesced
+      // input, a 120Hz digitiser — and dividing a 50px jump by a 1ms floor
+      // produces a number that clears any flick threshold you could pick, so
+      // the panel flies away on a twitch. Below the window the previous
+      // reading stands, which is what a hand is doing anyway.
+      const dt = e.timeStamp - d.t
+      if (dt >= 8) {
+        d.v = (e.clientX - d.x) / dt
+        d.x = e.clientX
+        d.t = e.timeStamp
+      }
+      // Rightwards only. Dragging left would open a gap at the screen edge and
+      // there is nothing behind the panel on that side to reveal.
+      paint(Math.max(0, dx))
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || e.pointerId !== d.id) return
+      if (d.axis !== "x") {
+        drag.current = null
+        return
+      }
+      const dx = Math.max(0, e.clientX - d.x0)
+      // The drag ends on whatever was under the thumb — a trip card, usually,
+      // which is a link. Swallow the click this gesture is about to produce.
+      const swallow = (ev: MouseEvent) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+      }
+      window.addEventListener("click", swallow, { capture: true, once: true })
+      window.setTimeout(
+        () => window.removeEventListener("click", swallow, { capture: true }),
+        0
+      )
+      end(dx > d.w * DISMISS_FRACTION || d.v > DISMISS_VELOCITY, dx)
+    },
+    onPointerCancel: (e: React.PointerEvent<HTMLDivElement>) => {
+      const d = drag.current
+      if (!d || e.pointerId !== d.id) return
+      if (d.axis !== "x") {
+        drag.current = null
+        return
+      }
+      end(false, 0)
+    },
+  }
+}
+
 export default function TripsDrawer() {
-  const [mounted, setMounted] = useState(false)
-  const [open, setOpen] = useState(false)
-  // Whether the collapsed desktop tab is showing its label. Held in state
-  // rather than done with a `sm:group-hover:` class because only one of the two
-  // width classes is then ever on the element — no stacked variant to get the
-  // cascade order right, and the open/closed states are testable.
-  const [tabExpanded, setTabExpanded] = useState(false)
-  const [username, setUsername] = useState<string | null>(null)
-  const [trips, setTrips] = useState<TripSummary[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const {
+    mounted,
+    open,
+    toggle,
+    origin,
+    morphing,
+    username,
+    count,
+    trips,
+    loading,
+    adopt,
+    release,
+    dropTrip,
+  } = useTrips()
+  const { ref: panelRef, ghost } = usePanelMorph(open, origin, morphing)
+  const scrimRef = useRef<HTMLDivElement>(null)
+  const swipe = useSwipeDismiss(panelRef, scrimRef, open, () => toggle(false))
 
-  useEffect(() => {
-    setMounted(true)
-    setUsername(storedUsername())
-    try {
-      setOpen(window.localStorage.getItem(OPEN_KEY) === "1")
-    } catch {
-      /* a browser that will not remember the panel state just starts closed */
-    }
-  }, [])
-
-  const toggle = useCallback((next: boolean) => {
-    setOpen(next)
-    try {
-      window.localStorage.setItem(OPEN_KEY, next ? "1" : "0")
-    } catch {
-      /* not worth a thought */
-    }
-  }, [])
-
-  const refresh = useCallback(async (name: string) => {
-    setLoading(true)
-    try {
-      const data = await getUserTrips(name)
-      setTrips(data.trips)
-    } catch {
-      // A released name, or a browser that remembers one the server does not.
-      // Falling back to the claim state is better than an error nobody can act
-      // on — and `forgetUsername` keeps the secret, so claiming again is one
-      // step rather than a new identity.
-      setTrips(null)
-      setUsername(null)
-      forgetUsername()
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Refetch whenever the panel is opened: the common path into this drawer is
-  // "I just planned a trip", and a list cached from before that would be
-  // missing the one trip the person came looking for.
-  useEffect(() => {
-    if (open && username) void refresh(username)
-  }, [open, username, refresh])
+  // How each of the panel's three bands arrives. Under the morph they crossfade
+  // in behind the chip's copy — a stagger there fights the container, which is
+  // already the thing carrying the eye. Under the slide they cascade, because
+  // a panel that arrives whole and instantly full is the flat version.
+  //
+  // `bandKey` is separate from the rest because React refuses a `key` that
+  // arrives through a spread — it is not a prop — and silently treats it as
+  // one, which turns the cascade into a one-time animation that never plays
+  // again. It has to be written on the element by hand.
+  const bandKey = (i: number) =>
+    morphing ? `band-${i}` : open ? `band-${i}-in` : `band-${i}`
+  const band = (i: number) =>
+    morphing
+      ? {
+          style: { transitionDelay: open ? `${130 + i * 45}ms` : "0ms" },
+          className: `transition-opacity duration-200 ${
+            open ? "opacity-100" : "opacity-0"
+          }`,
+        }
+      : {
+          // Keyed so the animation re-runs on every open: a CSS animation fires
+          // once per element and this panel is never unmounted. Keyed on `open`
+          // rather than a counter, so the closing pass renders the plain
+          // version — content rising into view while the panel leaves is the
+          // animation playing backwards at the wrong moment.
+          style: { animationDelay: `${60 + i * 70}ms` },
+          className: open ? "animate-panel-rise" : "",
+        }
 
   // Escape closes it, like every other overlay on the web.
   useEffect(() => {
@@ -136,75 +430,110 @@ export default function TripsDrawer() {
 
   return (
     <>
-      {!open && (
-        <button
-          type="button"
-          onClick={() => toggle(true)}
-          onMouseEnter={() => setTabExpanded(true)}
-          onMouseLeave={() => setTabExpanded(false)}
-          onFocus={() => setTabExpanded(true)}
-          onBlur={() => setTabExpanded(false)}
-          aria-label="Open your trips"
-          title="Your trips"
-          // Two shapes, because a left-edge tab works on a wide screen and
-          // fights a phone. Mobile content is full-bleed, so an edge tab lands
-          // on the hero wherever it is put vertically — there it is a labelled
-          // pill floating bottom-RIGHT, clear of `FeedbackLink` in the opposite
-          // corner. From `sm` up it is the edge tab the panel slides out of.
-          //
-          // On the desktop tab the label is collapsed until hover. This sits
-          // over the trip page's dark journey scene, and a permanent opaque
-          // pill there reads as damage to the picture rather than as chrome —
-          // so it stays a translucent icon until you go for it. The label is
-          // still in `aria-label` and `title`, and the mobile pill keeps it
-          // visible, which is where discovering it actually matters.
-          className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-30 flex items-center gap-2 rounded-full border border-ink-200 bg-white/90 px-4 py-3 text-sm font-medium text-ink-600 shadow-lg shadow-ink-900/10 backdrop-blur transition-[background-color,border-color,color,padding] hover:border-brand-300 hover:text-brand-700 sm:bottom-auto sm:left-0 sm:right-auto sm:top-24 sm:rounded-l-none sm:rounded-r-xl sm:border-l-0 sm:py-2.5 sm:pl-2 sm:shadow-sm ${
-            tabExpanded
-              ? "sm:gap-2 sm:border-ink-200 sm:bg-white/95 sm:pr-3"
-              : "sm:gap-0 sm:border-ink-200/60 sm:bg-white/55 sm:pr-2"
-          }`}
-        >
-          <Route className="h-4 w-4 shrink-0" />
-          <span
-            className={`overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-200 ${
-              tabExpanded ? "sm:max-w-24 sm:opacity-100" : "sm:max-w-0 sm:opacity-0"
-            }`}
-          >
-            Your trips
-          </span>
-        </button>
-      )}
-
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-ink-900/20 backdrop-blur-[1px] lg:hidden"
-          onClick={() => toggle(false)}
-          aria-hidden
-        />
-      )}
+      {/* Clicking away closes it, on every screen. It used to be `lg:hidden`,
+          which left the desktop with a panel you could only dismiss by finding
+          one of two small buttons — and the first thing anybody does with an
+          overlay they are finished with is click the page behind it.
+          Lighter over a wide screen than over a phone: there the panel takes
+          the whole display and the wash is what separates it from the page,
+          here it only has to say "this is on top" and catch the click.
+          Always mounted, so it can fade rather than blink. */}
+      <div
+        ref={scrimRef}
+        onClick={() => toggle(false)}
+        aria-hidden
+        className={`fixed inset-0 z-40 bg-ink-900/30 transition-opacity duration-200 sm:bg-ink-900/20 sm:backdrop-blur-[1px] lg:bg-ink-900/10 lg:backdrop-blur-0 ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+      />
 
       <div
         ref={panelRef}
         role="dialog"
         aria-label="Your trips"
         aria-hidden={!open}
-        // z-50, above the feedback button's z-40: both live in the bottom-left
-        // corner, and at equal depth the later-mounted one wins and covers this
-        // panel's release/share controls.
+        {...swipe}
+        // z-50, above the scrim's z-40.
         //
-        // Frosted rather than solid. On the trip page this slides over the 3D
-        // journey scene, and a flat white column there cuts the picture in two;
-        // letting the scene blur through keeps the panel reading as something
-        // laid ON the page rather than a hole punched in it. The cards inside
-        // stay opaque, so the text they carry never sits on a moving image.
-        className={`fixed left-0 top-0 z-50 flex h-dvh w-[min(22rem,90vw)] flex-col border-r border-ink-100/80 bg-white/80 shadow-xl backdrop-blur-xl transition-transform duration-200 ${
-          open ? "translate-x-0" : "-translate-x-full"
+        // Frosted rather than solid, FROM `sm` UP. On the trip page this opens
+        // over the 3D journey scene, and a flat white column there cuts the
+        // picture in two; letting the scene blur through keeps the panel
+        // reading as something laid ON the page rather than a hole punched in
+        // it. The cards inside stay opaque, so the text they carry never sits
+        // on a moving image.
+        //
+        // On a phone it is solid, and that is the animation's doing, not a
+        // change of taste. A backdrop filter is re-computed over whatever the
+        // element covers, every frame; here the element is 90vw × 100dvh and
+        // its shape is being animated for 460ms, which is the expensive corner
+        // of the expensive case, on the weakest hardware. There is also nothing
+        // to be frosted over — at 90vw the page is a 10% strip — so the phone
+        // pays the whole cost for an effect it cannot see. The scrim drops its
+        // blur there for the same reason and carries a slightly heavier wash
+        // instead, which is what that blur was doing for it.
+        //
+        // Two ways in. `usePanelMorph` grows it out of the button on a laptop;
+        // everywhere else it leaves and returns from the top-right corner, the
+        // slide carrying it to the edge and the scale — origin pinned at that
+        // corner — aiming it at the button rather than at the whole edge. Small
+        // (2%) on purpose; anything more reads as a zoom and wobbles against
+        // the translation. The two must not both run: a panel that slides in
+        // from off-screen WHILE a hole opens in it is two animations arguing.
+        //
+        // `invisible` when closed, and visibility is in the transition list on
+        // purpose: it is a discrete property, so it holds `visible` for the
+        // whole animation and flips at the end — the panel still leaves, and
+        // once it has, its inputs and links are out of the tab order instead of
+        // being focusable off-screen behind an `aria-hidden`.
+        className={`fixed right-0 top-0 z-50 flex h-dvh w-[min(22rem,90vw)] origin-top-right touch-pan-y flex-col border-l border-ink-100/80 bg-white shadow-xl sm:bg-white/80 sm:backdrop-blur-xl ${
+          morphing ? "" : "transition-[transform,opacity,visibility] duration-200 ease-out"
+        } ${
+          open
+            ? `visible opacity-100 ${morphing ? "" : "translate-x-0 scale-100"}`
+            : `invisible opacity-0 ${morphing ? "" : "translate-x-full scale-[0.98]"}`
         }`}
       >
+        {/* The chip, redrawn inside the shape that is growing out of it. It is
+            the outgoing half of the crossfade: on screen at full strength for
+            the frame where the panel IS the chip, gone by 140ms, and back at
+            the end of the close so there is something in the pill when the real
+            button reappears under the cursor. `pointer-events-none` because it
+            is scenery — the panel behind it is what the click lands on. */}
+        {ghost && (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: ghost.top,
+              left: ghost.left,
+              width: ghost.width,
+              height: ghost.height,
+              transitionDelay: open ? "0ms" : `${MORPH_MS - 220}ms`,
+            }}
+            className={`${chipSkin(
+              username !== null
+            )} pointer-events-none justify-center overflow-hidden transition-opacity duration-150 ${
+              open ? "opacity-0" : "opacity-100"
+            }`}
+          >
+            <ChipFace
+              claimed={username !== null}
+              label={username !== null ? `@${username}` : "Your trips"}
+              count={count}
+            />
+          </div>
+        )}
+
         {/* Safe areas top and bottom: this panel is full-height on a phone, so
             without them the title sits under the notch and the release control
             sits under the home indicator. `FeedbackLink` does the same. */}
-        <header className="flex items-center justify-between border-b border-ink-100/80 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <header
+          key={bandKey(0)}
+          style={band(0).style}
+          className={`flex items-center justify-between border-b border-ink-100/80 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] ${
+            band(0).className
+          }`}
+        >
           <h2 className="font-display text-base font-semibold text-ink-900">
             Your trips
           </h2>
@@ -214,18 +543,17 @@ export default function TripsDrawer() {
             aria-label="Close your trips"
             className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-50 hover:text-ink-700"
           >
-            <PanelLeftClose className="h-5 w-5" />
+            <PanelRightClose className="h-5 w-5" />
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div
+          key={bandKey(1)}
+          style={band(1).style}
+          className={`flex-1 overflow-y-auto px-4 py-4 ${band(1).className}`}
+        >
           {username === null ? (
-            <ClaimForm
-              onClaimed={(name) => {
-                setUsername(name)
-                setStoredUsername(name)
-              }}
-            />
+            <ClaimForm onClaimed={adopt} />
           ) : loading && trips === null ? (
             <p className="flex items-center gap-2 text-sm text-ink-400">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading your trips…
@@ -245,11 +573,7 @@ export default function TripsDrawer() {
                     <DeleteTrip
                       tripId={t.id}
                       compact
-                      onDeleted={() =>
-                        setTrips((cur) =>
-                          (cur ?? []).filter((x) => x.id !== t.id)
-                        )
-                      }
+                      onDeleted={() => dropTrip(t.id)}
                     />
                   }
                 />
@@ -265,19 +589,13 @@ export default function TripsDrawer() {
         </div>
 
         {username !== null && (
-          <DrawerFooter
-            username={username}
-            onReleased={() => {
-              setUsername(null)
-              setTrips(null)
-              forgetUsername()
-            }}
-            onAdopted={(name) => {
-              setUsername(name)
-              setStoredUsername(name)
-              setTrips(null)
-            }}
-          />
+          <div key={bandKey(2)} style={band(2).style} className={band(2).className}>
+            <DrawerFooter
+              username={username}
+              onReleased={release}
+              onAdopted={adopt}
+            />
+          </div>
         )}
       </div>
     </>
@@ -406,13 +724,27 @@ function LinkDeviceForm({
     setBusy(true)
     setError(null)
     try {
-      if (!adoptSecret(value)) {
+      // Ask first, store second. Adopting replaces this browser's own secret,
+      // so doing it before the check turns a mistyped code into the loss of
+      // whatever username this device already had.
+      const code = readDeviceCode(value)
+      if (!code) {
         setError("That does not look like a device code.")
         return
       }
-      const profile = await whoAmI()
+      const profile = await whoAmI(code)
       if (!profile) {
-        setError("That code works, but it holds no username yet.")
+        // Says where to look, because both ways of getting here are about
+        // WHICH browser the code came from: one that never picked a name, or
+        // one on a different copy of the site. Nothing has been changed here.
+        setError(
+          "That code is a valid one, but no username is attached to it. " +
+            "Copy it from the browser that shows your username, on this same site."
+        )
+        return
+      }
+      if (!adoptSecret(code)) {
+        setError("This browser will not let us store the code.")
         return
       }
       toast.success(`Signed in as “${profile.username}”`)

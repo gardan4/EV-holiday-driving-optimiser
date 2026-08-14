@@ -2,7 +2,7 @@ import Link from "next/link"
 import JsonLd from "./_components/JsonLd"
 import SiteFooter from "./_components/SiteFooter"
 import TripForm from "./_components/trip/TripForm"
-import TripsDrawer from "./_components/trips/TripsDrawer"
+import TripsButton from "./_components/trips/TripsButton"
 import { FAQ } from "@/lib/faq"
 import { faqLd, graph, organizationLd, webApplicationLd, websiteLd } from "@/lib/seo"
 
@@ -17,9 +17,11 @@ export default function Home() {
         data={graph(organizationLd(), websiteLd(), webApplicationLd(), faqLd())}
       />
 
-      {/* The list of what you already planned, right where you would otherwise
-          plan it again. */}
-      <TripsDrawer />
+      {/* The way to what you already planned, right where you would otherwise
+          plan it again. This page has no header for it to sit in, so it floats
+          in the corner the header would have put it in — the panel itself is
+          mounted once, in `providers.tsx`. */}
+      <TripsButton floating />
 
       {/* Soft alpine backdrop */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>

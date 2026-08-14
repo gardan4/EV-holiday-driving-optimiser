@@ -19,6 +19,7 @@ import SpeedChart from "./SpeedChart"
 import DeleteTrip from "./DeleteTrip"
 import { DriveThisButton, SendToPhonePanel } from "./live/SendToPhone"
 import DriveBanner from "./live/DriveBanner"
+import SaveTripNudge from "../trips/SaveTripNudge"
 
 /**
  * Results page: the journey band you scroll through sits on top, and the
@@ -194,6 +195,10 @@ export default function ResultsView({
 
         {/* The answer, before the evidence */}
         <AnswerBlock trip={trip} selected={selected} band={band} onSelectSpeed={select} />
+
+        {/* Below the answer, deliberately. This page leads with what the reader
+            came for; an invitation above it would be an interstitial. */}
+        <SaveTripNudge />
 
         {/* Charts + itinerary */}
         <div

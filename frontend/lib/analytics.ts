@@ -32,12 +32,20 @@ import { uuidV4 } from "./uuid"
  *
  *  `plan_failed` is deliberately absent: the server records it, with the
  *  reason it actually failed for, and the events endpoint refuses it from a
- *  client. Firing it from here too would double every failure. */
+ *  client. Firing it from here too would double every failure. Claiming and
+ *  releasing a username are absent for the same reason — the server records
+ *  those, because it is the only party that knows they succeeded.
+ *
+ *  `trips_opened` is the exception that has to come from here: the trips
+ *  drawer is a panel, not a route, so opening it produces no page view and
+ *  "did anyone use the list?" would otherwise be unanswerable. It carries no
+ *  username — nothing about which list was opened, only that one was. */
 export type EventName =
   | "page_view"
   | "plan_submitted"
   | "trip_planned"
   | "drive_started"
+  | "trips_opened"
 
 const CLIENT_ID_KEY = "evtrip.cid"
 const CAMPAIGN_KEY = "evtrip.src"

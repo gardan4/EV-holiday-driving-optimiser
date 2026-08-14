@@ -25,6 +25,9 @@ export interface Vehicle {
   max_dc_kw: number
   mass_kg: number
   top_speed_kph: number
+  /** Cable → battery efficiency. The curve is measured at the cable, so charge
+   *  times derive from it; see `chargeMinutes`. */
+  charge_efficiency: number
   source_note: string | null
 }
 
@@ -240,14 +243,21 @@ export async function claimUsername(username: string): Promise<Profile> {
   )
 }
 
-/** Which username this browser's secret holds.
+/** Which username a secret holds — this browser's, or a candidate one.
  *
  *  The one read in this app that sends an identifier, and it is narrow on
  *  purpose: it exists for the second-device flow, where the owner has just
  *  pasted their own code and is asking about their own name. It records
- *  nothing. */
-export async function whoAmI(): Promise<Profile | null> {
-  const resp = await apiFetch("/api/users/me", { headers: ownerHeaders() })
+ *  nothing.
+ *
+ *  `candidate` is what makes that flow safe to get wrong. Adopting a code
+ *  REPLACES whatever secret this browser holds, so asking the question with the
+ *  pasted code before storing it is the difference between "that code is no
+ *  good" and "that code is no good and your own username is now unreachable". */
+export async function whoAmI(candidate?: string): Promise<Profile | null> {
+  const resp = await apiFetch("/api/users/me", {
+    headers: candidate ? { "X-Owner-Secret": candidate } : ownerHeaders(),
+  })
   if (resp.status === 401 || resp.status === 404) return null
   return unwrap<Profile>(resp)
 }

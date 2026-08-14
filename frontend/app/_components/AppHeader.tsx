@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { ReactNode } from "react"
+import TripsButton from "./trips/TripsButton"
 
 interface AppHeaderProps {
   /** Page-specific primary action (e.g. "Plan a new trip" on results pages). */
@@ -10,7 +11,12 @@ interface AppHeaderProps {
   subtitle?: string
 }
 
-/** Single nav surface. Wordmark → home. Keep it simple. */
+/** Single nav surface. Wordmark → home, your trips on the right.
+ *
+ *  The trips button is here rather than passed in as an `action` on purpose:
+ *  it belongs on every page that has a header, and a per-page prop is a per-page
+ *  chance to forget — which is how it came to exist on two pages in the first
+ *  place. Page actions sit to its right. */
 export default function AppHeader({ action, subtitle }: AppHeaderProps) {
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
@@ -24,7 +30,10 @@ export default function AppHeader({ action, subtitle }: AppHeaderProps) {
             </span>
           )}
         </Link>
-        <div className="flex items-center gap-4">{action}</div>
+        <div className="flex shrink-0 items-center gap-3 sm:gap-4">
+          <TripsButton />
+          {action}
+        </div>
       </div>
     </header>
   )
