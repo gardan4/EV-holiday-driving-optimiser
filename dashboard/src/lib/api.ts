@@ -118,6 +118,27 @@ export type Journeys = {
   cars: (Row & { avg_optimum_kph: number | null })[]
 }
 
+/** Usernames, as counts. There is no per-name row in this type and there
+ *  should never be one — see `services/profiles.py`. `named_share` and
+ *  `return_rate` are null rather than 0 when their denominator is empty, so a
+ *  quiet week and a feature nobody wants do not render alike. */
+export type Names = {
+  claimed: number
+  released: number
+  list_views: number
+  drawer_opens: number
+  trips: number
+  named_trips: number
+  active: number
+  named_share: number | null
+  live: number
+  with_trips: number
+  dormant: number
+  returning: number
+  return_rate: number | null
+  spread: Row[]
+}
+
 export type DayHealth = {
   day: string
   calls: number
@@ -193,5 +214,8 @@ export const api = {
     get<Overview>("/api/overview", { ...f, granularity }),
   segments: (f: Filters) => get<Segments>("/api/segments", f),
   journeys: (f: Filters) => get<Journeys>("/api/journeys", f),
+  // Window only: half of this reads `profiles`/`trips`, which carry no facet
+  // to narrow by. Sending the chips would imply a filter that cannot apply.
+  names: (f: Filters) => get<Names>("/api/names", { days: f.days }),
   upstream: (days: number) => get<Upstream>("/api/upstream", { days }),
 }

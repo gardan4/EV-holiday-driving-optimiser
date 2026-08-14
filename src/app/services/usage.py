@@ -29,11 +29,12 @@ from app.api.schemas import (
     CorridorOut,
     DayCount,
     LabelCount,
+    NameStatsOut,
     ProviderOut,
     UsageStats,
 )
 from app.models import AppEvent, Trip, TripRun
-from app.services import corridors, quota
+from app.services import corridors, profiles, quota
 from app.services.analytics import Filters, breakdown, retention, timeseries
 
 
@@ -50,11 +51,21 @@ def _corridor_out(c: corridors.Corridor) -> CorridorOut:
 # possible to read this list and know everything the app records.
 ALLOWED_EVENTS = frozenset(
     {
-        "page_view",       # a page was opened
-        "plan_submitted",  # the form was sent
-        "trip_planned",    # …and a plan came back
-        "plan_failed",     # …or it didn't (how often planning breaks is worth knowing)
-        "drive_started",   # somebody actually drove one
+        "page_view",        # a page was opened
+        "plan_submitted",   # the form was sent
+        "trip_planned",     # …and a plan came back
+        "plan_failed",      # …or it didn't (how often planning breaks is worth knowing)
+        "drive_started",    # somebody actually drove one
+        # The username feature. `trips_opened` is the only one the browser
+        # sends: the drawer is not a route, so opening it leaves no page view
+        # and "did anyone use the list?" would otherwise have no answer at all.
+        # The other two are written by `api/users.py` and refused from the
+        # public endpoint — a claim is a state change on the server, and one
+        # anybody could POST would make the count meaningless. None of the
+        # three carries the username; see `services/profiles.py`.
+        "trips_opened",     # somebody opened their trips panel
+        "profile_claimed",  # …and picked a name (server-side)
+        "profile_released", # …or gave one back (server-side)
     }
 )
 
@@ -208,6 +219,18 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
     repeat = await corridors.repeat_planners(db, cutoff)
     cars = await corridors.by_vehicle(db, cutoff, limit=10)
 
+    # Usernames. Through `services.profiles`, the one reader of that table, so
+    # this and the console cannot disagree about what an "active" name is.
+    # Takes the same `Filters` — only its window is used, since profiles carry
+    # no device or campaign to narrow by.
+    name_data = profiles.as_dict(await profiles.name_stats(db, f))
+    names = NameStatsOut(
+        **{k: v for k, v in name_data.items() if k != "spread"},
+        spread=[
+            LabelCount(label=r["label"], count=r["value"]) for r in name_data["spread"]
+        ],
+    )
+
     # Retention: the question the daily pseudonym cannot answer. The rule it
     # encodes — "returning" means seen BEFORE the window opened, not twice
     # inside it — now lives in `analytics.retention`, with the reasoning.
@@ -242,6 +265,7 @@ async def usage_stats(db: AsyncSession, days: int = 7) -> UsageStats:
         unplaceable_trips=unplaceable,
         repeat_planners=[LabelCount(label=k, count=n) for k, n in repeat],
         top_cars=[LabelCount(label=name, count=n) for name, n, _ in cars[:10]],
+        names=names,
         campaigns=campaigns,
         providers=providers,
         failure_reasons=failure_reasons,

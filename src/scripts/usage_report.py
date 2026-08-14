@@ -203,6 +203,41 @@ def _format(s: UsageStats, source: str) -> str:
     _block("Trips per planner", s.repeat_planners,
            "nobody has planned a trip with a persistent id yet.")
 
+    # Usernames. `None` only when reading a deployment that predates this
+    # section — printing nothing beats printing zeros that look like a feature
+    # nobody touched.
+    if s.names is not None:
+        n = s.names
+        lines.append("")
+        if not n.live and not n.claimed:
+            lines.append("  Usernames: nobody has claimed one yet.")
+        else:
+            lines.append("  Usernames (live counts are all-time, the rest is the window):")
+            lines.append(
+                f"    {n.live} live, {n.dormant} holding nothing, "
+                f"{n.claimed} claimed and {n.released} released in the window"
+            )
+            share = f"{100.0 * n.named_share:.0f}%" if n.named_share is not None else "–"
+            lines.append(
+                f"    {n.named_trips} of {n.trips} trips ({share}) published under a "
+                f"name, by {n.active} name(s)"
+            )
+            if n.with_trips:
+                rate = f"{100.0 * n.return_rate:.0f}%" if n.return_rate is not None else "–"
+                # Against names that HOLD trips, never against every name: one
+                # claimed yesterday has not had the chance to come back.
+                lines.append(
+                    f"    {n.returning} of {n.with_trips} names with trips ({rate}) "
+                    "came back at least a day later"
+                )
+            lines.append(
+                f"    trips panel opened {n.drawer_opens}x, public list pages "
+                f"viewed {n.list_views}x"
+            )
+            for b in n.spread:
+                if b.count:
+                    lines.append(f"      {b.label:<12} {b.count:>5}")
+
     lines += [
         "",
         "  From the trips table (real history, predates event counting):",

@@ -483,6 +483,40 @@ class ProviderOut(BaseModel):
     headroom_pct: Optional[float] = None
 
 
+class NameStatsOut(BaseModel):
+    """Whether the username feature is used, as counts and nothing else.
+
+    Every field here is an aggregate over names — there is no per-name row and
+    no username anywhere in this shape, deliberately (see
+    `services/profiles.py`). The two clocks are labelled because they answer
+    different questions: `claimed`/`released`/`named_trips` describe the
+    window, while `live`/`dormant`/`returning`/`spread` describe every name
+    that exists, which is the only scale a rare event reads honestly at.
+    """
+
+    # This window
+    claimed: int
+    released: int
+    list_views: int
+    drawer_opens: int
+    trips: int
+    named_trips: int
+    active: int
+    # Share of the window's trips published under a name. None when nothing was
+    # planned — "0% of nothing" and "nobody wants this" must not look alike.
+    named_share: Optional[float] = None
+
+    # Lifetime
+    live: int
+    with_trips: int
+    dormant: int
+    returning: int
+    # Quoted against `with_trips`, never against `live`: a name claimed
+    # yesterday has not yet had the chance to come back.
+    return_rate: Optional[float] = None
+    spread: list[LabelCount] = []
+
+
 class CorridorOut(BaseModel):
     """One coarsened origin→destination pair. `label` is already rendered
     ("NL 52.1,5.1 → AT 47.2,11.4") because the geohash it comes from is not
@@ -541,6 +575,12 @@ class UsageStats(BaseModel):
     unplaceable_trips: int = 0
     repeat_planners: list[LabelCount] = []
     top_cars: list[LabelCount] = []
+
+    # Usernames: how many exist, how many are used, and whether the trips list
+    # is opened at all. Optional so a reader running against an API that
+    # predates it still parses — `usage_report --remote` is exactly that case
+    # between a local checkout and the deployed image.
+    names: Optional[NameStatsOut] = None
 
     # Which posted link worked, and whether the free tiers will survive it.
     campaigns: list[CampaignOut] = []

@@ -105,6 +105,7 @@ DATA_ROUTES = [
     "/api/overview",
     "/api/segments",
     "/api/journeys",
+    "/api/names",
     "/api/upstream",
     "/api/query?dimension=device",
     "/api/series",
@@ -362,6 +363,35 @@ class TestRoleIsolation:
 
         assert _serves_dashboard() is True
         assert _serves_api() is False
+
+    @pytest.mark.asyncio
+    async def test_the_console_never_touches_the_schema(self, monkeypatch):
+        """`create_all` is idempotent, which is not the same as read-only.
+
+        `./scripts/dashboard.sh --remote` points this role at the production
+        database from a laptop. Run there from a checkout that is ahead of what
+        is deployed, a schema-ensure creates the missing tables outside the
+        migration history — silently, and on the one database where that is
+        least recoverable. The role reads; `db_bootstrap` migrates.
+        """
+        from app import main
+
+        called = False
+
+        async def _spy():
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(main, "init_db", _spy)
+
+        monkeypatch.setattr(settings, "PROCESS_ROLE", "dashboard")
+        await main._run_common_startup()
+        assert called is False, "the dashboard role must not run create_all"
+
+        # …and the roles that own the schema still do.
+        monkeypatch.setattr(settings, "PROCESS_ROLE", "all")
+        await main._run_common_startup()
+        assert called is True
 
     @pytest.mark.asyncio
     async def test_public_write_endpoints_are_absent(self, client: AsyncClient):

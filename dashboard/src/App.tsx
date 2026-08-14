@@ -4,6 +4,7 @@ import {
   Unauthenticated,
   type Journeys,
   type Meta,
+  type Names as NamesData,
   type Overview,
   type Segments,
   type Upstream,
@@ -21,6 +22,7 @@ import { WorldMap } from "./components/WorldMap"
 import { Login } from "./components/Login"
 import { Upstream as UpstreamPanel } from "./components/UpstreamPanel"
 import { Drives } from "./components/Drives"
+import { Names } from "./components/Names"
 
 export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null)
@@ -30,6 +32,7 @@ export function App() {
   const [segments, setSegments] = useState<Segments | null>(null)
   const [journeys, setJourneys] = useState<Journeys | null>(null)
   const [upstream, setUpstream] = useState<Upstream | null>(null)
+  const [names, setNames] = useState<NamesData | null>(null)
   // Fetched once: it describes the system, not the window, so it does not
   // belong in the per-filter reload.
   const [meta, setMeta] = useState<Meta | null>(null)
@@ -59,14 +62,15 @@ export function App() {
     // stale data or sits on "Loading…" forever. On a dashboard that is worse
     // than a visible gap — it looks like the numbers are still coming rather
     // than like something broke.
-    const [o, s, j, u] = await Promise.allSettled([
+    const [o, s, j, u, n] = await Promise.allSettled([
       api.overview(filters, granularity),
       api.segments(filters),
       api.journeys(filters),
       api.upstream(Math.max(14, filters.days)),
+      api.names(filters),
     ])
 
-    if ([o, s, j, u].some((r) => r.status === "rejected" && r.reason instanceof Unauthenticated)) {
+    if ([o, s, j, u, n].some((r) => r.status === "rejected" && r.reason instanceof Unauthenticated)) {
       setAuthed(false)
       return
     }
@@ -75,12 +79,14 @@ export function App() {
     if (s.status === "fulfilled") setSegments(s.value)
     if (j.status === "fulfilled") setJourneys(j.value)
     if (u.status === "fulfilled") setUpstream(u.value)
+    if (n.status === "fulfilled") setNames(n.value)
 
     const failed = [
       ["overview", o],
       ["segments", s],
       ["journeys", j],
       ["upstream", u],
+      ["names", n],
     ].filter(([, r]) => (r as PromiseSettledResult<unknown>).status === "rejected")
 
     setError(
@@ -399,7 +405,7 @@ export function App() {
             )}
           </Panel>
 
-          <Panel title="trips per planner">
+          <Panel title="trips per planner" hint="By the counting pseudonym, not by username.">
             <Bars rows={journeys?.planners ?? []} empty="No trips yet." />
           </Panel>
 
@@ -421,6 +427,10 @@ export function App() {
             )}
           </Panel>
         </div>
+
+        {/* Usernames. Reads `profiles` and `trips`, so the facet chips above do
+            not narrow it — only the date range does, same as the map. */}
+        {names && <Names names={names} />}
 
         {/* Trip shape — the charge-share number is the product's own thesis. */}
         {journeys && (

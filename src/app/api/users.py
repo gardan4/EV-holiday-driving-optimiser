@@ -49,8 +49,8 @@ from app.api.schemas import (
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.core.visitor import request_owner_hash
-from app.models import Profile, Trip
+from app.core.visitor import request_owner_hash, request_visitor
+from app.models import AppEvent, Profile, Trip
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +197,37 @@ def _summary(trip: Trip) -> TripSummaryOut | None:
         return None
 
 
+async def _count(db: AsyncSession, request: Request, name: str) -> None:
+    """Count a claim or a release, with nobody attached to it.
+
+    Recorded here rather than from the browser for the reason
+    `api.trips._record_plan_failure` gives: the server is the only party that
+    knows the state change actually happened, and an event fired from a page can
+    be blocked — which would measure claims against a different population than
+    the `profiles` table they get compared with. `events.SERVER_ONLY_EVENTS`
+    refuses both names from the public endpoint, so the two counts cannot be
+    pushed apart by anybody but us.
+
+    Deliberately thinner than every other row in `app_events`. **No username** —
+    that is the whole point, and it is the same rule that makes
+    `events.normalize_path` collapse `/u/<name>` before storage. No path either:
+    this is an API call, not a page, and inventing one would put a fake entry in
+    the page breakdown. And no persistent client id, which is the interesting
+    omission: attached to a claim it would say which browser holds a name, and
+    a browser holding a name is a person. `visitor` is non-null in the schema
+    and is the daily-rotating pseudonym, so what remains cannot be followed past
+    midnight.
+
+    Never raises. Somebody's username is worth more than the row counting it.
+    """
+    try:
+        db.add(AppEvent(name=name, path=None, visitor=request_visitor(request)))
+        await db.commit()
+    except Exception:  # noqa: BLE001 — counting must not fail the operation
+        logger.warning("could not count %s", name, exc_info=True)
+        await db.rollback()
+
+
 async def _profile_by_name(db: AsyncSession, username: str) -> Profile:
     """The profile, or a 404 that says nothing about which part was wrong."""
     row = (
@@ -269,6 +300,11 @@ async def claim_username(
     # The name is public, so logging it leaks nothing the URL doesn't. The
     # secret and its hash are never logged.
     logger.info("username claimed: %s", name)
+    # Counted only on the path that created something. The idempotent re-claim
+    # above returns before this, because a retry is not a second person picking
+    # a name and counting it would make claims exceed the profiles table by
+    # however many times a flaky connection was retried.
+    await _count(db, request, "profile_claimed")
     return ProfileOut(username=profile.username, created_at=profile.created_at)
 
 
@@ -369,4 +405,9 @@ async def release_username(
     await db.delete(profile)
     await db.commit()
     logger.info("username released: %s", name)
+    # The only trace a release leaves. Deleting the profile takes its
+    # `created_at` with it, so without this row a name claimed and given back
+    # inside one window is invisible in both directions — the claim count and
+    # the live count would agree, and churn would read as nothing happening.
+    await _count(db, request, "profile_released")
     return Response(status_code=204)

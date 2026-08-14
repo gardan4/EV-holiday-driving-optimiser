@@ -45,7 +45,14 @@ from app.core.database import AsyncSessionLocal, get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_fernet
 from app.models import AppEvent
-from app.services import corridors, drives, quota, trip_shape, upstream_health
+from app.services import (
+    corridors,
+    drives,
+    profiles,
+    quota,
+    trip_shape,
+    upstream_health,
+)
 from app.services.analytics import (
     FILTERABLE,
     BadQuery,
@@ -444,6 +451,26 @@ async def journeys(
             for name, n, speed in cars
         ],
     }
+
+
+@router.get("/api/names", dependencies=[Depends(require_session)])
+async def names(
+    f: Filters = Depends(filters_from_query),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Whether the username feature is used — counts, never a list of names.
+
+    Its own endpoint rather than a block inside `/api/overview` for the same
+    reason `/api/journeys` is separate: half of it reads `profiles` and `trips`,
+    which carry no device, campaign or referrer, so the facet chips cannot
+    narrow it. Folded into the filtered overview it would sit next to tiles that
+    respond to a chip while it silently did not.
+
+    There is deliberately no drilldown here. Every other panel on the console
+    can be clicked into a narrower question; this one bottoms out at a count,
+    because the next question down is "which name", and that is a person.
+    """
+    return profiles.as_dict(await profiles.name_stats(db, f))
 
 
 @router.get("/api/upstream", dependencies=[Depends(require_session)])

@@ -109,6 +109,17 @@ async def _run_common_startup():
         )
     )
 
+    # The console never touches the schema it reads. `create_all` is idempotent
+    # against a database Alembic already provisioned, but "idempotent" is not
+    # "read-only": run from a checkout that is ahead of what is deployed, it
+    # CREATES the missing tables — outside the migration history, silently, and
+    # (since `./scripts/dashboard.sh --remote` exists) possibly against
+    # production from a laptop. A read-only console has no business migrating
+    # anything; `db_bootstrap` and `./scripts/dev.sh` own that path.
+    if _serves_dashboard():
+        logger.info("Dashboard role: skipping schema ensure (read-only console)")
+        return
+
     # Idempotent: on a prod DB provisioned by Alembic it's a no-op; on a fresh
     # dev DB it creates the tables. (db_bootstrap handles the migration path.)
     logger.debug("Ensuring schema exists (init_db / create_all)...")

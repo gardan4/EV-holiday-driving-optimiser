@@ -7,6 +7,9 @@ const TONE: Record<string, string> = {
   trip_planned: "#43c389",
   drive_started: "#9b7ec0",
   plan_failed: "#d9534f",
+  trips_opened: "#7d8ca0",
+  profile_claimed: "#43c389",
+  profile_released: "#c99a3f",
 }
 
 const VERB: Record<string, string> = {
@@ -15,6 +18,11 @@ const VERB: Record<string, string> = {
   trip_planned: "got a plan",
   drive_started: "started driving",
   plan_failed: "planning failed",
+  // Phrased without a name, because there is none in the row — the claim
+  // events carry a count and the daily pseudonym, nothing else.
+  trips_opened: "opened their trips",
+  profile_claimed: "claimed a username",
+  profile_released: "released a username",
 }
 
 /** Events as they land.

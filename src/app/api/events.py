@@ -175,7 +175,16 @@ def normalize_referrer_path(raw: str | None) -> str | None:
 # for. Left acceptable here, anyone could post reasonless failures and inflate
 # the count — and the funnel total would stop matching the reason breakdown,
 # which is the one cross-check that says the failure numbers are real.
-SERVER_ONLY_EVENTS = frozenset({"plan_failed"})
+#
+# The two profile events are here for a stronger version of the same reason.
+# Each one records a state change that only the server can confirm happened:
+# accepted from a browser, "names claimed" would be a number anybody could type
+# into the database, and it is checked against the `profiles` table — where
+# claims are also counted from `created_at` — precisely so the pair can be
+# compared. Two counts that can be forged apart are not a cross-check.
+SERVER_ONLY_EVENTS = frozenset(
+    {"plan_failed", "profile_claimed", "profile_released"}
+)
 
 # A campaign tag: lowercase letters, digits and dashes. Deliberately narrow —
 # this arrives on a public endpoint and is written to the database, so the

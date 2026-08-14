@@ -403,6 +403,56 @@ def _retention(s: UsageStats) -> str:
     </div>"""
 
 
+def _names(s: UsageStats) -> str:
+    """Usernames, as counts — and never as a list.
+
+    The headline is adoption (what share of trips carry a name), because that is
+    the number that says whether the trips list was worth building. Everything
+    else is context for it: names that exist, names holding nothing, and how
+    many came back another day.
+
+    There is no per-name row here and there never should be. A table of
+    usernames on an admin page is a list of people, and it would undo the
+    collapse `events.normalize_path` performs on the very same names.
+    """
+    n = s.names
+    if n is None:
+        return (
+            '<div class="empty">This deployment predates username counting.</div>'
+        )
+    if not n.live and not n.claimed:
+        return '<div class="empty">Nobody has claimed a username yet.</div>'
+
+    share = 100.0 * n.named_share if n.named_share is not None else 0.0
+    ratio = (
+        f'<div class="ratio"><span class="n">{share:.0f}%</span>'
+        f'<span class="d">{n.named_trips:,} of {n.trips:,} trips in this window '
+        f"were published under a name</span></div>"
+        f'<div class="bar-track"><div class="bar-fill" '
+        f'style="width:{min(share, 100.0):.1f}%"></div></div>'
+        if n.trips
+        else '<div class="empty">No trips planned in this window.</div>'
+    )
+    back = (
+        f"{n.returning:,} of {n.with_trips:,} names holding trips came back at "
+        "least a day later. "
+        if n.with_trips
+        else ""
+    )
+    return f"""
+    {ratio}
+    <div class="note">
+      <strong>{n.live:,}</strong> names live right now, {n.dormant:,} of them
+      holding nothing. {n.claimed:,} claimed and {n.released:,} released in this
+      window — released names leave no row behind, so those two are the only
+      record of churn. {back}The trips panel was opened {n.drawer_opens:,}
+      time(s) and public list pages were viewed {n.list_views:,} time(s).
+    </div>
+    <div style="margin-top:14px">
+      {_hbars([(b.label, b.count) for b in n.spread], empty="No named trips yet.")}
+    </div>"""
+
+
 def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> str:
     counts = {f.label: f.count for f in s.funnel}
     funnel_rows = [(nice, counts.get(key, 0)) for key, nice in FUNNEL_ORDER]
@@ -522,6 +572,16 @@ def render(s: UsageStats, source: str, *, watch_seconds: int | None = None) -> s
   <div class="card">
     <h2>Did they come back?</h2>
     {_retention(s)}
+  </div>
+
+  <div class="card">
+    <h2>Usernames</h2>
+    {_names(s)}
+    <div class="note">
+      Counts only — no name appears on this page, and none is stored next to a
+      visitor. The live and spread figures are all-time; claims, releases and
+      the panel opens are this window.
+    </div>
   </div>
 
   <div class="card">
