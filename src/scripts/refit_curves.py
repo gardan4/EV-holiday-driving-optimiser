@@ -245,19 +245,21 @@ MATCHES: dict[str, str] = {
     "hyundai-kona-64": "Hyundai_Kona Electric 64 (2nd gen)_64",
     "kia-ev6-74-rwd": "Kia_EV6_74",
     "kia-ev3-78": "Kia_EV3 Long Range_78",
-    # Deliberately NOT skoda-enyaq-77. The dataset's two Enyaq-77 profiles both
-    # peak near 179 kW, which is the 2025 facelift; our 77 entry is the
-    # 2021-2024 car that tops out at 135. Same pack, different charger — and the
-    # dataset's naming ("Enyaq iV 80 _ 85") lumps the generations together, so
-    # taking either profile for it would model the wrong car at 33% more power.
-    "skoda-enyaq-85": "Skoda_Enyaq 85_77",
+    # Deliberately NO Skoda Enyaq at all. Every Enyaq-77 profile in the dataset
+    # peaks near 179 kW, and Skoda's own spec says that is the 85x (AWD) and RS:
+    # the 85 RWD we model is a 135 kW car, and the 2021-2024 iV 80 is 125-135.
+    # The dataset's naming ("Enyaq iV 80 _ 85", "Enyaq 85") distinguishes
+    # neither the drivetrain nor the generation, so any of them would model a
+    # different car at a third more power.
+    #
+    # Same reason there is no vw-id3-pro-s-79: the ID.3 profile peaks at 100 kW
+    # against that car's 185 kW spec, so it is not the variant we ship.
     "bmw-i4-edrive40": "BMW_i4_80.9",
     "bmw-i5-edrive40": "BMW_i5_81.2",
     "bmw-ix1-edrive20": "BMW_iX1_64.7",
     "ford-mustang-mach-e-er": "Ford_Mustang Mach-E Extended (2024)_91",
     "audi-q4-45": "Audi_Q4 e-tron 40/45 (RWD/AWD)_77",
     "renault-megane-60": "Renault_Megane E-Tech V60_60",
-    "vw-id3-pro-s-79": "Volkswagen_ID.3_79",
 }
 
 
