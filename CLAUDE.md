@@ -123,8 +123,9 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
 
 ### Dashboard (`dashboard/`) — Vite + React 19 + Tailwind 4 + Recharts
 
-The admin console — **local only**, run with `./scripts/dashboard.sh` (⇧⌘P →
-"Mission control"). Dark-only "flight deck", sharing the app's validated chart
+The admin console — **runs locally** (nothing about it is deployed), with
+`./scripts/dashboard.sh` (⇧⌘P → "Mission control"), or `--prod` to read the
+deployed database instead. Dark-only "flight deck", sharing the app's validated chart
 hexes but not its light surface. Vite builds into `src/dashboard_static/`
 (gitignored) so the `dashboard` process role can serve it with `StaticFiles`.
 Nothing builds it in CI, so a UI change that does not compile is only caught by
@@ -458,15 +459,30 @@ the pipeline is green before infra exists. Infra deploy is manual
   A robots allow is necessary, not sufficient: Cloudflare's "block AI crawlers"
   rule would stop all of them before they reach the origin.
 
-- **The dashboard is LOCAL ONLY, and is a process role rather than an app.**
+- **The dashboard RUNS LOCALLY, and is a process role rather than an app.**
   `PROCESS_ROLE=dashboard` (`./scripts/dashboard.sh`, or the "Mission control"
   VS Code task) serves the console on :8101 against whatever `DATABASE_URL`
-  says — in practice the local database, since Azure SQL only admits the App
-  Service outbound IPs. **Production numbers therefore still come from
-  `usage_report --remote` / `usage_dashboard --remote`**, which read the
-  token-gated `GET /api/events/stats`. Closing that gap means either putting
-  the console on an App Service after all (see below) or adding your own IP to
-  `sqlAllowedIps` — a real firewall change, not a convenience.
+  says. `--prod` (:8102, "Mission control: deployed database") gives it
+  `DATABASE_URL_PROD` instead — the console still runs on your machine, only
+  the connection string changes. What makes that safe is the ROLE, not the
+  script: it mounts the admin router and nothing that writes, and never runs
+  `db_bootstrap`. Use a **read-only login** anyway (`.env.example` has the
+  T-SQL), because the credential is the part that still holds the day somebody
+  changes the role. It needs a real firewall change — Azure SQL admits the App
+  Service outbound set and nothing else — which is what `devAllowedIps` in
+  `infra/main.bicep` is for: empty by default, never passed by CI, so deploying
+  opens nothing on its own, and a rule that lives in source is one somebody can
+  see and remove. A rule added in the portal survives every incremental deploy
+  invisibly, which is the failure this parameter exists to prevent.
+  **`usage_report --remote` / `usage_dashboard --remote` are still the right
+  tool for a number you just want to look at**: they read the token-gated
+  `GET /api/events/stats`, so they need no firewall rule and work from
+  anywhere.
+  **The console says which database answered** — `/api/meta` carries the host
+  and database name from `database.describe_url`, and the filter bar colours a
+  live connection. Derived from the connection the process actually made, never
+  from the flag that started it, because a label that can disagree with reality
+  is worse than none; and it is host and name only, never the credential.
   Nothing about it is in `infra/` or `deploy.yml`: no App Service, no image
   content, no CI step, and `src/dashboard_static/` is gitignored so the API
   image never carries the bundle. **If that ever changes**, three things come
@@ -538,18 +554,22 @@ uv run python -m scripts.purge_old_trips            # dry run; --apply to delete
 uv run python -m scripts.purge_old_feedback         # dry run; --apply to delete >24mo feedback
 uv run python -m scripts.usage_dashboard            # local HTML snapshot; --remote for prod
 
-# Admin dashboard — live, filterable mission control on :8101. Local only.
+# Admin dashboard — live, filterable mission control on :8101. Runs locally.
 # Builds the UI if needed, waits for the DB, opens the browser. The sign-in
 # password is STATS_TOKEN from .env; empty means every route 404s by design.
 # VS Code: ⇧⌘P → "Mission control".
 #
-# It reads DATABASE_URL, i.e. your LOCAL database — Azure SQL is firewalled to
-# the App Service outbound IPs, so a laptop cannot reach it. For PRODUCTION use
-# `usage_report --remote` / `usage_dashboard --remote` (above), which go
-# through the token-gated GET /api/events/stats instead.
+# --prod points it at the DEPLOYED database (:8102, DATABASE_URL_PROD from
+# .env) — read-only by role, and it needs a SQL firewall rule for your IP
+# (infra devAllowedIps; docs/DEPLOYMENT.md) or the login just times out. The
+# filter bar shows which database answered. For a number you only want to look
+# at, `usage_report --remote` / `usage_dashboard --remote` (above) go through
+# the token-gated GET /api/events/stats and need no firewall change at all.
 ./scripts/dashboard.sh
 ./scripts/dashboard.sh --build        # force a UI rebuild first
 ./scripts/dashboard.sh --build-only   # compile the UI, don't serve
+./scripts/dashboard.sh --prod         # :8102, against the deployed database
+cd src && uv run python -m scripts.db_ping   # SELECT 1 + which database it is
 npm --prefix dashboard run dev        # Vite on 5273 w/ HMR, proxying /api to 8101
 # Post launch links tagged: https://…/?src=r-electricvehicles (see CAMPAIGN_SOURCES)
 

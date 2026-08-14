@@ -1,4 +1,4 @@
-import type { Filters } from "../lib/api"
+import type { Filters, Meta } from "../lib/api"
 import type { Facet } from "../lib/useFilters"
 import { LivePip } from "./ui"
 
@@ -21,10 +21,47 @@ const FACET_LABEL: Record<string, string> = {
   referrer_path: "thread",
 }
 
+/** Which database answered, said out loud.
+ *
+ * The console reads whatever `DATABASE_URL` the process was given, and since
+ * `--prod` that can be the deployed one. Two tabs of the same layout showing
+ * different populations is how somebody ends up reasoning about live traffic
+ * while believing they are looking at seed data, so a live connection is
+ * labelled and coloured rather than merely implied by the port.
+ *
+ * Rendered from the server's own answer, and absent until `/api/meta` lands —
+ * a placeholder reading "local" while the real value is in flight would be the
+ * one wrong state that matters.
+ */
+function DatabaseChip({ database }: { database: Meta["database"] }) {
+  const live = !database.local
+  return (
+    <span
+      className="chip"
+      title={`These numbers come from ${database.host}/${database.name}`}
+      style={
+        live
+          ? {
+              borderColor: "var(--color-s-rose)",
+              color: "var(--color-s-rose)",
+              background: "color-mix(in oklab, var(--color-s-rose) 12%, transparent)",
+            }
+          : undefined
+      }
+    >
+      <span className={live ? undefined : "text-ink-mute"}>
+        {live ? "live db" : "local db"}
+      </span>
+      <span className="truncate max-w-[14rem]">{database.host}</span>
+    </span>
+  )
+}
+
 export function FilterBar({
   filters,
   active,
   status,
+  database,
   onDays,
   onClear,
   onDrop,
@@ -33,6 +70,7 @@ export function FilterBar({
   filters: Filters
   active: { facet: Facet; value: string }[]
   status: "connecting" | "live" | "retrying"
+  database?: Meta["database"]
   onDays: (d: number) => void
   onClear: () => void
   onDrop: (facet: Facet, value: string) => void
@@ -92,6 +130,7 @@ export function FilterBar({
         )}
 
         <div className="ml-auto flex items-center gap-3">
+          {database && <DatabaseChip database={database} />}
           <LivePip status={status} />
           <button type="button" className="chip" onClick={onLogout}>
             sign out

@@ -167,6 +167,7 @@ export function App() {
         filters={filters}
         active={active}
         status={live.status}
+        database={meta?.database}
         onDays={setDays}
         onClear={clear}
         onDrop={(f: Facet, v: string) => toggle(f, v)}

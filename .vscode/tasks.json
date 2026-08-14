@@ -45,6 +45,20 @@
       }
     },
     {
+      "label": "Mission control: deployed database",
+      "detail": "The same console on :8102, reading the DEPLOYED database — real trips, real people. Read-only: the dashboard role serves no route that writes. Needs DATABASE_URL_PROD in .env and a SQL firewall rule for your IP (docs/DEPLOYMENT.md). A separate port so a local tab and a live one can sit open together; the filter bar says which is which.",
+      "type": "shell",
+      "command": "./scripts/dashboard.sh --prod",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "focus": true
+      }
+    },
+    {
       "label": "Mission control: rebuild the UI",
       "detail": "After editing dashboard/. Recompiles into src/dashboard_static without starting the server. (For hot reload instead: npm --prefix dashboard run dev.)",
       "type": "shell",
@@ -55,7 +69,7 @@
     },
     {
       "label": "Usage: production numbers",
-      "detail": "The live site's numbers as a terminal table. Mission control reads your local DB, so this is how you see production. Needs STATS_TOKEN in .env.",
+      "detail": "The live site's numbers as a terminal table, read through the API's token-gated stats route — so unlike the deployed-database console it needs no firewall rule and works from anywhere. Needs STATS_TOKEN in .env.",
       "type": "shell",
       "command": "uv run python -m scripts.usage_report --remote --days 7",
       "options": { "cwd": "${workspaceFolder}/src" },
@@ -92,9 +106,9 @@
     },
     {
       "label": "Free dev ports",
-      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100, 8101 (leaves Docker alone).",
+      "detail": "Kill node/python dev servers on 3000, 8000, 3100, 8100, 8101, 8102 (leaves Docker alone).",
       "type": "shell",
-      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -iTCP:8101 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-ser\") {print $2}' | sort -u | xargs -r kill 2>/dev/null; echo 'Ports freed.'",
+      "command": "lsof -nP -iTCP:3000 -iTCP:8000 -iTCP:3100 -iTCP:8100 -iTCP:8101 -iTCP:8102 -sTCP:LISTEN | awk 'NR>1 && ($1==\"node\" || $1 ~ /^[Pp]ython/ || $1==\"uvicorn\" || $1==\"next-ser\") {print $2}' | sort -u | xargs -r kill 2>/dev/null; echo 'Ports freed.'",
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": [],
       "presentation": { "reveal": "silent", "panel": "shared", "close": true }

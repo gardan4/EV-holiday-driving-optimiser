@@ -194,6 +194,63 @@ class TestAuth:
         assert (await client.get("/api/overview")).status_code == 401
 
 
+class TestWhichDatabase:
+    """The console can now be pointed at the deployed database
+    (`./scripts/dashboard.sh --prod`), so it has to say which one answered.
+
+    The label is derived from the connection the process actually made rather
+    than from the flag that started it — a label that can disagree with reality
+    is worse than none — and it must never carry the credential that made it.
+    """
+
+    LOCAL = (
+        "mssql+aioodbc://sa:LocalDev_Passw0rd!@localhost:14330/evtripdb-dev"
+        "?driver=ODBC+Driver+18+for+SQL+Server"
+    )
+    REMOTE = (
+        "mssql+aioodbc://dashboard_ro:hunter2-the-real-one@evtrip-sql-dev."
+        "database.windows.net:1433/evtripdb-dev?driver=ODBC+Driver+18+for+SQL+Server"
+    )
+
+    def test_the_password_never_comes_back_out(self):
+        """This is the whole risk of the feature: a running process that will
+        hand its connection string to whoever asks."""
+        from app.core.database import describe_url
+
+        for url, secret in ((self.LOCAL, "LocalDev_Passw0rd!"), (self.REMOTE, "hunter2")):
+            described = describe_url(url)
+            blob = repr(described)
+            assert secret not in blob
+            assert "dashboard_ro" not in blob
+            assert "sa:" not in blob
+
+    def test_local_and_deployed_are_told_apart_by_host(self):
+        """Not by the database NAME: the deployed one is also `evtripdb-dev`,
+        because the single deployed environment is the one named dev. And not
+        by `ENV` either, for the reason `EXPOSE_DOCS` exists."""
+        from app.core.database import describe_url
+
+        local = describe_url(self.LOCAL)
+        remote = describe_url(self.REMOTE)
+        assert local["local"] is True
+        assert remote["local"] is False
+        assert local["name"] == remote["name"] == "evtripdb-dev"
+        assert remote["host"] == "evtrip-sql-dev.database.windows.net"
+
+    def test_an_unreadable_url_is_not_called_local(self):
+        """The safe direction: a console that warns about a database it turns
+        out to own, never one that quietly calls a live database local."""
+        from app.core.database import describe_url
+
+        assert describe_url("::: not a url :::")["local"] is False
+
+    @pytest.mark.asyncio
+    async def test_meta_says_which_database_answered(self, client: AsyncClient):
+        await _signed_in(client)
+        meta = (await client.get("/api/meta")).json()
+        assert set(meta["database"]) == {"host", "name", "local"}
+
+
 class TestQueries:
     @pytest.mark.asyncio
     async def test_overview_carries_its_window_and_filters(self, client: AsyncClient):

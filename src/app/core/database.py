@@ -108,6 +108,50 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "db", "evtrip-db-local"})
+
+
+def describe_url(url: str | None = None) -> dict:
+    """Which database this process is talking to — host and name, no credentials.
+
+    Exists because the admin console can now be pointed at the deployed database
+    (`./scripts/dashboard.sh --prod`), and two browser tabs showing a filter bar
+    and a 90-day window look exactly alike. A reader who cannot tell which
+    database they are on will eventually act on the wrong one, so the console
+    says it out loud — from the URL the process actually connected with, never
+    from a flag somebody passed, because a label that can disagree with reality
+    is worse than no label.
+
+    **Username and password are never returned.** `make_url` parses them into
+    their own attributes and this reads only `host` and `database`, so there is
+    no string here that a password could hide inside — not even URL-encoded.
+    The one thing this must never become is a way to read the connection string
+    back out of a running process.
+
+    `local` is derived from the host rather than from `ENV`, for the reason
+    `EXPOSE_DOCS` exists: the deployed environment is named `dev`, so anything
+    keyed on the environment name is wrong exactly where it matters.
+    """
+    from sqlalchemy.engine import make_url
+
+    try:
+        parsed = make_url(url if url is not None else DATABASE_URL)
+        host = (parsed.host or "").strip()
+        name = (parsed.database or "").strip()
+    except Exception:  # noqa: BLE001 — a label is never worth an exception
+        logger.warning("could not parse DATABASE_URL for display", exc_info=True)
+        return {"host": "unknown", "name": "unknown", "local": False}
+
+    return {
+        "host": host or "unknown",
+        "name": name or "unknown",
+        # Unknown counts as NOT local: the safe direction is a console that
+        # warns about a database it turns out to own, never one that quietly
+        # calls a live database "local".
+        "local": host.lower() in _LOCAL_HOSTS,
+    }
+
+
 def get_sync_database_url() -> str:
     """Convert async database URL to sync equivalent."""
     # Map async driver to sync equivalent for MSSQL

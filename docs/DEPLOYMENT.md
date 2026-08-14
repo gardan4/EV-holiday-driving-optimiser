@@ -82,6 +82,57 @@ docker build -t evtrip-api ./src
 docker build -t evtrip-web ./frontend
 ```
 
+## Reading the deployed database from the admin console
+
+The console (`./scripts/dashboard.sh`, VS Code: "Mission control") runs on your
+machine and reads whatever `DATABASE_URL` it is given. `--prod` gives it the
+deployed one, on port 8102 so a local console and a live one can sit open at
+once, and the filter bar carries the host it actually connected to.
+
+It is read-only by role rather than by promise: `PROCESS_ROLE=dashboard` mounts
+the admin router and the built SPA and none of the public API routers, every
+route on it is a SELECT, and `db_bootstrap` is never run from that script. Use a
+read-only login anyway — the credential is the part that still holds when
+somebody changes the role.
+
+Three steps, and only the first is in this repository:
+
+1. **A read-only login**, created once against the deployed database as admin:
+
+   ```sql
+   CREATE USER dashboard_ro WITH PASSWORD = '…';
+   ALTER ROLE db_datareader ADD MEMBER dashboard_ro;
+   -- deliberately no db_datawriter and no db_ddladmin
+   ```
+
+2. **`DATABASE_URL_PROD` in `.env`**, in the same shape as `DATABASE_URL` but
+   with that login and the Azure host. It is read by the dashboard script and
+   nothing else, and passed to that one process rather than exported.
+
+3. **A SQL firewall rule for your address.** Azure SQL admits the App Service
+   outbound set and nothing else, so without one the login simply times out:
+
+   ```bash
+   curl -s https://api.ipify.org        # the address to allow
+   az deployment group create \
+     --resource-group "$RG" \
+     --template-file infra/main.bicep \
+     --parameters infra/main.parameters.json \
+     --parameters devAllowedIps='<that address>' …
+   ```
+
+   `devAllowedIps` is empty by default and CI never passes it, so deploying
+   opens nothing on its own. Take yours out when you are done: a home address is
+   not static, and a stale rule is a door left open for whoever holds it next.
+   Adding the rule in the portal instead would work and is what this parameter
+   exists to prevent — deployments are incremental, so a hand-made rule survives
+   invisibly and nobody reading `infra/main.bicep` would know the database had a
+   door in it.
+
+`usage_report --remote` and `usage_dashboard --remote` need none of this: they
+read the API's token-gated stats route, so they work from anywhere and remain
+the right tool for a number you just want to look at.
+
 ## Notes
 
 - SQL location follows the deployment `location` (default: the resource group's).

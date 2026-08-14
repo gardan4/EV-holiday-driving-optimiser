@@ -95,6 +95,9 @@ param restrictToCloudflare bool = true
 @description('Comma-separated IPs allowed through the SQL firewall (the App Service outbound set). Empty ⇒ no app rules are created; the infra job resolves this from the live app.')
 param sqlAllowedIps string = ''
 
+@description('Comma-separated developer IPs allowed through the SQL firewall, for the local admin console (./scripts/dashboard.sh --prod). Empty ⇒ none, which is the default and the right one for CI.')
+param devAllowedIps string = ''
+
 @description('SQL Database SKU name (e.g. Basic, S0, S1).')
 param sqlSkuName string = 'S0'
 
@@ -274,6 +277,35 @@ resource sqlFirewallAppOutbound 'Microsoft.Sql/servers/firewallRules@2023-05-01-
     properties: {
       startIpAddress: ip
       endIpAddress: ip
+    }
+  }
+]
+
+// A developer's own address, so the local admin console can read this database
+// (`./scripts/dashboard.sh --prod`). Separate from the list above because the
+// two have opposite lifetimes: that one is resolved fresh from the live app on
+// every deploy and is meant to churn, this one is a deliberate exception that
+// should be visible in source and removable in one line.
+//
+// Empty by default, which is what CI passes — nothing is opened up by
+// deploying, only by somebody adding their address on purpose:
+//
+//   az deployment group create … --parameters devAllowedIps='<your ip>'
+//
+// A rule added by hand in the portal would work too and is the thing this
+// exists to prevent: deployments are incremental, so it would survive
+// invisibly, and nobody reviewing this file would know the database had a door
+// in it. Keep the list short and take yours out when you are done — a home IP
+// is not static, so a stale entry is an address somebody else now has.
+var devIps = empty(devAllowedIps) ? [] : split(devAllowedIps, ',')
+
+resource sqlFirewallDev 'Microsoft.Sql/servers/firewallRules@2023-05-01-preview' = [
+  for (ip, i) in devIps: {
+    parent: sqlServer
+    name: 'developer-${i}'
+    properties: {
+      startIpAddress: trim(ip)
+      endIpAddress: trim(ip)
     }
   }
 ]

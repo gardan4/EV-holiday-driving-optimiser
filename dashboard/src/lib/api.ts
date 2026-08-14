@@ -161,6 +161,12 @@ export type Upstream = {
 }
 
 export type Meta = {
+  /** Which database answered — host and name, never credentials. The console
+   *  can be pointed at the deployed database (`./scripts/dashboard.sh --prod`),
+   *  and a local tab and a live one are otherwise identical to look at. Read
+   *  off the connection the process actually made, not off the flag that
+   *  started it: a label that can disagree with reality is worse than none. */
+  database: { host: string; name: string; local: boolean }
   dimensions: string[]
   filterable: string[]
   measures: string[]

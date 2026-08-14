@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, get_db
+from app.core.database import AsyncSessionLocal, describe_url, get_db
 from app.core.rate_limit import limiter
 from app.core.security import get_fernet
 from app.models import AppEvent
@@ -208,6 +208,12 @@ async def meta() -> dict:
     from app.services.simulator import SimParams, _default_country_caps
 
     return {
+        # Which database these numbers came out of. The console can be pointed
+        # at the deployed one (`./scripts/dashboard.sh --prod`), and a local tab
+        # and a live one are otherwise indistinguishable — same layout, same
+        # window, different consequences. Host and name only; `describe_url`
+        # never returns credentials.
+        "database": describe_url(),
         "dimensions": sorted(DIMENSIONS),
         "filterable": sorted(FILTERABLE),
         "measures": sorted(MEASURES),
