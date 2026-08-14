@@ -51,6 +51,12 @@ export default function ResultsView({
   )
   const band = useMemo(() => nearOptimalBand(result.speeds), [result.speeds])
 
+  // What "Drive this" hands to the phone. Null while the reader is on the
+  // optimum, which is both the common case and the one whose drive link should
+  // stay bare — a speed the plan already recommends does not need saying.
+  const chosenSpeed =
+    selectedSpeed === result.optimum_speed ? null : selectedSpeed
+
   // Picking a different speed can change the itinerary from 4 stops to 9,
   // which changes the page height by ~440px. If the reader is scrolled down,
   // the browser clamps their scroll position and the page appears to jump.
@@ -164,6 +170,7 @@ export default function ResultsView({
             {live?.status !== "active" && (
               <DriveThisButton
                 tripId={trip.id}
+                speedKph={chosenSpeed}
                 onShowQr={() => setSendOpen(true)}
               />
             )}
@@ -188,7 +195,11 @@ export default function ResultsView({
         </div>
 
         {sendOpen && (
-          <SendToPhonePanel tripId={trip.id} onClose={() => setSendOpen(false)} />
+          <SendToPhonePanel
+            tripId={trip.id}
+            speedKph={chosenSpeed}
+            onClose={() => setSendOpen(false)}
+          />
         )}
 
         <DriveBanner tripId={trip.id} live={live} />

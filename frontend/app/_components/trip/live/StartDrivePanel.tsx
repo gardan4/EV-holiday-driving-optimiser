@@ -22,12 +22,22 @@ import { storeToken } from "@/lib/useLiveRun"
 export default function StartDrivePanel({
   trip,
   alreadyDriving,
+  speedKph = null,
 }: {
   trip: Trip
   alreadyDriving: boolean
+  /** The plan the reader chose on the results page, already checked against
+   *  this trip's feasible speeds. Null means they were on the optimum. */
+  speedKph?: number | null
 }) {
   const router = useRouter()
+  // The chosen plan, then the optimum, then whatever is feasible. The drive is
+  // followed and benchmarked against this one, so it has to be the plan the
+  // reader was actually looking at when they handed it over.
   const best =
+    (speedKph != null
+      ? trip.result.speeds.find((s) => s.speed_kph === speedKph)
+      : undefined) ??
     trip.result.speeds.find((s) => s.speed_kph === trip.result.optimum_speed) ??
     trip.result.speeds.find((s) => s.feasible)
   const [soc, setSoc] = useState(Math.round(trip.request.depart_soc ?? 100))

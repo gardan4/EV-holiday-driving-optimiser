@@ -30,17 +30,40 @@ function isHandheld(): boolean {
   return window.matchMedia("(pointer: coarse)").matches
 }
 
+/**
+ * The drive URL for whichever plan the reader is looking at.
+ *
+ * The results page has always let you choose a speed other than the optimum,
+ * and "Drive this" has always ignored that and started the optimum — which was
+ * survivable while the choice was a row of pills below the fold, and stopped
+ * being once the steppers put it next to the answer. Somebody who dials to 130
+ * and hands the trip to their phone would otherwise be followed against, and
+ * benchmarked against, the 145 plan they deliberately rejected.
+ *
+ * Omitted when it IS the optimum, so the ordinary link stays clean and the QR
+ * for an untouched plan is the same code it has always been.
+ */
+export function driveHref(tripId: string, speedKph?: number | null): string {
+  const base = `/trip/${tripId}/drive`
+  return speedKph == null ? base : `${base}?speed=${Math.round(speedKph)}`
+}
+
 export function DriveThisButton({
   tripId,
+  speedKph = null,
   onShowQr,
 }: {
   tripId: string
+  /** The speed the reader has selected, when it isn't the optimum. */
+  speedKph?: number | null
   onShowQr: () => void
 }) {
   const router = useRouter()
   return (
     <button
-      onClick={() => (isHandheld() ? router.push(`/trip/${tripId}/drive`) : onShowQr())}
+      onClick={() =>
+        isHandheld() ? router.push(driveHref(tripId, speedKph)) : onShowQr()
+      }
       className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700"
     >
       <Smartphone className="h-4 w-4" />
@@ -56,9 +79,14 @@ export function DriveThisButton({
  */
 export function SendToPhonePanel({
   tripId,
+  speedKph = null,
   onClose,
 }: {
   tripId: string
+  /** The speed the reader has selected, when it isn't the optimum. The QR
+   *  re-encodes when it changes: the code on screen has to be the plan on
+   *  screen, or the phone quietly drives a different one. */
+  speedKph?: number | null
   onClose: () => void
 }) {
   const [svg, setSvg] = useState<string | null>(null)
@@ -66,7 +94,7 @@ export function SendToPhonePanel({
   const [url, setUrl] = useState("")
 
   useEffect(() => {
-    const target = `${window.location.origin}/trip/${tripId}/drive`
+    const target = `${window.location.origin}${driveHref(tripId, speedKph)}`
     setUrl(target)
     let alive = true
     void import("qrcode").then((QR) =>
@@ -82,7 +110,7 @@ export function SendToPhonePanel({
     return () => {
       alive = false
     }
-  }, [tripId])
+  }, [tripId, speedKph])
 
   async function copy() {
     await navigator.clipboard.writeText(url)
