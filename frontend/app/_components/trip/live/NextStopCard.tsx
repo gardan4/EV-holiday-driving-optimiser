@@ -25,7 +25,7 @@
 
 import { BatteryCharging, Flag, Navigation, Search } from "lucide-react"
 import { Stop, Vehicle } from "@/lib/client"
-import { fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
 
 /** Beyond this the plan's arrival percentage is worth a caveat. Matches the
  *  band the HUD already colours the battery readout at. */
@@ -104,6 +104,7 @@ export default function NextStopCard({
           <p className="mt-0.5 text-xs text-ink-500">
             {stop.operator && <span>{stop.operator} · </span>}
             {Math.round(stop.power_kw)} kW
+            {fmtBays(stop.n_points) && <> · {fmtBays(stop.n_points)}</>}
             {!here && <> · {fmtKm(toGo)} to go</>}
           </p>
         </div>

@@ -507,6 +507,7 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
                     power_kw=c.max_power_kw,
                     # Round trip off/on the motorway at ~40 kph average.
                     detour_min=2.0 * (perp_m / 1000.0) / 40.0 * 60.0,
+                    n_points=c.n_points or 1,
                 )
             )
         return out

@@ -723,6 +723,21 @@ class TestTurningDownAStop:
         assert after["current"]["charger_id"] != rejected
         assert all(a["charger_id"] != rejected for a in after["alternatives"])
 
+    async def test_the_bay_count_reaches_the_driver(self, client):
+        """Capacity is the one thing about a site that separates a hub from a
+        lone plug, and it sat in the `chargers` table since the first deploy
+        without ever leaving it — `ChargerNode` did not carry it, so no plan,
+        itinerary or alternative could show it. It is NOT availability; see the
+        note in `AlternativeStops`."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        seen = [a["n_points"] for a in [out["current"], *out["alternatives"]] if a]
+        assert seen, "expected at least the current stop"
+        assert any(n > 1 for n in seen), "the fixture's hubs lost their bays"
+
     async def test_a_watcher_cannot_ask_for_alternatives(self, client):
         """It is a write-token route like every other run endpoint: the trip id
         reads the drive, it does not steer it."""

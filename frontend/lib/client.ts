@@ -90,6 +90,10 @@ export interface Stop {
   lat: number
   lon: number
   power_kw: number
+  /** DC bays OpenChargeMap lists. NOT live availability — no operator
+   *  publishes that to us — and absent on trips planned before it was
+   *  carried through, hence optional. */
+  n_points?: number
   offset_m: number
   arrive_min: number
   arrive_soc: number
@@ -342,6 +346,8 @@ export interface Alternative {
   name: string
   operator: string | null
   power_kw: number
+  /** DC bays OpenChargeMap lists; see `Stop.n_points`. */
+  n_points?: number
   lat: number
   lon: number
   /** On the whole route's axis, like every other stop. */

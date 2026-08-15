@@ -333,6 +333,7 @@ def _snapshot_route(route: routing.RouteData, chargers: list) -> dict:
                 "operator": c.operator,
                 "lat": c.lat,
                 "lon": c.lon,
+                "n_points": c.n_points,
             }
             for c in chargers
         ],
@@ -787,6 +788,7 @@ async def alternatives(
             name=stop.name,
             operator=stop.operator,
             power_kw=stop.power_kw,
+            n_points=stop.n_points,
             lat=round(stop.lat, 5),
             lon=round(stop.lon, 5),
             offset_m=round(stop.offset_m + st["offset_m"]),

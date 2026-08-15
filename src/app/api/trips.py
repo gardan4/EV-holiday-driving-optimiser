@@ -111,6 +111,7 @@ def _result_out(r: SpeedResult) -> SpeedResultOut:
                 arrive_soc=round(s.arrive_soc, 1),
                 depart_soc=round(s.depart_soc, 1),
                 charge_min=round(s.charge_min, 1),
+                n_points=s.n_points,
             )
             for s in r.stops
         ],

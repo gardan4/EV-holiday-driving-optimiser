@@ -134,6 +134,10 @@ class StopOut(BaseModel):
     arrive_soc: float
     depart_soc: float
     charge_min: float
+    # DC bays OpenChargeMap lists. Not live availability — nobody publishes
+    # that to us — but a twelve-stall hub and a lone plug are different bets
+    # and the model treats them identically.
+    n_points: int = 1
 
 
 class TimelinePoint(BaseModel):
@@ -250,6 +254,7 @@ class AlternativeOut(BaseModel):
     name: str
     operator: Optional[str] = None
     power_kw: float
+    n_points: int = 1
     lat: float
     lon: float
     # On the whole route's axis, like every other stop the frontend draws.

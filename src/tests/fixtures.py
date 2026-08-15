@@ -38,6 +38,9 @@ def chargers_every(total_km: float, spacing_km: float, power_kw: float = 150.0,
             offset_m=km * 1000.0,
             power_kw=power_kw,
             detour_min=2.0,
+            # Alternating hub and single plug, so anything that carries the bay
+            # count through has something to prove.
+            n_points=4 if idx % 2 == 0 else 1,
         ))
         km += spacing_km
         idx += 1
@@ -79,6 +82,10 @@ def nl_to_austria_route() -> tuple[list[RouteSegment], list[ChargerNode]]:
             offset_m=c.offset_m,
             power_kw=c.power_kw,
             detour_min=c.detour_min,
+            # Re-constructing a node drops every field not named here, which is
+            # how a charger attribute added upstream quietly stops existing in
+            # every test that uses this corridor.
+            n_points=c.n_points,
         )
         for i, c in enumerate(chargers)
     ]

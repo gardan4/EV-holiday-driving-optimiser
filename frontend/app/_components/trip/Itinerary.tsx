@@ -2,7 +2,7 @@
 
 import { BatteryCharging, Car, ExternalLink, Flag, MapPin } from "lucide-react"
 import { SpeedResult, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { clockAt, fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
 
 interface ItineraryProps {
   trip: Trip
@@ -59,7 +59,9 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
         />
         <p className="text-xs text-ink-500">
           {stop.operator && <span>{stop.operator} · </span>}
-          {Math.round(stop.power_kw)} kW · arrive {clockAt(departIso, stop.arrive_min)}
+          {Math.round(stop.power_kw)} kW
+          {fmtBays(stop.n_points) && <> · {fmtBays(stop.n_points)}</>} · arrive{" "}
+          {clockAt(departIso, stop.arrive_min)}
         </p>
         <div className="mt-2 flex items-center justify-between gap-2">
           <SocDelta from={stop.arrive_soc} to={stop.depart_soc} />

@@ -79,6 +79,22 @@ export function socLabel(soc: number, measured: boolean, band: number): string {
   return `${Math.max(0, Math.round(soc - band))}-${Math.min(100, Math.round(soc + band))}%`
 }
 
+/**
+ * "· 4 bays", or nothing at all.
+ *
+ * OpenChargeMap's bay count is the only capacity signal we have, and it is
+ * absent or 1 often enough that printing "1 bay" would assert something the
+ * data does not support — a site with an unknown count and a genuine single
+ * plug look identical here. So one bay and no bays both render as silence, and
+ * the number only appears when it is telling you something: this is a hub.
+ *
+ * It is NOT availability. Nothing in this app knows whether a stall is free;
+ * see the note in `AlternativeStops`.
+ */
+export function fmtBays(n: number | null | undefined): string {
+  return n && n > 1 ? `${n} bays` : ""
+}
+
 /** Google Maps deep link for a charging stop (no in-app map in v1). */
 export function mapsLink(lat: number, lon: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`

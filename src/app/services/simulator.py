@@ -99,6 +99,11 @@ class ChargerNode:
     operator: str | None = None
     lat: float = 0.0
     lon: float = 0.0
+    # DC bays OpenChargeMap knows about. Not a live count and never modelled —
+    # `queue_min` is the only thing here that prices a busy site — but it is
+    # the difference between a lone plug and a twelve-stall hub, which is what
+    # a driver weighs when deciding whether to risk one.
+    n_points: int = 1
 
 
 def _default_country_caps() -> dict[str, float]:
@@ -270,6 +275,7 @@ class StopPlan:
     depart_soc: float
     charge_min: float
     detour_min: float
+    n_points: int = 1
 
 
 @dataclass
@@ -865,6 +871,7 @@ def _exact_forward_pass(
                 depart_soc=soc,
                 charge_min=c_min,
                 detour_min=node.detour_min,
+                n_points=node.n_points,
             )
         )
         timeline.append((arrive_clock, node.offset_m, arrive_soc))
