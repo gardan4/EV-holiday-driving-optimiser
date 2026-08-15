@@ -332,7 +332,7 @@ the pipeline is green before infra exists. Infra deploy is manual
   transformed, or not being a simulator setting — because that decision being
   implicit is what the bug was.
 - **A stop can be wrong for reasons the model cannot see, so the driver can
-  turn one down** (`runs.alternatives`). The DP optimises minutes, and the
+  turn one down — ANY of them** (`runs.alternatives`). The DP optimises minutes, and the
   quickest charger on a corridor is regularly a lay-by behind a warehouse with
   nowhere to eat — which matters at nine in the evening with a car full of
   people, and is not in OpenChargeMap. So the app does not invent amenities it
@@ -353,7 +353,17 @@ the pipeline is green before infra exists. Infra deploy is manual
   is NOW and must therefore use the same first-leg floor the plan was made
   under, or a driver who accepted a stretch stop gets it handed back as an
   option; it is filtered by charger id as well, because that row reads as a bug
-  however it got there. Three more properties hold it up. **Ranked by successive exclusion, not by proximity** —
+  however it got there. **`reject_charger_id` names the stop**, so a charger
+  four hours away can be swapped from the plan list — which is where the food
+  question actually lands, since by the time a stop is the NEXT one the choice
+  about it has been made for you. Swapping the next stop picks `stops[0]` from
+  each candidate plan; swapping a later one picks whichever stop now stands
+  nearest the rejected one's position, because reporting `stops[0]` there would
+  answer about a stop nobody mentioned. Stretch options are offered only for
+  the next stop: the relaxed floor is a first-leg idea, and that pass has to
+  rule out everything up to and including the rejected charger or the DP simply
+  stops before it — a fine plan, and not an answer to "what if I push past it".
+  Three more properties hold it up. **Ranked by successive exclusion, not by proximity** —
   turn the current stop down, re-run the DP, and what comes back is the real
   next-best plan with every later stop re-optimised around the swap; a nearest
   neighbours list would offer chargers no plan can use. **`delta_min` is
