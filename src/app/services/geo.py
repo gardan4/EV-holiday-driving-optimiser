@@ -168,7 +168,25 @@ class RouteGeometry:
         Uses a local equirectangular approximation per segment — accurate to
         well under 1% at charger-search distances (< a few km).
         """
-        best_off, best_d2 = 0.0, math.inf
+        off, perp, _ = self.project_detailed(lat, lon)
+        return off, perp
+
+    def project_detailed(self, lat: float, lon: float) -> tuple[float, float, int]:
+        """As `project`, plus WHICH SIDE of the road the point is on.
+
+        `+1` is left of the direction of travel, `-1` is right, `0` is on the
+        line. That third number is the difference between a charger you pull
+        into and one you can only reach by carrying on to the next junction and
+        driving back — on a dual carriageway the two are a hundred metres apart
+        and identical to every distance-based measure, which is exactly how a
+        plan comes to route somebody back the way they came.
+
+        The sign is the 2D cross product of the travel direction with the
+        offset to the point, on the same local plane the distance uses. It says
+        nothing about traffic side by itself; `chargers` pairs it with the
+        country to decide which side is reachable.
+        """
+        best_off, best_d2, best_side = 0.0, math.inf, 0
         cos_lat = math.cos(math.radians(lat))
         px, py = lon * cos_lat, lat
         for i in range(len(self.coords) - 1):
@@ -183,9 +201,11 @@ class RouteGeometry:
             if d2 < best_d2:
                 best_d2 = d2
                 best_off = self.cum_m[i] + t * (self.cum_m[i + 1] - self.cum_m[i])
+                cross = dx * (py - cy) - dy * (px - cx)
+                best_side = 0 if cross == 0.0 else (1 if cross > 0 else -1)
         # Degrees → meters (1° ≈ 111.32 km on the scaled plane).
         perp_m = math.sqrt(best_d2) * 111_320.0
-        return best_off, perp_m
+        return best_off, perp_m, best_side
 
 
 # ---------------------------------------------------------------------------

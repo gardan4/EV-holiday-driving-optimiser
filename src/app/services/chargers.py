@@ -13,6 +13,7 @@ import asyncio
 import logging
 import math
 import time
+from bisect import bisect_right
 from contextvars import ContextVar
 from datetime import datetime, timedelta
 
@@ -59,6 +60,60 @@ OPERATIONAL_STATUS = 50
 # filter was already fixed.
 OCM_QUERY_VERSION = 2
 MAX_PERP_M = 3_000.0          # ≤ 3 km off-route
+
+# --- "I am not driving back up the motorway to reach a plug" -----------------
+#
+# A charger on the far carriageway of a dual carriageway is a hundred metres
+# away and unreachable: you carry on to the next junction, come off, cross,
+# come back, and rejoin. Every distance-based measure here says it is the
+# closest site on the route, so the DP picked it happily and the itinerary
+# quietly instructed somebody to drive back the way they came. These are
+# dropped outright rather than priced, because "never" is the actual
+# requirement — a cost, however large, is still a thing an optimiser will pay
+# when it is in a hurry.
+#
+# Narrow on purpose, because a hard rule that fires too widely takes chargers
+# away from routes that need them:
+#
+# * Only within `SIDE_MATTERS_M` of the line. Further out you are leaving at a
+#   junction and using local roads whatever side it is on, and the carriageway
+#   stops being what decides.
+# * Only on motorway-like road. `DIVIDED_ROAD_KPH` is the same free-flow
+#   threshold the simulator uses to treat a segment as motorway; below it,
+#   turning around is a junction, not a 20 km penance.
+# * Only where we KNOW which side people drive on. `geo.country_at` covers
+#   eight countries and returns "" everywhere else, and guessing would be
+#   worse than not applying the rule: in a left-hand-traffic country it would
+#   drop precisely the reachable chargers and keep the unreachable ones.
+SIDE_MATTERS_M = 500.0
+DIVIDED_ROAD_KPH = 105.0
+
+# Where people drive on the left. `geo.country_at` cannot return any of these
+# today — its boxes are eight right-hand-traffic countries — so this table is
+# inert until that coverage grows. It exists so that growing it makes the rule
+# correct rather than exactly backwards.
+LEFT_HAND_TRAFFIC = frozenset(
+    {
+        "GB", "IE", "MT", "CY", "JP", "AU", "NZ", "IN", "PK", "BD", "LK", "NP",
+        "TH", "MY", "SG", "ID", "BN", "HK", "MO", "ZA", "KE", "TZ", "UG", "ZM",
+        "ZW", "MW", "MZ", "BW", "LS", "SZ", "NA", "MU", "FJ", "PG", "JM", "TT",
+        "GY", "SR", "BB", "BS",
+    }
+)
+
+
+def reachable_side(country: str) -> int | None:
+    """Which side of the road you can pull into, in the sign convention of
+    `RouteGeometry.project_detailed`: -1 is right of travel, +1 is left.
+
+    None when the country is unknown, which switches the rule off rather than
+    guessing — see the note above.
+    """
+    if not country:
+        return None
+    return 1 if country in LEFT_HAND_TRAFFIC else -1
+
+
 # Stops are excluded near both ends of a route: the first 50 km because the
 # battery is still full, the last 10 because you may as well arrive.
 #
@@ -72,6 +127,44 @@ MIN_OFFSET_M = 50_000.0
 END_MARGIN_M = 10_000.0
 START_FRACTION = 0.25
 END_FRACTION = 0.10
+
+
+def road_at(route: RouteData, geom_offset_m: float) -> tuple[float, str]:
+    """(free-flow kph, country) of the road under a point on the polyline.
+
+    Two distance axes exist on a route — ORS's per-step distances and the
+    polyline's own haversine sum — and `project` returns the second one, so
+    `seg_geom_offsets` is what makes this lookup land on the right segment.
+    Synthetic routes in tests carry no map, and there the two axes are the
+    same by construction.
+    """
+    segs = route.segments
+    if not segs:
+        return (0.0, "")
+    starts = route.seg_geom_offsets[:-1] if route.seg_geom_offsets else None
+    if starts is None:
+        starts, acc = [], 0.0
+        for s in segs:
+            starts.append(acc)
+            acc += s.dist_m
+    i = max(0, min(bisect_right(starts, geom_offset_m) - 1, len(segs) - 1))
+    return (segs[i].freeflow_kph, segs[i].country or "")
+
+
+def needs_u_turn(route: RouteData, geom_offset_m: float, perp_m: float, side: int) -> bool:
+    """Is this charger on the far carriageway of a road you cannot turn on?
+
+    See `SIDE_MATTERS_M` for why each condition is here. All three have to
+    hold: close to the line, fast road, and a country whose traffic side we
+    actually know.
+    """
+    if side == 0 or perp_m > SIDE_MATTERS_M:
+        return False
+    freeflow_kph, country = road_at(route, geom_offset_m)
+    if freeflow_kph < DIVIDED_ROAD_KPH:
+        return False
+    reachable = reachable_side(country)
+    return reachable is not None and side != reachable
 
 
 def stop_window(total_m: float) -> tuple[float, float]:
@@ -363,6 +456,11 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
     # real projection off the event loop.
     corridor = [(la, lo) for la, lo in geom.sample_every(SAMPLE_SPACING_M)]
 
+    # Logged rather than discarded silently: when a thin corridor comes back
+    # infeasible, "we skipped four chargers on the far carriageway" is the
+    # first thing worth knowing.
+    skipped_u_turn: list[str] = []
+
     def _project_corridor() -> list[ChargerNode]:
         # Conservative: half a sample spacing (worst case distance to the
         # nearest sample) plus the perpendicular limit we'd accept anyway.
@@ -385,10 +483,18 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
             if not near:
                 continue
 
-            offset_m, perp_m = geom.project(c.lat, c.lon)
+            offset_m, perp_m, side = geom.project_detailed(c.lat, c.lon)
             if perp_m > MAX_PERP_M:
                 continue
             if offset_m < window_start or offset_m > window_end:
+                continue
+            # Dropped BEFORE the dedup below, which keeps the most powerful
+            # site within 500 m of an offset. A services pair straddling a
+            # motorway is two rows at nearly the same offset, so filtering
+            # afterwards would let a 350 kW site on the far carriageway evict
+            # the 150 kW one you can actually pull into.
+            if needs_u_turn(route, offset_m, perp_m, side):
+                skipped_u_turn.append(c.name)
                 continue
             out.append(
                 ChargerNode(
@@ -406,6 +512,12 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
         return out
 
     candidates = await asyncio.to_thread(_project_corridor)
+    if skipped_u_turn:
+        logger.info(
+            "chargers: skipped %d on the far carriageway (%s)",
+            len(skipped_u_turn),
+            ", ".join(skipped_u_turn[:5]),
+        )
 
     # 4. Dedup near-identical locations (keep the most powerful site).
     candidates.sort(key=lambda n: (n.offset_m, -n.power_kw))

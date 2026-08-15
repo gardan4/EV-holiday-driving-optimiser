@@ -378,6 +378,28 @@ the pipeline is green before infra exists. Infra deploy is manual
   profile "peaks" at 230 kW simply because it began at 8% SoC), and any curve
   disagreeing with the catalog's advertised peak by >3% is refused rather than
   applied, because that is a product claim and not a curve tweak.
+- **No plan sends you back up a road you were already on** (`chargers.needs_u_turn`).
+  A charger on the far carriageway of a motorway is a hundred metres away and
+  unreachable: you carry on to the next junction, come off, cross, and drive
+  back. `detour_min` is derived from perpendicular distance alone, so it priced
+  that at the same 2.4 minutes as the services you are about to pass, and the
+  DP took it — an itinerary that instructed a driver to double back. Such sites
+  are DROPPED, not priced, because "never" was the actual requirement and a
+  cost is a thing an optimiser will pay when it is in a hurry. The rule is
+  narrow on purpose, since a hard filter that fires too widely takes chargers
+  away from routes that need them: only within `SIDE_MATTERS_M` of the line
+  (further out you leave at a junction whatever side it is), only above
+  `DIVIDED_ROAD_KPH` (below that, turning round is a junction), and only where
+  `geo.country_at` actually knows the country — guessing the traffic side would
+  drop precisely the reachable chargers in a left-hand-traffic country and keep
+  the unreachable ones, so `LEFT_HAND_TRAFFIC` exists to make growing that
+  coverage correct rather than backwards. It is applied BEFORE the dedup, which
+  keeps the most powerful site within 500 m of an offset — a services pair
+  straddling a motorway is two rows at nearly one offset, and filtering after
+  would let the far-side 350 kW evict the near-side 150 kW. No `OCM_QUERY_VERSION`
+  bump: the OCM query is unchanged and projection happens per request, so
+  cached tiles stay valid. A drive already under way keeps the chargers it
+  snapshotted at the start; new plans are filtered.
 - **The planner is worldwide, the speed caps are not.** Any place ORS can route
   between is plannable; `simulator._default_country_caps` only knows eight
   western-European countries and everywhere else falls back to

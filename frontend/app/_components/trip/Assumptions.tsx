@@ -392,7 +392,12 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             <li>
               <b className="font-semibold text-ink-700">Charger detours.</b> Estimated from
               how far the site sits off the route, not routed door to door, so arrival
-              times at chargers are ±5 minutes.
+              times at chargers are ±5 minutes. Sites on the far carriageway of a
+              motorway are skipped rather than costed — reaching one means carrying
+              on to the next junction and driving back, and no plan here will send
+              you the wrong way up a road you were already on. That needs to know
+              which side people drive on, so it only applies in the countries whose
+              limits are modelled above.
             </li>
             <li>
               <b className="font-semibold text-ink-700">Whether the charger works.</b> Sites
