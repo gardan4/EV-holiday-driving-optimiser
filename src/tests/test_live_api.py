@@ -935,6 +935,42 @@ class TestTurningDownAStop:
             isinstance(r["food_hint"], str) for r in rows if r["food_hint"]
         )
 
+    async def test_it_can_swap_a_stop_further_down_the_plan(self, client):
+        """The food question lands on a stop hours away — by the time it is the
+        next one, the choice has been made for you. Naming a charger asks the
+        same question about a different position, and the answer has to be
+        about THAT position: a replacement near where the rejected stop was,
+        not whatever happens to be first."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        plan = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+        stops = plan["remaining"]["stops"]
+        assert len(stops) >= 3, "need a plan with a stop worth calling 'later'"
+        later = stops[2]
+
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/alternatives",
+                json={"reject_charger_id": later["charger_id"]},
+            )
+        ).json()
+
+        assert out["current"]["charger_id"] == later["charger_id"]
+        assert out["alternatives"], "expected somewhere else for that stop"
+        # Answers about that position, not about the next stop.
+        assert all(
+            a["charger_id"] != stops[0]["charger_id"] for a in out["alternatives"]
+        )
+        for a in out["alternatives"]:
+            assert a["charger_id"] != later["charger_id"]
+            # Near where the rejected one was, rather than anywhere on the
+            # route — a "replacement" 400 km away is a different journey.
+            assert abs(a["offset_m"] - later["offset_m"] - plan["offset_base_m"]) < 250_000
+            # Pushing past the reserve is a first-leg idea; it cannot be
+            # offered about a stop four hours away.
+            assert a["below_reserve"] is False
+
     async def test_a_watcher_cannot_ask_for_alternatives(self, client):
         """It is a write-token route like every other run endpoint: the trip id
         reads the drive, it does not steer it."""

@@ -31,6 +31,7 @@ import MapsRouteButton from "../MapsRouteButton"
 import AlternativeStops from "./AlternativeStops"
 import BatteryCheck from "./BatteryCheck"
 import HoldSpeed from "./HoldSpeed"
+import PlanAhead from "./PlanAhead"
 import NextStopCard from "./NextStopCard"
 
 export default function LiveView({
@@ -145,9 +146,9 @@ export default function LiveView({
 
   /** Look for another charger for the next stop. Read-only — the plan does not
    *  move until the driver picks one. */
-  async function loadAlternatives() {
+  async function loadAlternatives(rejectChargerId?: string) {
     try {
-      const found = await live.findAlternatives()
+      const found = await live.findAlternatives(rejectChargerId)
       if (found) setAlts(found)
       if (found && found.alternatives.length === 0) {
         toast.message("Nothing else on this stretch reaches the destination.")
@@ -308,6 +309,21 @@ export default function LiveView({
           />
         )}
 
+        {/* The plan itself, always — not only after a re-plan. Every stop is
+            swappable, because by the time one is the NEXT stop the choice
+            about it has been made for you. */}
+        {!finished && (
+          <PlanAhead
+            stops={ahead}
+            distM={distM}
+            destLabel={trip.request.dest.label.split(",")[0]}
+            destArrivalClock={clockAt(run.started_at, etaMin)}
+            onSwap={
+              isDriver ? (id) => void loadAlternatives(id) : undefined
+            }
+          />
+        )}
+
         {alts && (
           <AlternativeStops
             data={alts}
@@ -423,11 +439,7 @@ export default function LiveView({
         )}
 
         {revised && (
-          <RevisedPanel
-            plan={revised}
-            startedAtIso={run.started_at}
-            distM={distM}
-          />
+          <RevisedPanel plan={revised} startedAtIso={run.started_at} />
         )}
 
         {finished && (
@@ -478,25 +490,21 @@ function heroStop(next: Stop | null, distM: number): LiveHeroState["nextStop"] {
 /**
  * The revised journey, always shown next to the promise it replaces.
  *
- * Everything here is measured FROM THE CAR, not from this morning's origin.
- * The stops used to be labelled with their distance along the whole route —
- * "227 km" while sitting at the 175 km mark — which is a fact about the trip
- * and no help at all to somebody deciding whether to stop now. A re-plan is a
- * plan for the road ahead, so it is written in the road ahead's units.
+ * Three headline numbers and nothing else: what to hold, what is left, when
+ * you land. The stop list it used to carry moved to `PlanAhead`, which shows
+ * the tail of whichever plan is in force whether or not anyone has re-planned
+ * — two lists of the same stops is one list too many on a phone.
  *
- * The three headline numbers stay three across at every width. Stacked on a
- * phone they were a 270-pixel column of one number each, which pushed the list
- * of stops — the part you re-planned to see — off the bottom of the screen.
+ * They stay three across at every width. Stacked they were a 270-pixel column
+ * of one number each, which pushed everything below off the bottom of the
+ * screen.
  */
 function RevisedPanel({
   plan,
   startedAtIso,
-  distM,
 }: {
   plan: NonNullable<LiveRun["plan"]>
   startedAtIso: string
-  /** How far the car has come, so every distance can be relative to it. */
-  distM: number
 }) {
   const b = plan.benchmark
   const worse = b.delta_min > 1
@@ -537,17 +545,9 @@ function RevisedPanel({
         />
       </div>
 
-      <ol className="mt-3 space-y-1.5 text-sm">
-        {plan.remaining.stops.map((s) => (
-          <li key={s.charger_id} className="flex items-baseline justify-between gap-2">
-            <span className="min-w-0 flex-1 truncate text-ink-700">{s.name}</span>
-            <span className="shrink-0 font-mono text-[11px] text-ink-400">
-              in {fmtKm(Math.max(s.offset_m + plan.offset_base_m - distM, 0))} ·{" "}
-              {s.arrive_soc.toFixed(0)}% · {s.charge_min.toFixed(0)} min
-            </span>
-          </li>
-        ))}
-      </ol>
+      {/* No stop list here any more: `PlanAhead` shows the tail of whichever
+          plan is in force, always, and two lists of the same stops is one
+          list too many on a phone. */}
     </div>
   )
 }

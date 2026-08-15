@@ -104,8 +104,9 @@ export interface LiveHandle {
     minArrivalSoc?: number | null,
     holdSpeedKph?: number | null
   ) => Promise<RevisedPlan | null>
-  /** Other chargers for the next stop. Read-only — taking one is a re-plan. */
-  findAlternatives: () => Promise<Alternatives | null>
+  /** Other chargers for a stop. Read-only — taking one is a re-plan.
+   *  `rejectChargerId` names which stop; omit it for the next one. */
+  findAlternatives: (rejectChargerId?: string) => Promise<Alternatives | null>
   end: () => Promise<void>
 }
 
@@ -318,15 +319,18 @@ export function useLiveRun(
     [runId]
   )
 
-  const findAlternatives = useCallback(async () => {
-    if (!runId) return null
-    setBusy(true)
-    try {
-      return await getAlternatives(runId)
-    } finally {
-      setBusy(false)
-    }
-  }, [runId])
+  const findAlternatives = useCallback(
+    async (rejectChargerId?: string) => {
+      if (!runId) return null
+      setBusy(true)
+      try {
+        return await getAlternatives(runId, rejectChargerId)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [runId]
+  )
 
   const end = useCallback(async () => {
     if (!runId) return

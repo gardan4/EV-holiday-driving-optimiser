@@ -94,6 +94,10 @@ export interface Stop {
    *  publishes that to us — and absent on trips planned before it was
    *  carried through, hence optional. */
   n_points?: number
+  /** What the site's NAME suggests you could eat there. Derived server-side on
+   *  the way out, so old trips get it too; null means the name says nothing,
+   *  not that there is nothing there. */
+  food_hint?: string | null
   offset_m: number
   arrive_min: number
   arrive_soc: number
@@ -522,9 +526,16 @@ export async function replanRun(
 
 /** Other chargers the drive could stop at instead of the next one. Read-only:
  *  taking one means calling `replanRun` with its `exclude_charger_ids`. */
-export async function getAlternatives(runId: string): Promise<Alternatives> {
+export async function getAlternatives(
+  runId: string,
+  /** Which stop to replace. Omit for the next one. */
+  rejectChargerId?: string
+): Promise<Alternatives> {
   return unwrap<Alternatives>(
-    await apiFetch(`/api/runs/${runId}/alternatives`, { method: "POST" })
+    await apiFetch(`/api/runs/${runId}/alternatives`, {
+      method: "POST",
+      body: JSON.stringify({ reject_charger_id: rejectChargerId ?? null }),
+    })
   )
 }
 

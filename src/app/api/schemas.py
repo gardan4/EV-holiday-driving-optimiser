@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.services.amenities import food_hint as _food_hint
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +140,32 @@ class StopOut(BaseModel):
     # that to us — but a twelve-stall hub and a lone plug are different bets
     # and the model treats them identically.
     n_points: int = 1
+    # What the site's NAME suggests you could eat there, or null when it says
+    # nothing. See `food_hint` below for why it is derived here.
+    food_hint: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _derive_food_hint(self):
+        """Read the hint off the name, for every stop that leaves the server.
+
+        Derived rather than stored, and derived HERE rather than at each call
+        site, for three reasons. Trips planned before any of this existed have
+        stops in their stored JSON with no such field, and they are the
+        majority — computing on the way out gives them the hint too. The marker
+        list will grow, and a stored value would freeze every old trip on the
+        table as it was the day it was planned. And there are four paths a stop
+        travels (a fresh plan, a stored trip, a re-plan, an alternative); one of
+        them would eventually be added without this, which is exactly how
+        `n_points` sat in the database for months without ever reaching a
+        screen.
+
+        Set only when absent, so a caller that has already computed it — the
+        alternatives endpoint, which needs the value before building the row —
+        is not second-guessed.
+        """
+        if self.food_hint is None:
+            object.__setattr__(self, "food_hint", _food_hint(self.name))
+        return self
 
 
 class TimelinePoint(BaseModel):
@@ -293,6 +321,17 @@ class AlternativeOut(BaseModel):
     # `replan` — without it the re-plan applies the full reserve again and
     # refuses the very stop that was just chosen.
     min_arrival_soc: Optional[float] = None
+
+
+class AlternativesRequest(BaseModel):
+    """Which stop the driver wants to replace.
+
+    Absent means the next one, which is what the button on the next-stop card
+    asks for. Naming a charger further down the plan is the same question about
+    a different stop — "not that one, and not because of when I get there".
+    """
+
+    reject_charger_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class AlternativesOut(BaseModel):

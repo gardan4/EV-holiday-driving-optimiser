@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.schemas import (
     AlternativeOut,
     AlternativesOut,
+    AlternativesRequest,
     BenchmarkOut,
     LiveOut,
     LiveStateOut,
@@ -825,7 +826,10 @@ async def replan(
 @router.post("/runs/{run_id}/alternatives", response_model=AlternativesOut)
 @limiter.limit(settings.RATE_LIMIT_LIVE_REPLAN, key_func=run_key)
 async def alternatives(
-    request: Request, run_id: str, db: AsyncSession = Depends(get_db)
+    request: Request,
+    run_id: str,
+    body: AlternativesRequest = AlternativesRequest(),
+    db: AsyncSession = Depends(get_db),
 ) -> AlternativesOut:
     """Other chargers the drive could stop at instead of the next one.
 
@@ -837,7 +841,13 @@ async def alternatives(
     only thing the model CAN say about them, which is what choosing each one
     costs in arrival time.
 
-    Ranked by successive exclusion rather than by proximity: turn the current
+    Works on ANY stop in the plan, not only the next one: `reject_charger_id`
+    says which. A stop four hours away is where the food question actually
+    lands — by the time it is the next one, the choice has been made for you —
+    and the machinery is identical, because turning a charger down and asking
+    what the plan does instead is one operation whatever its position.
+
+    Ranked by successive exclusion rather than by proximity: turn the chosen
     stop down and re-run the DP, and what comes back is genuinely the next best
     plan, with every later stop re-optimised around the swap. That is why
     `delta_min` is against the remaining JOURNEY and not the leg — swapping a
@@ -885,11 +895,41 @@ async def alternatives(
     speed = float((run.plan or {}).get("optimum_speed") or run.planned_speed_kph)
     speed = min(speed, veh.top_speed_kph)
 
+    # Which question this is. Swapping the NEXT stop means every candidate is
+    # a `stops[0]` — the alternatives ARE the next stop. Swapping one further
+    # down means the plan keeps its earlier stops and the candidate is whatever
+    # now stands nearest the rejected one's position, which is a different pick
+    # entirely: reporting `stops[0]` there would answer about a stop the driver
+    # never mentioned.
+    planned_next = _planned_next_stop_id(run, st)
+    swapping_next = (
+        body.reject_charger_id is None or body.reject_charger_id == planned_next
+    )
+
     already = set(_excluded(st))
     turned_down: list[str] = []
     baseline_min: float | None = None
     current: AlternativeOut | None = None
     found: list[AlternativeOut] = []
+    # Where on the route the swap is happening. Set from the baseline plan's
+    # own stop, so a replacement is picked by POSITION rather than by being
+    # first: rejecting the third stop and reporting the first one back would
+    # answer a question nobody asked.
+    target_offset: float | None = None
+
+    def _pick(best):
+        """The stop this swap is about."""
+        if not best.stops:
+            return None
+        if swapping_next:
+            return best.stops[0]
+        if target_offset is None:
+            named = next(
+                (s for s in best.stops if s.charger_id == body.reject_charger_id),
+                None,
+            )
+            return named or best.stops[0]
+        return min(best.stops, key=lambda s: abs(s.offset_m - target_offset))
 
     async def _next_best(exclude: set[str], p: SimParams):
         sl = _remaining_slice(snapshot, st["offset_m"], exclude)
@@ -931,11 +971,14 @@ async def alternatives(
         best = await _next_best(already | set(turned_down), params)
         if best is None:
             break
-        stop = best.stops[0]
+        stop = _pick(best)
+        if stop is None:
+            break
         alt = _as_alt(best, stop, below_reserve=False)
         if baseline_min is None:
             baseline_min = best.total_min or 0.0
             current = alt
+            target_offset = stop.offset_m
         else:
             found.append(alt)
         turned_down.append(stop.charger_id)
@@ -943,22 +986,52 @@ async def alternatives(
     # 2. The ones only a lower floor can reach. Same machinery, one parameter
     #    moved, so a stretch option is a real plan and not a suggestion — the
     #    rest of the journey after it is still planned on the full reserve.
+    #
+    #    Only when the stop being swapped is the NEXT one. The relaxed floor
+    #    applies to the leg being driven and no other, so "push on past the
+    #    reserve" is meaningless about a stop four hours away — and the stop it
+    #    would reach is `stops[0]`, the one on that leg, not whichever now
+    #    stands nearest a target further down the route.
+    #    It also gets its OWN exclusion set, seeded with the stop being
+    #    replaced and nothing else. "What could I reach by pushing past the
+    #    reserve" is a different question from "what else is quick", and
+    #    running it on the leftovers of the first list made the answer depend
+    #    on how many ordinary alternatives happened to be found — which on a
+    #    corridor like this one meant no answer at all.
+    #    And it rules out everything up to and INCLUDING the stop being
+    #    replaced, not just that stop. Leave the earlier ones available and the
+    #    DP simply stops before the rejected charger — a perfectly good plan,
+    #    and not an answer to "what if I push on past it", which is the only
+    #    question this pass exists to ask.
     stretch_params = replace(params, first_leg_reserve_soc=STRETCH_FLOOR_SOC)
-    for _ in range(MAX_STRETCH):
-        best = await _next_best(already | set(turned_down), stretch_params)
-        if best is None:
+    target_abs = (target_offset or 0.0) + st["offset_m"]
+    offered = {a.charger_id for a in found} | (
+        {current.charger_id} if current else set()
+    )
+    stretch_down: list[str] = [
+        *(
+            c.charger_id
+            for c in live.snapshot_chargers(snapshot)
+            if c.offset_m <= target_abs + 1.0
+        ),
+        *offered,
+    ]
+    for _ in range(MAX_STRETCH if swapping_next else 0):
+        best = await _next_best(already | set(stretch_down), stretch_params)
+        if best is None or not best.stops:
             break
         stop = best.stops[0]
+        stretch_down.append(stop.charger_id)
+        if stop.charger_id in offered:
+            continue
         # Built BEFORE this one joins the turned-down list: `exclude_charger_ids`
         # is what makes this stop the next one, so a row that carried its own
         # id would tell `replan` to refuse the charger it is offering.
-        alt = _as_alt(best, stop, below_reserve=True)
-        turned_down.append(stop.charger_id)
         # Only worth showing if the reserve is what was hiding it. Anything
         # else here is an ordinary alternative the loop above ran out of room
         # for, and dressing it up as a risk would be a lie.
         if stop.arrive_soc < params.reserve_soc:
-            found.append(alt)
+            found.append(_as_alt(best, stop, below_reserve=True))
 
     # 3. Somewhere to eat. The ranking above is by minutes, and the quickest
     #    few are regularly a lay-by, a car park and another lay-by — so the
@@ -972,7 +1045,9 @@ async def alternatives(
             best = await _next_best(already | set(turned_down), params)
             if best is None:
                 break
-            stop = best.stops[0]
+            stop = _pick(best)
+            if stop is None:
+                break
             alt = _as_alt(best, stop, below_reserve=False)
             turned_down.append(stop.charger_id)
             if alt.food_hint:
@@ -984,9 +1059,11 @@ async def alternatives(
     # the plan was made further back, so the two can disagree — and an
     # "alternative" that is the stop you already chose is the one row guaranteed
     # to look like a bug.
-    planned_next = _planned_next_stop_id(run, st)
-    if planned_next:
-        found = [a for a in found if a.charger_id != planned_next]
+    rejected = body.reject_charger_id or planned_next
+    if rejected:
+        found = [a for a in found if a.charger_id != rejected]
+    if current is not None:
+        found = [a for a in found if a.charger_id != current.charger_id]
 
     return AlternativesOut(
         speed_kph=speed, current=current, alternatives=found
