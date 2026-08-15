@@ -335,11 +335,25 @@ the pipeline is green before infra exists. Infra deploy is manual
   turn one down** (`runs.alternatives`). The DP optimises minutes, and the
   quickest charger on a corridor is regularly a lay-by behind a warehouse with
   nowhere to eat — which matters at nine in the evening with a car full of
-  people, and is not in OpenChargeMap. So the app does not try to judge
-  amenities it has no data for: it hands back the next few candidates with the
-  one thing it CAN say, the cost in arrival time, says out loud that it does
-  not know what is there, and links each to Maps so a human can look. Three
-  properties hold it up. **Ranked by successive exclusion, not by proximity** —
+  people, and is not in OpenChargeMap. So the app does not invent amenities it
+  has no data for: it hands back the next few candidates with the cost in
+  arrival time and links each to Maps so a human can look. It DOES read the
+  site's name for whether you could eat there (`services/amenities.py`) —
+  "Raststätte" and "Lidl" mean something a driver at nine in the evening badly
+  wants to know — and keeps searching down the ranking until it finds one,
+  because ranked by minutes the quickest few stops are regularly a lay-by, a
+  car park and another lay-by, so the question goes unanswered by a list that
+  is working perfectly. The name and never the OPERATOR: "Shell Recharge" is a
+  network that puts posts in car parks, and matching it would mark half of
+  Europe as having a bakery. It is a guess from a string, labelled as one
+  ("reads like motorway services", never "has a restaurant"), and a null hint
+  means the name says nothing rather than that there is nothing there.
+  **The stop the plan is already heading for is never offered as an
+  alternative to itself** — the baseline pass is recomputed from where the car
+  is NOW and must therefore use the same first-leg floor the plan was made
+  under, or a driver who accepted a stretch stop gets it handed back as an
+  option; it is filtered by charger id as well, because that row reads as a bug
+  however it got there. Three more properties hold it up. **Ranked by successive exclusion, not by proximity** —
   turn the current stop down, re-run the DP, and what comes back is the real
   next-best plan with every later stop re-optimised around the swap; a nearest
   neighbours list would offer chargers no plan can use. **`delta_min` is
