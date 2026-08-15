@@ -188,7 +188,11 @@ export default function PrivacyPage() {
           <br />
           Your start and destination are sent to OpenRouteService to get a route
           and to OpenChargeMap to find chargers along it, both third-party
-          services with their own terms. Feedback, and the email address you
+          services with their own terms. To say whether there is anywhere to eat
+          at a charging stop we ask OpenStreetMap what is mapped around it —
+          that request carries the charger&apos;s coordinates and nothing of
+          yours, not your route and not your position, and the answer is cached
+          here so the same site is not asked about twice. Feedback, and the email address you
           type in if you add one, is forwarded to a private Discord channel.
           Discord is a company in the United States, so that one leaves the EU.
           Microsoft, Cloudflare and Discord all offer the standard contractual

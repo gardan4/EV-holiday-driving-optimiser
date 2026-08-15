@@ -1402,6 +1402,20 @@ async def alternatives(
     if current is not None:
         found = [a for a in found if a.charger_id != current.charger_id]
 
+    # What is actually AROUND each of them. Last, and only for the handful that
+    # survived, because this is the one part of the answer that leaves the
+    # building: asking OpenStreetMap about the twelve candidates the DP tried
+    # and discarded would be twelve times the request for nothing anybody sees.
+    # A failure here costs the chips and nothing else — the list, the ordering
+    # and the costs are all already computed.
+    shortlist = [a for a in [current, *found] if a is not None]
+    near = await amenities.nearby(
+        db, [(a.charger_id, a.lat, a.lon) for a in shortlist]
+    )
+    for alt in shortlist:
+        if alt.charger_id in near:
+            alt.nearby = near[alt.charger_id]
+
     return AlternativesOut(
         speed_kph=speed, current=current, alternatives=found
     )

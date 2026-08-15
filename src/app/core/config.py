@@ -171,6 +171,31 @@ class Settings(BaseSettings):
     ORS_GEOCODE_DAILY_QUOTA: int = 1000  # geocoding/day, a separate allowance
     OCM_DAILY_QUOTA: int = 0             # OpenChargeMap publishes no hard daily cap
 
+    # ----- OpenStreetMap / Overpass: what is AROUND a charger -----
+    # The food hint used to be a reading of the site's name, which on a
+    # motorway corridor says nothing at all — every fast charger is a network
+    # and a place. This asks what is mapped within a few hundred metres.
+    # It decorates a plan and is never part of one, so every failure is
+    # swallowed and the app falls back to reading names.
+    OVERPASS_ENABLED: bool = True
+    OVERPASS_URL: str = "https://overpass-api.de/api/interpreter"
+    # Short on purpose: this sits on the alternatives request, which a driver
+    # is waiting on. Overpass answers a small `around` query well inside this;
+    # anything slower is not worth the wait, and the breaker in
+    # `services/overpass.py` stops a slow day costing every request.
+    OVERPASS_TIMEOUT_S: float = 6.0
+    # Overpass's fair-use policy asks for an identifiable agent, so a busy
+    # client can be contacted rather than simply blocked.
+    OVERPASS_USER_AGENT: str = "EVTripOptimizer/1.0 (+https://evtrip.dev)"
+    # A services with a bakery in it is a fact about a building, so this is
+    # cached in months rather than hours — and stale amenity data is a far
+    # cheaper mistake than a stale charger.
+    AMENITY_CACHE_DAYS: int = 120
+    # Chargers looked up per request. The alternatives panel asks about the
+    # planned stop plus a handful of candidates; the cap is what stops a
+    # pathological plan turning into a large Overpass query.
+    AMENITY_MAX_PER_REQUEST: int = 12
+
     # Campaign tags accepted on `?src=`, comma-separated (e.g.
     # "r-electricvehicles,r-evcharging,hn"). Empty means any well-formed slug
     # is accepted — the strict pattern in `events.normalize_campaign` is doing

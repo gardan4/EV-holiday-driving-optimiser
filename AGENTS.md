@@ -353,9 +353,31 @@ the pipeline is green before infra exists. Infra deploy is manual
   place — so the reading comes back empty for the WHOLE list however far down
   the ranking the search goes, and Geiselwind is an Autohof with a kitchen.
   A panel that promises to mention food and then shows no chips has made the
-  absence claim by omission, so `AlternativeStops` says the names said nothing
-  and points at Maps. Widening `_FOOD_MARKERS` does not fix that corridor and
-  never will; the fix would be amenity data we do not have. Short markers live
+  absence claim by omission, so `AlternativeStops` says so in words and points
+  at Maps. Widening `_FOOD_MARKERS` never fixes that corridor, because the name
+  is the wrong place to look.
+  **So the question moved off the name and onto the ground**
+  (`services/overpass.py`, `amenities.nearby`, `Charger.amenities`). The app
+  still invents nothing — it asks OpenStreetMap what is MAPPED within
+  `RADIUS_M` of the plug and shows a fixed vocabulary of category words, so
+  "restaurant · supermarket here" is a place that exists rather than a word in
+  a title, and the two claims are separate fields rendered differently.
+  This is the one design decision that was reversed by use: the earlier
+  "no amenity data" line was about not INVENTING data, and Overpass is data.
+  Five things hold it up. **NULL and `[]` are different answers** — never
+  looked, versus looked and nothing mapped — because OSM coverage is uneven and
+  a timeout recorded as "nothing here" is an absence claim built out of a
+  failure; the cache, the schema and the panel's three-way footer all keep them
+  apart. **It decorates a plan and is never part of one**: every failure is
+  swallowed, a breaker stops a slow Overpass costing every request its full
+  timeout, and the app falls back to reading names exactly as before.
+  **Cache-first with a months-long TTL and no row, no lookup** — a services
+  with a bakery is a fact about a building, and a charger with nowhere to store
+  the answer would be re-asked on every request for ever, which is what the
+  fair-use policy is about. **Only the shortlist is looked up**, after the DP
+  has finished, so the candidates it tried and discarded cost nothing.
+  And **it is counted like every other upstream** (`quota.SERVICES`), with the
+  headroom withheld because Overpass publishes no per-key ceiling. Short markers live
   in `_FOOD_WORDS` and match as WORDS, because "Spar" is inside "Sparkasse",
   "Hofer" inside "Strohofer" and "Moto" inside "Motorway" — a food chip over a
   savings bank is not a weak guess, it is a wrong one.

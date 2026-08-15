@@ -309,6 +309,14 @@ class AlternativeOut(BaseModel):
     # the UI must present it as one; null is not a claim that there is nothing
     # there. See `services/amenities.py`.
     food_hint: Optional[str] = None
+    # What OpenStreetMap MAPS within a few hundred metres. The answer the name
+    # could never give — on a motorway every fast charger is a network and a
+    # place — and deliberately a separate field from `food_hint`, because "the
+    # title contains the word Raststätte" and "there is a restaurant here" are
+    # different kinds of claim and the UI says them differently. An empty list
+    # means we looked and nothing is mapped, which is NOT nothing there: OSM
+    # coverage is uneven. Null means we did not look, or could not.
+    nearby: Optional[list[str]] = None
     lat: float
     lon: float
     # On the whole route's axis, like every other stop the frontend draws.

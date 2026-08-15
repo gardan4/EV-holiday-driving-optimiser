@@ -39,7 +39,20 @@ showing this must be able to say THAT, or its silence reads as "nowhere to eat"
 
 from __future__ import annotations
 
+import logging
 import re
+import uuid
+from collections.abc import Sequence
+from datetime import datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.models import Charger
+from app.services import overpass, quota
+
+logger = logging.getLogger(__name__)
 
 # (needle, what to call it). Ordered: the first match wins, so the more
 # specific entries come first. Lowercase; matching is case-insensitive and
@@ -178,3 +191,119 @@ def food_hint(name: str | None) -> str | None:
         if pattern.search(haystack):
             return label
     return None
+
+
+# ---------------------------------------------------------------------------
+# What is actually there
+# ---------------------------------------------------------------------------
+#
+# Everything above reads a string. This reads the ground, via
+# `services/overpass.py`, and is the answer the name could never give: on a
+# motorway corridor every fast charger is a network and a place, so the reading
+# came back empty for an entire list while one of them was an Autohof with a
+# kitchen.
+#
+# Cache-first, exactly like the chargers themselves. The difference is the TTL:
+# a charger's power and status are volatile and a services having a bakery is a
+# fact about a building, so this is months rather than hours.
+
+
+async def nearby(
+    db: AsyncSession, sites: Sequence[tuple[str, float, float]]
+) -> dict[str, list[str]]:
+    """`{charger_id: [category, ...]}` for the sites we have an answer for.
+
+    A MISSING key means "we do not know" and an EMPTY list means "looked,
+    nothing mapped". Callers must keep those apart: OSM coverage is uneven, so
+    nothing mapped is not nothing there, and a chip that said otherwise would
+    be the same absence claim `food_hint` refuses to make.
+
+    Never raises, and never leaves a caller waiting on a provider that is
+    unwell — see the breaker in `overpass`. On any failure this returns what
+    the cache already knew, which is the behaviour the app had before OSM was
+    consulted at all.
+    """
+    if not sites:
+        return {}
+    fresh_after = datetime.utcnow() - timedelta(days=settings.AMENITY_CACHE_DAYS)
+    # A `ChargerNode.charger_id` is the cache row's own UUID, as a string.
+    # Anything that is not one belongs to a synthetic route (the tests, the
+    # demo seed) and simply has no row to read or write.
+    wanted: dict[uuid.UUID, str] = {}
+    for cid, _lat, _lon in sites:
+        try:
+            wanted[uuid.UUID(cid)] = cid
+        except (ValueError, AttributeError, TypeError):
+            continue
+    by_id: dict[str, Charger] = {}
+    if wanted:
+        rows = await db.execute(select(Charger).where(Charger.id.in_(wanted)))
+        by_id = {str(row.id): row for row in rows.scalars()}
+
+    out: dict[str, list[str]] = {}
+    stale: list[overpass.Point] = []
+    for cid, lat, lon in sites:
+        row = by_id.get(cid)
+        if row is None:
+            # No cache row to write the answer to. Looking anyway would mean
+            # asking Overpass the same question on every request for ever,
+            # which is precisely the behaviour its fair-use policy is about.
+            # In practice this is a synthetic route — the tests, the demo seed.
+            continue
+        if (
+            row.amenities is not None
+            and row.amenities_at is not None
+            and row.amenities_at >= fresh_after
+        ):
+            out[cid] = list(row.amenities)
+        elif len(stale) < settings.AMENITY_MAX_PER_REQUEST:
+            stale.append(overpass.Point(key=cid, lat=lat, lon=lon))
+
+    if not stale:
+        return out
+
+    started = datetime.utcnow()
+    found, calls = await overpass.fetch(stale)
+    if calls:
+        await quota.record(
+            db,
+            provider="overpass",
+            kind="amenities",
+            calls=calls,
+            cache_hits=len(out),
+            duration_ms=int((datetime.utcnow() - started).total_seconds() * 1000),
+            ok=found is not None,
+        )
+    if found is None:
+        return out
+
+    now = datetime.utcnow()
+    for point in stale:
+        labels = found.get(point.key, [])
+        out[point.key] = labels
+        row = by_id.get(point.key)
+        if row is not None:
+            # Plain columns, but assigned rather than mutated in place for the
+            # same reason the JSON state columns are: SQLAlchemy does not track
+            # edits inside a JSON value.
+            row.amenities = list(labels)
+            row.amenities_at = now
+    try:
+        await db.commit()
+    except Exception:  # noqa: BLE001 — a cache write is worth less than the answer
+        logger.warning("could not cache amenity lookup", exc_info=False)
+        await db.rollback()
+    return out
+
+
+def describe(labels: Sequence[str]) -> str | None:
+    """The chip's text: at most two categories, in the order they were ranked.
+
+    Two, because this is read at a glance in a moving car and "restaurant,
+    supermarket" answers the question while "restaurant, fast food, café,
+    supermarket, convenience shop, toilets" is a database dump.
+    """
+    picked = [str(x) for x in labels][:2]
+    if not picked:
+        return None
+    return " · ".join(picked)

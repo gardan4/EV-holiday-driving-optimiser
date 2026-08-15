@@ -384,6 +384,12 @@ export interface Alternative {
    *  "supermarket" — or null when it says nothing. A guess from a string, so
    *  render it as one. Null is NOT a claim that there is nothing there. */
   food_hint?: string | null
+  /** What OpenStreetMap MAPS within a few hundred metres. A different kind of
+   *  claim from `food_hint` and rendered differently: this one is a place that
+   *  exists, not a word in a title. `[]` means we looked and nothing is
+   *  mapped — which is not "nothing there", OSM coverage being uneven — and
+   *  null/undefined means we did not look, or could not. */
+  nearby?: string[] | null
   lat: number
   lon: number
   /** On the whole route's axis, like every other stop. */

@@ -140,6 +140,15 @@ class Charger(Base):
     # Trimmed OCM POI payload kept for debugging / future fields.
     raw: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # What OpenStreetMap maps within a few hundred metres of this site: a short
+    # list of allowlisted category words ("restaurant", "supermarket"), never
+    # names, never free text. Cached far longer than the charger itself,
+    # because a services with a bakery in it is a fact about a building.
+    # NULL means "never looked"; an empty list means "looked, found nothing
+    # mapped" — a distinction the UI has to keep, since OSM coverage is uneven
+    # and "nothing mapped" is not "nothing there".
+    amenities: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    amenities_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class OcmTile(Base):

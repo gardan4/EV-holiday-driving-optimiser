@@ -92,10 +92,16 @@ export default function AlternativeStops({
   // panel that promises to mention food and never does, which reads as "nowhere
   // to eat at any of these": the exact absence claim the hint is not allowed to
   // make. So the silence is stated, and stated as a fact about the NAMES.
-  const nothingSaidAboutFood =
-    data.alternatives.length > 0 &&
-    !data.alternatives.some((a) => a.food_hint) &&
-    !data.current?.food_hint
+  // Three states, not two, and they are genuinely different answers.
+  //  - somebody has amenities → chips, no footer
+  //  - we asked OpenStreetMap and it maps nothing → say that, about the MAP
+  //  - we never got an answer → fall back to the old sentence, about the NAMES
+  const shown = [data.current, ...data.alternatives].filter(
+    (a): a is Alternative => a != null
+  )
+  const anyFood = shown.some((a) => (a.nearby?.length ?? 0) > 0 || a.food_hint)
+  const asked = shown.some((a) => Array.isArray(a.nearby))
+  const nothingSaidAboutFood = shown.length > 0 && !anyFood
 
   return (
     <div className="mt-3 rounded-2xl border border-ink-200 bg-white p-3 sm:p-4">
@@ -204,10 +210,21 @@ export default function AlternativeStops({
         <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-ink-50 px-2.5 py-2 text-[11px] leading-relaxed text-ink-500">
           <UtensilsCrossed className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
-            None of these names say anything about food — most are just a
-            network and a place. That&apos;s the names, not the places:{" "}
-            <b className="font-semibold text-ink-600">Look</b> shows what is
-            actually there.
+            {asked ? (
+              <>
+                OpenStreetMap maps nothing to eat within a few hundred metres of
+                any of these. Coverage is uneven, so that is the map rather than
+                the ground — <b className="font-semibold text-ink-600">Look</b>{" "}
+                is the way to be sure.
+              </>
+            ) : (
+              <>
+                Nothing known about food at any of these — the names are just a
+                network and a place, and the map had nothing to add.{" "}
+                <b className="font-semibold text-ink-600">Look</b> shows what is
+                actually there.
+              </>
+            )}
           </span>
         </p>
       )}
@@ -231,10 +248,12 @@ export default function AlternativeStops({
             availability to us.
           </p>
           <p>
-            <b className="font-semibold text-ink-600">Food</b> is read off the
-            site&apos;s name, not from amenity data. Check it in Maps before
-            counting on dinner; a charger with no hint may still sit next to a
-            café we never hear about.
+            <b className="font-semibold text-ink-600">Food</b> comes from
+            OpenStreetMap: what its contributors have mapped within a few
+            hundred metres of the plug. Where the map is silent we fall back to
+            reading the site&apos;s name, and say &quot;reads like&quot; when we
+            do. Neither is a guarantee of an open kitchen at nine in the
+            evening — check in Maps before counting on dinner.
           </p>
           <p>
             <b className="font-semibold text-ink-600">Under the reserve</b>{" "}
@@ -271,14 +290,26 @@ function Row({ alt, distM }: { alt: Alternative; distM: number }) {
               moment of the fetch. */}
           {fmtKm(Math.max(alt.offset_m - distM, 0))}
         </div>
-        {alt.food_hint && (
-          <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">
+        {/* Two different claims, said differently. `nearby` is a place
+            OpenStreetMap maps within a few hundred metres — it exists, so the
+            chip states it. `food_hint` is a word in a title, so the chip
+            hedges. When there is real data the guess is redundant and would
+            only muddle which of the two the reader is looking at. */}
+        {alt.nearby && alt.nearby.length > 0 ? (
+          <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-100 px-1.5 py-0.5 text-[11px] font-semibold text-brand-900">
             <UtensilsCrossed className="h-3 w-3 shrink-0" />
-            {/* "reads like" and not "has": this is a guess from the site's
-                name, and a chip that asserted amenities we do not have would
-                be the exact invention the panel above disclaims. */}
-            reads like {alt.food_hint}
+            {alt.nearby.slice(0, 2).join(" · ")} here
           </div>
+        ) : (
+          alt.food_hint && (
+            <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">
+              <UtensilsCrossed className="h-3 w-3 shrink-0" />
+              {/* "reads like" and not "has": this is a guess from the site's
+                  name, and a chip that asserted amenities we do not have would
+                  be the exact invention the panel above disclaims. */}
+              reads like {alt.food_hint}
+            </div>
+          )
         )}
         <div
           className={`mt-0.5 flex items-center gap-1 text-xs ${

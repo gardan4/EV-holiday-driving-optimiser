@@ -40,6 +40,10 @@ def _quota(provider: str, kind: str) -> int:
         ("ors", "directions"): settings.ORS_DAILY_QUOTA,
         ("ors", "geocode"): settings.ORS_GEOCODE_DAILY_QUOTA,
         ("ocm", "chargers"): settings.OCM_DAILY_QUOTA,
+        # Overpass publishes no per-key daily cap — it is a shared instance
+        # under a fair-use policy — so the calls are counted and the headroom
+        # withheld rather than measured against an invented ceiling.
+        ("overpass", "amenities"): 0,
     }.get((provider, kind), 0)
 
 
@@ -52,6 +56,7 @@ SERVICES: tuple[tuple[str, str], ...] = (
     ("ors", "directions"),
     ("ors", "geocode"),
     ("ocm", "chargers"),
+    ("overpass", "amenities"),
 )
 
 
