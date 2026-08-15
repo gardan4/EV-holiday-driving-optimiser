@@ -433,6 +433,20 @@ the pipeline is green before infra exists. Infra deploy is manual
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".
+- **Arriving anywhere is noticed, not just at the four stops the plan chose**
+  (`live.nearest_charger`). The ping path matched `nearest_planned_stop` — the
+  plan's own stops and nothing else — so a driver who stopped at any of the
+  hundreds of other chargers on the corridor was invisible to their own drive:
+  the screen kept counting down to a charger 77 km up the road while they stood
+  plugged in somewhere else. Reported twice, from two different chargers,
+  before the cause was found. Matched against the SNAPSHOT's chargers now, and
+  on straight-line distance rather than along the route, because snapshot
+  offsets are geometry-space while a ping's position is segment-space — a few
+  tenths of a percent apart, which over 500 km is kilometres and no radius
+  meaning "standing at this one" survives it. Being near a charger is only half
+  the test: `advance` still requires the car to have stopped, so a site passed
+  at 130 km/h fails on `dx`. `need_soc_next` is priced once on the transition
+  in, never per ping.
 - **A locked phone reports nothing, so arriving has to be tellable by hand**
   (`POST /runs/{id}/arrive`). Position comes from GPS, GPS comes from a page
   being looked at, and a phone whose car is charging is in a pocket — so the

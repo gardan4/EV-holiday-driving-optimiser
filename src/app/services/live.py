@@ -26,6 +26,7 @@ import math
 from bisect import bisect_left
 from dataclasses import replace
 
+from app.services.geo import haversine_m
 from app.services.simulator import (
     ChargerNode,
     RouteProfile,
@@ -48,6 +49,13 @@ MAX_ACCURACY_M = 200.0
 # Standing within this of a planned stop, with the wheels not turning, counts
 # as plugged in.
 AT_CHARGER_M = 150.0
+
+# How near a charger's own coordinate the car has to be for a ping to call it
+# "at" that one. Wider than `AT_CHARGER_M` because a services is a few hundred
+# metres end to end and the fix is taken between buildings — and safe to widen,
+# because being near a charger is not enough on its own: `advance` also
+# requires the car to have stopped moving.
+AT_CHARGER_MATCH_M = 250.0
 
 # Below this the observed "speed" is noise, not driving.
 MIN_OBSERVED_KPH = 5.0
@@ -416,6 +424,36 @@ def benchmark(
     }
 
 
+def nearest_charger(
+    chargers: list, lat: float, lon: float, max_m: float = AT_CHARGER_MATCH_M
+) -> tuple[str | None, float | None]:
+    """Which charger, of ANY on the corridor, the car is standing at.
+
+    Not just the planned stops. `nearest_planned_stop` matched those four sites
+    and nothing else, so a driver who stopped anywhere the plan had not chosen
+    — a services they liked, the only free stall in town, a charger picked from
+    the alternatives — was invisible to the drive no matter how good the fix
+    was. The screen kept counting down to a charger 77 km up the road while its
+    driver stood plugged in somewhere else, twice, which is how this was found.
+
+    Matched on STRAIGHT-LINE distance rather than along the route, because the
+    snapshot's chargers carry geometry-space offsets while a ping's position is
+    in segment space: the two axes differ by a few tenths of a percent, which
+    over 500 km is kilometres — far outside any radius that means "standing at
+    this one". Coordinates have no such problem.
+
+    This says only that the car is NEAR a charger; `advance` decides whether it
+    is stopped at one, and a site passed at 130 km/h fails that test because
+    the offset moves 900 m between pings.
+    """
+    best_id, best_kw, best_d = None, None, max_m
+    for c in chargers:
+        d = haversine_m(lat, lon, _stop_lat(c), _stop_lon(c))
+        if d <= best_d:
+            best_id, best_kw, best_d = _stop_id(c), _stop_power(c), d
+    return best_id, best_kw
+
+
 def nearest_planned_stop(
     stops: list, offset_m: float, lat: float, lon: float
 ) -> tuple[str | None, float | None]:
@@ -440,6 +478,14 @@ def _stop_id(s) -> str:
 
 def _stop_power(s) -> float:
     return s["power_kw"] if isinstance(s, dict) else s.power_kw
+
+
+def _stop_lat(s) -> float:
+    return s["lat"] if isinstance(s, dict) else s.lat
+
+
+def _stop_lon(s) -> float:
+    return s["lon"] if isinstance(s, dict) else s.lon
 
 
 def snapshot_segments(snapshot: dict) -> list[RouteSegment]:

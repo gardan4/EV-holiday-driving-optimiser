@@ -1048,6 +1048,73 @@ class TestTakingAnArrivalBack:
         assert resp.status_code == 404
 
 
+class TestArrivingIsNoticed:
+    """Standing at a charger the plan did not choose used to be invisible.
+
+    `nearest_planned_stop` matched the plan's four stops and nothing else, so
+    the drive kept counting down to a charger 77 km up the road while its
+    driver stood plugged in somewhere else — reported twice, from two different
+    chargers, before the cause was found.
+    """
+
+    async def test_a_ping_at_an_unplanned_charger_marks_it(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        planned = {s["charger_id"] for s in speed["stops"]}
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        node = next(
+            n
+            for n in nodes
+            if n.charger_id not in planned and n.offset_m > state["offset_m"]
+        )
+        here = along(node.offset_m / total_seg)
+
+        # Parked: the car reaches it and stops, which is two pings — one that
+        # drives there, one that finds it has not moved since.
+        await client.post(
+            f"/api/runs/{run['run_id']}/ping", json={**here, "moving_s": 1800.0}
+        )
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={**here, "moving_s": 0.0, "stationary_s": 120.0},
+            )
+        ).json()
+
+        assert st["at_charger_id"] == node.charger_id
+        assert st["at_charger"] is not None
+        assert st["at_charger"]["planned"] is False
+        # …and the number the driver is standing there asking for.
+        assert st["need_soc_next"] is not None
+
+    async def test_driving_past_one_does_not_count_as_stopping(self, client):
+        """A charger passed at 130 km/h is not a stop. Being NEAR one is only
+        half the test; `advance` requires the car to have stopped moving."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        node = next(n for n in nodes if n.offset_m > state["offset_m"] + 50_000)
+
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={**along(node.offset_m / total_seg), "moving_s": 1800.0},
+            )
+        ).json()
+        assert st["at_charger_id"] is None
+
+
 class TestAReadingIsAboutAPlace:
     """A dashboard figure is ground truth about a battery AT A PLACE.
 

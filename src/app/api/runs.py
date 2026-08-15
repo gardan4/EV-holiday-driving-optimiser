@@ -691,9 +691,10 @@ async def ping(
     if body.accuracy_m is not None and body.accuracy_m > live.MAX_ACCURACY_M:
         offset_m = run.state["offset_m"]
 
-    speed = _planned_result(trip, run.planned_speed_kph) or {}
-    stop_id, stop_kw = live.nearest_planned_stop(
-        speed.get("stops", []), offset_m, body.lat, body.lon
+    # ANY charger on the corridor, not just the four the plan chose — see
+    # `live.nearest_charger`.
+    stop_id, stop_kw = live.nearest_charger(
+        live.snapshot_chargers(snapshot), body.lat, body.lon
     )
 
     plan_req = PlanRequest.model_validate(trip.request)
@@ -715,6 +716,21 @@ async def ping(
         stop_power_kw=stop_kw,
         at_charger_id=stop_id,
     )
+    # Arriving somewhere is a transition, and the one moment "how much do I
+    # have to put in before I can go" becomes the question on the screen. It is
+    # priced ONCE, here, rather than on every ping: it is a property of the
+    # position and the route, the car is not moving while it matters, and this
+    # path is deliberately cheap enough to sit on the event loop.
+    if stop_id and not run.state.get("at_charger_id"):
+        new_st = {
+            **new_st,
+            "need_soc_next": _soc_needed_next(
+                run, trip, veh, params, float(new_st["offset_m"])
+            ),
+        }
+    elif not new_st.get("at_charger_id"):
+        new_st = {**new_st, "need_soc_next": None}
+
     # Plain JSON columns don't track in-place edits — always reassign.
     run.state = new_st
     run.last_seen_at = now
