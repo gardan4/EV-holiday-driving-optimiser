@@ -91,7 +91,9 @@ export interface LiveHandle {
   /** Pause/resume telemetry WITHOUT ending the drive — otherwise the only way
    *  to stop broadcasting your position is to declare you've arrived. */
   toggleSharing: () => void
-  submitSoc: (soc: number) => Promise<void>
+  /** Returns the state the reading produced, so the caller can react to what
+   *  the correction revealed rather than to what it was before. */
+  submitSoc: (soc: number) => Promise<LiveState | null>
   requestReplan: () => Promise<RevisedPlan | null>
   end: () => Promise<void>
 }
@@ -270,10 +272,12 @@ export function useLiveRun(
 
   const submitSoc = useCallback(
     async (soc: number) => {
-      if (!runId) return
+      if (!runId) return null
       setBusy(true)
       try {
-        setState(await recordSoc(runId, soc))
+        const st = await recordSoc(runId, soc)
+        setState(st)
+        return st
       } finally {
         setBusy(false)
       }

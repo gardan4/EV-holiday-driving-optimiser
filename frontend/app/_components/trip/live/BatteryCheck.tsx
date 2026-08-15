@@ -38,19 +38,32 @@ import { fmtDuration, socLabel } from "@/lib/format"
 /** Above this much uncertainty the estimate is worth confirming unprompted. */
 const NUDGE_BAND = 4
 
+/** How far off plan a freshly MEASURED battery has to be for the confirmation
+ *  to offer a re-plan. Lower than the server's own alarm threshold (8 points,
+ *  `live.SOC_SHORTFALL_TO_REPLAN`) and symmetric, because this is an offer the
+ *  driver can ignore rather than a standing warning, and it is the only thing
+ *  in the app that reacts to the battery being BETTER than planned. */
+const OFFER_REPLAN_BAND = 5
+
 export default function BatteryCheck({
   state,
   isDriver,
   busy,
   stopName,
   onSubmit,
+  onReplan,
   openSignal = 0,
 }: {
   state: LiveState
   isDriver: boolean
   busy: boolean
   stopName: string | null
-  onSubmit: (soc: number) => Promise<void>
+  /** Returns the state the reading produced — what the correction revealed is
+   *  the whole reason to offer anything after it. */
+  onSubmit: (soc: number) => Promise<LiveState | null>
+  /** Re-plan the rest of the drive. Offered on the confirmation, because a
+   *  reading that moves the battery moves the charging plan with it. */
+  onReplan?: () => void
   /** Bumped when the driver asks for this from somewhere else on the screen —
    *  the battery readout in the HUD, which is where they are already looking. */
   openSignal?: number
@@ -158,16 +171,31 @@ export default function BatteryCheck({
 
   async function send(value: number) {
     try {
-      await onSubmit(value)
+      const next = await onSubmit(value)
       setEditing(false)
       const off = state.soc - value
-      toast.success(
+      const message =
         Math.abs(off) < 1
           ? "Thanks, the estimate was on the money."
           : `Thanks, we were ${Math.abs(off).toFixed(0)}% ${
               off > 0 ? "optimistic" : "pessimistic"
             }. The rest of the drive is tuned to your car now.`
-      )
+
+      // A correction is the one moment the battery is a MEASUREMENT, so it is
+      // also the moment re-planning is worth most — and the driver's hands are
+      // already here. Offered in both directions, deliberately: a battery
+      // worse than planned raises the amber panel by itself, while a battery
+      // BETTER than planned might drop a stop entirely and nothing else in the
+      // app would ever suggest it.
+      const drift = next ? Math.abs(next.soc_vs_plan) : 0
+      const worthReplanning = next != null && (next.needs_replan || drift >= OFFER_REPLAN_BAND)
+      toast.success(message, {
+        duration: worthReplanning ? 12_000 : 4_000,
+        action:
+          worthReplanning && onReplan
+            ? { label: "Re-plan", onClick: onReplan }
+            : undefined,
+      })
     } catch (err) {
       // Silence here would be the worst outcome: the driver believes the app
       // has their real figure and it's still guessing.

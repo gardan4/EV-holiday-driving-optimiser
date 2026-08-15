@@ -19,7 +19,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Flag, Loader2, PlugZap } from "lucide-react"
+import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { LiveRun, Stop, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
@@ -187,13 +187,36 @@ export default function LiveView({
             </p>
           </div>
           {!finished && isDriver && (
-            <button
-              onClick={() => void live.end().catch(() => toast.error("Could not finish"))}
-              disabled={live.busy}
-              className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-2 text-sm font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
-            >
-              <Flag className="h-4 w-4" /> Arrived
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Standing, not conditional. `needs_replan` fires on a shortfall
+                  or a delay big enough to alarm about, which is a fine moment
+                  to INTERRUPT somebody and a poor definition of when they are
+                  allowed to ask. How you actually drive — the speed you settle
+                  at, the heating, a headwind — moves what the charging plan
+                  should be long before it trips a threshold, and the driver is
+                  the one who knows that before any of our numbers do. The
+                  amber panel keeps its own button: it carries the reasons, and
+                  it may be the only thing read on a screen this busy. */}
+              <button
+                onClick={() => void doReplan()}
+                disabled={live.busy}
+                className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-2 text-sm font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
+              >
+                {live.busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                Re-plan
+              </button>
+              <button
+                onClick={() => void live.end().catch(() => toast.error("Could not finish"))}
+                disabled={live.busy}
+                className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-2 text-sm font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
+              >
+                <Flag className="h-4 w-4" /> Arrived
+              </button>
+            </div>
           )}
         </div>
 
@@ -279,6 +302,7 @@ export default function LiveView({
               busy={live.busy}
               stopName={nextStop?.name ?? null}
               onSubmit={live.submitSoc}
+              onReplan={() => void doReplan()}
               openSignal={socPrompt}
             />
           </div>
