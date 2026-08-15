@@ -257,10 +257,29 @@ export default function LiveView({
       toast.success(
         res.matched_name
           ? `Charging at ${res.matched_name}.`
-          : "Moved to where you are — no charger recognised here."
+          : "Moved to where you are — no charger recognised here.",
+        // The way out, offered where the mistake is noticed. This tap is one
+        // button away from "Somewhere else" on a phone in a moving car, and it
+        // is the only one the drive cannot walk back on its own.
+        { action: { label: "Undo", onClick: () => void undoArrival() } }
       )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not move the drive")
+    }
+  }
+
+  /** "I'm not there." Puts the drive back exactly as it stood before the last
+   *  arrival — the toast's Undo and the card's own link are the same call,
+   *  because a toast is gone in five seconds and a misclick is often noticed
+   *  after it. */
+  async function undoArrival() {
+    try {
+      const st = await live.undoArrive()
+      if (st) toast.success("Put back — you're on the road again.")
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not undo that arrival"
+      )
     }
   }
 
@@ -396,6 +415,11 @@ export default function LiveView({
             onArrive={
               isDriver && focused
                 ? () => void markArrived(focused)
+                : undefined
+            }
+            onUndoArrive={
+              isDriver && state.can_undo_arrive
+                ? () => void undoArrival()
                 : undefined
             }
           />

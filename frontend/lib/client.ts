@@ -342,6 +342,10 @@ export interface LiveState {
   /** Battery needed to reach the next planned stop, reserve included. The
    *  question a driver at an unplanned charger is asking. */
   need_soc_next?: number | null
+  /** Whether "I'm plugged in here now" can still be taken back. It is the one
+   *  tap on the drive screen the model cannot undo on its own — the offset is
+   *  clamped forward, so a wrong arrival survives every later fix. */
+  can_undo_arrive?: boolean
 }
 
 export interface Benchmark {
@@ -584,6 +588,16 @@ export async function arriveAt(
         lon: here?.lon ?? null,
       }),
     })
+  )
+}
+
+/** "I'm not there." Puts the drive back exactly as it was before the last
+ *  arrival — position, battery and clock together, because the arrival billed
+ *  the skipped kilometres and returning the position alone would hand back a
+ *  battery that paid for road it is about to drive again. */
+export async function undoArrival(runId: string): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/arrive/undo`, { method: "POST" })
   )
 }
 

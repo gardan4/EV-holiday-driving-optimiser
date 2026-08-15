@@ -81,6 +81,7 @@ export default function NextStopCard({
   total = 1,
   onStep,
   onArrive,
+  onUndoArrive,
 }: {
   /** The stop this card is about: the one under the car when plugged in,
    *  otherwise the next one ahead. Null when there are none left. */
@@ -116,6 +117,12 @@ export default function NextStopCard({
    *  locked phone reports no position, which is what a phone does while its
    *  car charges. */
   onArrive?: () => void
+  /** Driver only, and only while there is one to take back: "I'm not there."
+   *  The arrival is the single tap on this screen no later fix can correct —
+   *  the offset is clamped forward, so a wrong one survives every ping — and
+   *  the toast that offered Undo is long gone by the time most people notice.
+   */
+  onUndoArrive?: () => void
 }) {
   if (!stop) {
     return (
@@ -307,6 +314,20 @@ export default function NextStopCard({
           className="mt-2 w-full rounded-xl py-2 text-xs font-semibold text-ink-500 underline underline-offset-2 hover:text-brand-700"
         >
           I&apos;m plugged in here now
+        </button>
+      )}
+
+      {/* The way back. Offered whenever an arrival can still be taken back,
+          including on the card for the stop it moved the car to — that is
+          where somebody who mis-tapped is looking, and by then the toast has
+          gone. Amber rather than quiet grey: it undoes a thing that already
+          happened. */}
+      {onUndoArrive && (
+        <button
+          onClick={onUndoArrive}
+          className="mt-2 w-full rounded-xl py-2 text-xs font-semibold text-amber-800 underline underline-offset-2 hover:text-amber-900"
+        >
+          I&apos;m not here — undo that arrival
         </button>
       )}
     </div>

@@ -411,6 +411,11 @@ class LiveStateOut(BaseModel):
     # asking — "how much do I have to put in before I can go?" — which the plan
     # cannot answer, because it never expected the car to be here.
     need_soc_next: Optional[float] = None
+    # Whether the last "I'm plugged in here now" can still be taken back. It is
+    # the one irreversible tap on the drive screen — the offset is clamped
+    # forward, so a wrong arrival cannot be corrected by driving or by waiting
+    # — so the screen has to be able to offer the way out.
+    can_undo_arrive: bool = False
 
 
 class BenchmarkOut(BaseModel):

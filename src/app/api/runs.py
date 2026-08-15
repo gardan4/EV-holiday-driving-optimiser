@@ -481,6 +481,11 @@ def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
         # is a property of the position and the route, and the car is not
         # moving while it matters.
         need_soc_next=st.get("need_soc_next"),
+        # Whether "I'm plugged in here now" can still be taken back. A flag and
+        # not the stored state: what the previous position WAS is nobody's
+        # business but the server's, and a read of this run belongs to watchers
+        # too.
+        can_undo_arrive=bool(st.get("arrive_undo")),
     )
 
 
@@ -830,6 +835,19 @@ async def arrive(
         "need_soc_next": _soc_needed_next(
             run, trip, veh, params, float(new_st["offset_m"])
         ),
+        # Kept so the tap can be taken back. This is the one write in the whole
+        # drive that is a CLAIM rather than a measurement — a person pressing a
+        # button, next to a button they meant to press — and it is also the one
+        # the rest of the model cannot undo on its own: `live.advance` clamps
+        # the offset forward so a wobbly fix can never walk the car backwards,
+        # which means a wrong arrival cannot be corrected by driving, or by
+        # waiting, or by any later ping. Everything else recovers by itself.
+        # Nested undos are dropped: the state before an arrival is the one to
+        # go back to, and keeping a chain of them would grow a JSON column on
+        # a hot path to no purpose.
+        "arrive_undo": {
+            k: v for k, v in run.state.items() if k != "arrive_undo"
+        },
     }
     run.last_seen_at = now
     db.add(
@@ -848,6 +866,58 @@ async def arrive(
         state=_state_out(run, trip, vehicle.usable_kwh),
         matched_name=node.name if node else None,
     )
+
+
+@router.post("/runs/{run_id}/arrive/undo", response_model=LiveStateOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_PING, key_func=run_key)
+async def undo_arrive(
+    request: Request, run_id: str, db: AsyncSession = Depends(get_db)
+) -> LiveStateOut:
+    """"I'm not there" — take back the last hand-entered arrival.
+
+    "I'm plugged in here now" sits one tap away from the stop card and is the
+    only irreversible thing on the drive screen. Everything else the driver can
+    get wrong is corrected by the next fix: a bad position is snapped, a bad
+    battery reading is re-anchored by the next one, a stop turned down can be
+    turned back on by re-planning. An arrival cannot, because `live.advance`
+    clamps the offset forward on purpose — the same rule that stops a wobbly
+    GPS fix walking the car backwards also stops a wrong arrival being walked
+    back, and the drive then insists you are at a charger you are 69 km short
+    of until you physically get there.
+
+    Restoring the whole prior state rather than just the offset, because the
+    arrival billed the skipped kilometres as driving: putting the position back
+    and leaving the energy spent would hand back a battery that paid for a
+    stretch of road it is about to drive again, which is the mirror of the bug
+    the billing exists to prevent. `at_min` goes back too and the next ping
+    recomputes it from the wall clock, so no time is lost or invented.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    prior = run.state.get("arrive_undo")
+    if not prior:
+        raise HTTPException(
+            status_code=409, detail="There's no arrival to undo."
+        )
+
+    now = datetime.utcnow()
+    # Plain JSON columns don't track in-place edits — always reassign.
+    run.state = {**prior, "at_charger_id": None, "stale": False}
+    run.last_seen_at = now
+    db.add(
+        TripEvent(
+            run_id=run.id, at=now, kind="arrive_undo",
+            offset_m=float(run.state["offset_m"]),
+            lat=run.state["lat"], lon=run.state["lon"],
+            soc=live.current_soc(run.state, vehicle.usable_kwh),
+            payload={},
+        )
+    )
+    await db.commit()
+    return _state_out(run, trip, vehicle.usable_kwh)
 
 
 @router.post("/runs/{run_id}/soc", response_model=LiveStateOut)

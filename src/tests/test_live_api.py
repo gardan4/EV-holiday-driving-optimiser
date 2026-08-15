@@ -820,6 +820,108 @@ class TestSayingYouAreThere:
         assert resp.status_code == 404
 
 
+class TestTakingAnArrivalBack:
+    """"I'm plugged in here now" is one tap under the stop card, next to
+    another button, pressed on a phone in a moving car — and it is the only
+    write on this screen the model cannot correct on its own. `live.advance`
+    clamps the offset forward so a wobbly fix cannot walk the car backwards,
+    and that same rule means a wrong arrival survives every later ping: the
+    drive insists you are at a charger you are 69 km short of until you
+    physically get there."""
+
+    async def _arrive_at_a_stop_ahead(self, client, trip, run):
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > before["offset_m"] + 20_000
+        )
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        return before, after
+
+    async def test_it_puts_the_drive_back_where_it_was(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        before, after = await self._arrive_at_a_stop_ahead(client, trip, run)
+        assert after["offset_m"] > before["offset_m"] + 20_000
+        assert after["can_undo_arrive"] is True
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+        assert resp.status_code == 200, resp.text
+        back = resp.json()
+        assert back["offset_m"] == pytest.approx(before["offset_m"], abs=1.0)
+        assert back["at_charger_id"] is None
+        assert back["can_undo_arrive"] is False
+
+    async def test_it_hands_the_billed_kilometres_back_too(self, client):
+        """The arrival prices the stretch it skips. Restoring the position and
+        leaving the energy spent would hand back a battery that paid for road
+        it is about to drive again — the mirror of the bug the billing exists
+        to prevent, and just as invisible."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        before, after = await self._arrive_at_a_stop_ahead(client, trip, run)
+        assert after["soc"] < before["soc"] - 1.0
+
+        back = (
+            await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+        ).json()
+        assert back["soc"] == pytest.approx(before["soc"], abs=0.05)
+
+    async def test_the_car_can_drive_on_normally_afterwards(self, client):
+        """The point of the undo is that the drive continues, not that it is
+        merely rewound: the next ping has to move the car again from the
+        restored position rather than being clamped by the arrival's offset."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        before, _ = await self._arrive_at_a_stop_ahead(client, trip, run)
+        await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+
+        st = (
+            await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        ).json()
+        assert st["offset_m"] == pytest.approx(before["offset_m"], abs=2000)
+
+    async def test_there_is_nothing_to_undo_before_an_arrival(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        st = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert st["can_undo_arrive"] is False
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+        assert resp.status_code == 409
+
+    async def test_undoing_twice_does_not_walk_further_back(self, client):
+        """One undo, for the last arrival. A chain of them would let a tap
+        taken back three stops ago rewind a drive that has since moved on."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._arrive_at_a_stop_ahead(client, trip, run)
+        first = (
+            await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+        ).json()
+        resp = await client.post(f"/api/runs/{run['run_id']}/arrive/undo")
+        assert resp.status_code == 409
+        again = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert again["offset_m"] == pytest.approx(first["offset_m"], abs=1.0)
+
+    async def test_a_watcher_cannot_undo(self, client):
+        trip = await make_trip(client)
+        await start_run(client, trip)
+        resp = await client.post(f"/api/trips/{trip['id']}/arrive/undo")
+        assert resp.status_code == 404
+
+
 class TestHoldingASpeed:
     """The re-plan swept a band and took its optimum, which decides for the
     driver. Six hours in, "I'm going to sit at 120" is a fact about the road

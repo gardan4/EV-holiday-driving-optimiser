@@ -26,6 +26,7 @@ import {
   pingRun,
   recordSoc,
   replanRun,
+  undoArrival,
 } from "./client"
 import { RouteIndex, project } from "./route"
 
@@ -113,6 +114,9 @@ export interface LiveHandle {
    *  when it can get one, falling back to `chargerId`. Returns what it
    *  matched, so the caller can say which charger it decided on. */
   markArrived: (chargerId: string | null) => Promise<ArriveResult | null>
+  /** Take back the last arrival. The one tap on this screen that no later fix
+   *  can correct, so it needs a way out that is not "end the drive". */
+  undoArrive: () => Promise<LiveState | null>
   end: () => Promise<void>
 }
 
@@ -389,6 +393,21 @@ export function useLiveRun(
     [runId]
   )
 
+  const undoArrive = useCallback(async () => {
+    if (!runId) return null
+    setBusy(true)
+    try {
+      const st = await undoArrival(runId)
+      setState(st)
+      // Same reason as arriving: the car has moved, and the locally snapped
+      // offset is from the wrong side of the jump.
+      setLocalOffsetM(null)
+      return st
+    } finally {
+      setBusy(false)
+    }
+  }, [runId])
+
   const end = useCallback(async () => {
     if (!runId) return
     setBusy(true)
@@ -428,6 +447,7 @@ export function useLiveRun(
     requestReplan,
     findAlternatives,
     markArrived,
+    undoArrive,
     end,
   }
 }

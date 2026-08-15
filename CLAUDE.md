@@ -420,6 +420,19 @@ the pipeline is green before infra exists. Infra deploy is manual
   arrives; nothing within `ARRIVE_MATCH_M` still moves the car and says no
   charger was recognised, because being somewhere we have no data for is a
   fact about our data and not a reason to leave the drive 69 km back.
+  **And it can be taken back** (`POST /runs/{id}/arrive/undo`). It is the only
+  write on the drive screen the model cannot correct on its own: `live.advance`
+  clamps the offset forward so a wobbly fix never walks the car backwards, and
+  that same rule means a mis-tap survives every later ping — the drive insists
+  you are at a charger you are 69 km short of until you physically arrive. The
+  undo restores the WHOLE prior state and not just the offset, because the
+  arrival billed the skipped kilometres: putting the position back and leaving
+  the energy spent hands back a battery that paid for road it is about to drive
+  again, which is the mirror of the bug the billing exists to prevent. One
+  level deep, so a tap taken back three stops ago cannot rewind a drive that
+  has moved on, and offered in two places — the toast, and the stop card while
+  `can_undo_arrive` holds — because a toast is gone in five seconds and a
+  mis-tap is usually noticed after it.
   **An unplanned charger is described like any other** (`LiveStateOut.
   at_charger`, from the SNAPSHOT rather than the plan) and carries the one
   number the plan cannot give: `need_soc_next`, the battery required to reach
