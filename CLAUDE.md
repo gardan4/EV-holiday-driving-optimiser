@@ -294,8 +294,21 @@ the pipeline is green before infra exists. Infra deploy is manual
   **no per-name row, no drilldown, no username in `app_events`**, which is the
   same rule `events.normalize_path` enforces on `/u/<name>` and would be
   pointless there if the console gave the names back.
-- **No in-app map.** The 3D journey scene is the visualization; per-stop
-  Google Maps deep links cover navigation. Keeps CSP self-hosted.
+- **No in-app map, and the hand-off is the WHOLE route** (`frontend/lib/maps.ts`).
+  The 3D journey scene is the visualization and Google Maps deep links cover
+  navigation, which keeps the CSP self-hosted — a link is not a request. Those
+  links used to be per-stop only, which is right for reading a plan and useless
+  for driving one: re-entering the next charger at every stop, in the car, is
+  where a plan gets abandoned. `mapsRouteLegs` sends origin → every stop →
+  destination as one route, from the results page, the start screen and
+  mid-drive. Three things it must keep doing. **Nine waypoints is Google's
+  limit**, so a longer plan is split into consecutive legs that share their
+  endpoints and are LABELLED as parts — truncating to the first nine would
+  navigate somebody to a road short of where they are going. **The live one
+  omits `origin`**, which is what makes Maps start from the car rather than from
+  this morning's departure point. **Stops go over as coordinates, never names**:
+  a charger's name here is whatever OpenChargeMap calls the site, and the
+  coordinate is what the plan was computed against.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,
   charge to ~60-80%", not hardcode it (tests assert this emerges).
 - **A drive is simulated under the assumptions its own plan was made with, and

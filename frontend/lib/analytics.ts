@@ -46,6 +46,7 @@ export type EventName =
   | "trip_planned"
   | "drive_started"
   | "trips_opened"
+  | "maps_route_opened"
 
 const CLIENT_ID_KEY = "evtrip.cid"
 const CAMPAIGN_KEY = "evtrip.src"

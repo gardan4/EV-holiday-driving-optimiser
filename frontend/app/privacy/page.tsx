@@ -200,8 +200,9 @@ export default function PrivacyPage() {
             your start and destination.
           </strong>
           Beyond those, nothing: no advertising, no trackers, and the page loads
-          no third-party scripts. Per-stop navigation links point at Google
-          Maps, and only open if you tap one.
+          no third-party scripts. The navigation links — a single stop, or the
+          whole route with its charging stops in it — point at Google Maps, and
+          only open if you tap one.
         </Section>
 
         <Section title="Why we're allowed to keep any of it">

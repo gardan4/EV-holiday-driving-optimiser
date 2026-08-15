@@ -56,6 +56,13 @@ ALLOWED_EVENTS = frozenset(
         "trip_planned",     # …and a plan came back
         "plan_failed",      # …or it didn't (how often planning breaks is worth knowing)
         "drive_started",    # somebody actually drove one
+        # The plan left for the car's own navigation. Worth its own row because
+        # it is the one action here whose whole point is that the visitor goes
+        # somewhere else: a trip that ends in Maps looks identical to one nobody
+        # used, and the two mean opposite things. The path says whether it was
+        # taken off the results page, the start screen or mid-drive; nothing
+        # about which route, which is a coordinate pair by another name.
+        "maps_route_opened",
         # The username feature. `trips_opened` is the only one the browser
         # sends: the drawer is not a route, so opening it leaves no page view
         # and "did anyone use the list?" would otherwise have no answer at all.

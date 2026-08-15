@@ -64,7 +64,7 @@ export async function GET() {
 
 ## What it is not
 
-- Not a turn-by-turn navigator. There is no in-app map; per-stop links hand off to Google Maps.
+- Not a turn-by-turn navigator. There is no in-app map; the planned route, charging stops included, hands off to Google Maps.
 - Not measured data. Charging curves are curated from published fast-charge tests and consumption is a fitted model. Figures are modelled estimates, and each vehicle page names its own sources.
 - Speed caps are only modelled properly for eight western-European countries. Everywhere else falls back to a 130 km/h default, which is too high for most of the world.
 - Range figures on the vehicle pages are flat-road and mild-weather. The trip planner itself does account for elevation and temperature; the standalone per-car tables do not.

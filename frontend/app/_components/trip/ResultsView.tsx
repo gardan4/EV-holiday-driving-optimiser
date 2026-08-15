@@ -9,12 +9,14 @@ import { nearOptimalBand } from "@/lib/verdict"
 import { buildVerdict } from "@/lib/summary"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { plannedRouteLegs } from "@/lib/maps"
 import AnswerBlock from "./AnswerBlock"
 import Assumptions from "./Assumptions"
 import BatteryChart from "./BatteryChart"
 import CostChart from "./CostChart"
 import Itinerary from "./Itinerary"
 import JourneyHero from "./JourneyHero"
+import MapsRouteButton from "./MapsRouteButton"
 import SpeedChart from "./SpeedChart"
 import DeleteTrip from "./DeleteTrip"
 import { DriveThisButton, SendToPhonePanel } from "./live/SendToPhone"
@@ -50,6 +52,15 @@ export default function ResultsView({
     [result.speeds, selectedSpeed]
   )
   const band = useMemo(() => nearOptimalBand(result.speeds), [result.speeds])
+
+  // Follows `selectedSpeed` like everything else on this page: the stops belong
+  // to the plan on screen, and handing Maps the optimum's chargers while the
+  // reader is looking at the 130 km/h itinerary would be the same silent swap
+  // "Drive this" exists to avoid.
+  const mapsLegs = useMemo(
+    () => (selected?.feasible ? plannedRouteLegs(trip, selected.stops) : []),
+    [trip, selected]
+  )
 
   // What "Drive this" hands to the phone. Null while the reader is on the
   // optimum, which is both the common case and the one whose drive link should
@@ -174,6 +185,7 @@ export default function ResultsView({
                 onShowQr={() => setSendOpen(true)}
               />
             )}
+            <MapsRouteButton legs={mapsLegs} />
             <button
               onClick={copyLink}
               className="inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"

@@ -23,9 +23,11 @@ import { AlertTriangle, Flag, Loader2, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveRun, Stop, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { remainingRouteLegs } from "@/lib/maps"
 import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
 import JourneyHero, { LiveHeroState } from "../JourneyHero"
+import MapsRouteButton from "../MapsRouteButton"
 import BatteryCheck from "./BatteryCheck"
 
 export default function LiveView({
@@ -66,10 +68,14 @@ export default function LiveView({
     ? revised.benchmark.live_total_min
     : plannedTotal + (state?.ahead_behind_min ?? 0)
 
-  const nextStop = useMemo(
-    () => findNextStop(trip, result?.stops ?? [], revised, distM),
-    [trip, result, revised, distM]
+  // Everything still in front of the car, on whichever plan is in force. Both
+  // the HUD's next stop and the Maps hand-off read this one list, so the
+  // charger the screen names is the first one the navigation gets sent.
+  const ahead = useMemo(
+    () => stopsAhead(result?.stops ?? [], revised, distM),
+    [result, revised, distM]
   )
+  const nextStop = useMemo(() => heroStop(ahead[0] ?? null, distM), [ahead, distM])
 
   const heroLive: LiveHeroState | null = useMemo(() => {
     if (!state || !run) return null
@@ -161,6 +167,31 @@ export default function LiveView({
             </button>
           )}
         </div>
+
+        {/* The plan, in the navigation the car is actually following. The HUD's
+            "Navigate" is the next charger and nothing else, which is the right
+            thing at 120 km/h; this is the one to take at a stop, and it starts
+            from where the phone is rather than from this morning's origin. */}
+        {!finished && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink-100 bg-white p-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-ink-900">
+                The rest of the way, in Google Maps
+              </p>
+              <p className="mt-0.5 text-xs text-ink-500">
+                {ahead.length === 0
+                  ? `Straight to ${trip.request.dest.label.split(",")[0]}, no stops left`
+                  : `${ahead.length} ${ahead.length === 1 ? "stop" : "stops"} left, then ${trip.request.dest.label.split(",")[0]}`}{" "}
+                · from where you are now
+              </p>
+            </div>
+            <MapsRouteButton
+              legs={remainingRouteLegs(trip, ahead)}
+              label="Navigate the rest"
+              tone="solid"
+            />
+          </div>
+        )}
 
         {isDriver && !finished && (
           <p className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
@@ -254,20 +285,29 @@ function socLabel(soc: number, measured: boolean, band: number): string {
   return `${Math.max(0, Math.round(soc - band))}-${Math.min(100, Math.round(soc + band))}%`
 }
 
-/** The next charging stop ahead of the car, on whichever plan is in force. */
-function findNextStop(
-  trip: Trip,
+/**
+ * The charging stops still ahead of the car, on whichever plan is in force.
+ *
+ * A re-plan replaces the list outright — its stops are offset from where the
+ * re-plan happened, so they are placed back on the route before anything
+ * compares them with how far the car has come.
+ */
+function stopsAhead(
   originalStops: Stop[],
   revised: LiveRun["plan"],
   distM: number
-): LiveHeroState["nextStop"] {
+): Stop[] {
   const stops = revised
     ? revised.remaining.stops.map((s) => ({
         ...s,
         offset_m: s.offset_m + revised.offset_base_m,
       }))
     : originalStops
-  const next = stops.find((s) => s.offset_m > distM + 200)
+  return stops.filter((s) => s.offset_m > distM + 200)
+}
+
+/** The next stop as the HUD wants it: a distance from here, not an offset. */
+function heroStop(next: Stop | null, distM: number): LiveHeroState["nextStop"] {
   if (!next) return null
   return {
     name: next.name,

@@ -17,7 +17,9 @@ import { toast } from "sonner"
 import { Trip, startRun } from "@/lib/client"
 import { track } from "@/lib/analytics"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { plannedRouteLegs } from "@/lib/maps"
 import { storeToken } from "@/lib/useLiveRun"
+import MapsRouteButton from "../MapsRouteButton"
 
 export default function StartDrivePanel({
   trip,
@@ -148,6 +150,23 @@ export default function StartDrivePanel({
             )}
             Start driving
           </button>
+
+          {/* The other half of setting off: the plan is only useful in the car
+              if the car's navigation knows about the chargers. Below the start
+              button deliberately — this phone can only follow the drive if it
+              is started here first, and Maps opens in another app. */}
+          <div className="mt-3">
+            <MapsRouteButton
+              legs={plannedRouteLegs(trip, best.stops)}
+              label="Open the route in Maps"
+              full
+            />
+            <p className="mt-2 text-center text-xs leading-relaxed text-ink-400">
+              With every charging stop already in it. Start the drive first and
+              this phone keeps following it while you navigate.
+            </p>
+          </div>
+
           <p className="mt-3 text-center text-xs leading-relaxed text-ink-400">
             This phone will follow the drive and share its location. Anyone with
             the trip link can watch; only this phone can steer. A coarse trail

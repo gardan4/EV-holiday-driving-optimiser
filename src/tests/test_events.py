@@ -190,6 +190,25 @@ class TestRecording:
         row = (await db_session.execute(select(AppEvent))).scalars().one()
         assert row.path == "/trip/:id/live"
 
+    async def test_the_maps_handoff_is_countable_from_a_browser(
+        self, client, db_session
+    ):
+        """Opening the route in Google Maps is the one action whose point is
+        that the visitor leaves — so it has to be counted here or a trip that
+        ended in the car's navigation is indistinguishable from one nobody
+        used. It is not a server-side event: only the browser knows it was
+        tapped."""
+        resp = await client.post(
+            "/api/events",
+            json={"name": "maps_route_opened", "path": f"/trip/{TRIP_ID}/live"},
+        )
+        assert resp.status_code == 204
+
+        row = (await db_session.execute(select(AppEvent))).scalars().one()
+        assert row.name == "maps_route_opened"
+        # Which surface it was taken from, never which route.
+        assert row.path == "/trip/:id/live"
+
     async def test_unknown_event_names_are_refused(self, client, db_session):
         """Without the allowlist this is a public endpoint that writes a
         caller-supplied string to the database."""

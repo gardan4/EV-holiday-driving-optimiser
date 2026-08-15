@@ -14,8 +14,9 @@ friend's plan.
   charge curves, per-country speed caps (incl. derestricted German autobahn),
   arrival-charge targets, and winter conditions.
 - Shows the total-time-vs-speed curve with the optimum highlighted, a
-  stop-by-stop itinerary (arrive 23:41 at 12%, charge 18 min to 60%…) with
-  Google Maps links, and a **low-poly 3D journey diorama** — play the overnight
+  stop-by-stop itinerary (arrive 23:41 at 12%, charge 18 min to 60%…) that
+  opens in Google Maps as one route with every charging stop already in it,
+  and a **low-poly 3D journey diorama** — play the overnight
   drive, watch the battery drain, and put a second car at your friend's speed
   on the road with a live gap timer.
 - Every plan gets a shareable permalink — send it to your co-driver.
