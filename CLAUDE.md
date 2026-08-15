@@ -433,6 +433,49 @@ the pipeline is green before infra exists. Infra deploy is manual
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".
+- **The panel prices the plan you are ON, not a fresh optimum**
+  (`runs._plan_in_force`). "Somewhere else to charge" makes exactly one claim
+  about the PLAN — the row saying which stop you are heading for — and it was
+  built from a free re-optimisation from the current position, which is a claim
+  about the model instead. The two diverge for ordinary reasons: the plan was
+  made further back, the driver has corrected the battery upwards since, and a
+  DP run from here may prefer to push straight past the next stop. The panel
+  then named a charger 64 km away as planned, directly beneath a card saying
+  the next stop was 43 km away, about a different charger. Restricting the DP's
+  candidates to the plan's own stops is NOT enough — with a better battery it
+  simply skips the first of them and takes the second, which is a third plan —
+  so the stop being swapped is FORCED: its leg is priced straight off the route
+  profile at the departure percentage the plan chose, and only the tail after
+  it goes back through the DP. The tail is re-optimised on purpose, because
+  every alternative is costed that way and the two have to be comparable. A
+  genuinely quicker option is not lost, it appears in the list with a NEGATIVE
+  delta — which is why `delta_min >= 0` is no longer an invariant for ordinary
+  alternatives. `_planned_stops_ahead` falls through to the original itinerary
+  when nothing has been re-planned, or "never offer the stop you are already
+  going to" silently stops applying to every drive before its first re-plan.
+- **An accepted stretch is about ONE leg, and ends when that leg does**
+  (`runs._clear_first_leg_floor`). `first_leg_reserve_soc` is persisted so the
+  standing "Re-plan" button cannot refuse the stop the driver just chose — and
+  nothing ever took it off again, so a risk accepted at nine in the morning was
+  still lowering the reserve on the fourth leg that evening. Every later plan
+  was computed against a floor nobody had agreed to, and the alternatives panel
+  inherited it. Cleared on arriving at a charger, ANY charger: the floor was
+  about reaching one, and one has been reached.
+- **The battery is smoothed between server updates** (`lib/liveSoc.ts`). The
+  server owns the model and nothing here anchors anything — this only carries
+  the server's own last answer forward over the seconds since it arrived, using
+  the same ported maths in `lib/vehicles.ts`. Without it the position moves
+  smoothly, because the GPS watch projects it locally, and the percentage next
+  to it jumps a whole point every ~25 s and reads as stale. Three things keep
+  it honest: it always starts from `state.soc` (or, at a plug, from the
+  server's own `charging.start_soc` and `since_min`), so no second opinion can
+  form; it is capped at `MAX_GAP_S`, past which the phone has stopped hearing
+  from the server and extrapolating would be guessing; and the gap is measured
+  on the SERVER's clock — `state.at_min` against `started_at` — rather than on
+  when a reply reached the phone, so a slow connection cannot inflate it.
+  `LiveView` computes it once per second and every card reads that one derived
+  state, so nothing on the screen can show a different battery from anything
+  else.
 - **Arriving anywhere is noticed, not just at the four stops the plan chose**
   (`live.nearest_charger`). The ping path matched `nearest_planned_stop` — the
   plan's own stops and nothing else — so a driver who stopped at any of the
@@ -1034,6 +1077,15 @@ docker compose -f docker-compose.local-db.yml up -d
   the later file and point its `down_revision` at the other. `db_bootstrap`
   fails outright on a branched history, so this breaks the deploy, not just a
   test.
+- **A naive timestamp from the API is UTC; JavaScript reads it as local.**
+  `datetime.utcnow()` serialises as `"2026-08-15T08:36:17"` with no zone, and
+  the ECMAScript parser treats a date-TIME form without an offset as LOCAL
+  time — so east of Greenwich it lands in the future and anything measuring
+  elapsed time against it gets a negative answer. The failure is silent: code
+  that guards against a nonsense gap just stops doing its job for everyone
+  outside UTC. Use `format.parseServerTime`, which is deliberately the OPPOSITE
+  convention from `parseLocalIso` next to it — that one reads a departure the
+  user typed, which is naive local by design.
 - **Number inputs hold a string, not the clamped number** (`trip/fields.tsx`).
   Binding the box straight to a clamped `value` rewrites it on every keystroke:
   clearing it snaps back to `min` (hence the "040" people kept typing) and

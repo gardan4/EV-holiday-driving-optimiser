@@ -319,6 +319,26 @@ def _set_first_leg_floor(run: TripRun, floor: float | None) -> float | None:
     return floor
 
 
+def _clear_first_leg_floor(st: dict) -> dict:
+    """Forget an accepted stretch once the leg it was accepted for is over.
+
+    `first_leg_reserve_soc` is a decision about ONE leg — "I'll arrive at that
+    services under the reserve rather than stop short of it" — and it is
+    persisted so the standing "Re-plan" button cannot silently refuse the stop
+    the driver just chose. Nothing ever took it off again, so a risk accepted
+    at nine in the morning was still lowering the reserve on the fourth leg
+    that evening: every later plan was quietly computed on a floor nobody had
+    agreed to, and the alternatives panel used it too, which is how it came to
+    offer a charger 21 km further on than the plan's own next stop.
+
+    Arriving at a charger ends the leg, whichever charger it is — the floor was
+    about reaching one, and one has been reached.
+    """
+    if st.get("first_leg_floor_soc") is None:
+        return st
+    return {k: v for k, v in st.items() if k != "first_leg_floor_soc"}
+
+
 def _resolve_hold_speed(run: TripRun, body: ReplanRequest) -> float | None:
     """The speed the driver intends to hold, and whether that intention changed.
 
@@ -413,16 +433,35 @@ def _soc_needed_next(
     return round(min(100.0, kwh / max(veh.usable_kwh, 1e-6) * 100.0 + reserve), 1)
 
 
-def _planned_next_stop_id(run: TripRun, st: dict) -> str | None:
-    """The charger the plan in force is actually heading for, if any."""
+def _planned_stops_ahead(run: TripRun, trip: Trip, st: dict) -> list[str]:
+    """The chargers the plan in force still intends to stop at, in order.
+
+    The re-planned slice when there is one, the original itinerary otherwise.
+    Falling through matters: on a drive nobody has re-planned, `run.plan` is
+    empty and reading only that reports the plan as having no stops at all —
+    which is how "never offer the stop you are already going to" quietly
+    stopped applying to every drive that had not been re-planned yet.
+    """
     plan = run.plan or None
-    if not plan:
-        return None
-    base = float(plan.get("offset_base_m") or 0.0)
-    for s in (plan.get("remaining") or {}).get("stops") or []:
-        if s["offset_m"] + base > st["offset_m"] + 200.0:
-            return str(s["charger_id"])
-    return None
+    if plan:
+        base = float(plan.get("offset_base_m") or 0.0)
+        return [
+            str(s["charger_id"])
+            for s in (plan.get("remaining") or {}).get("stops") or []
+            if s["offset_m"] + base > st["offset_m"] + 200.0
+        ]
+    speed = _planned_result(trip, run.planned_speed_kph) or {}
+    return [
+        str(s["charger_id"])
+        for s in speed.get("stops", [])
+        if float(s["offset_m"]) > st["offset_m"] + 200.0
+    ]
+
+
+def _planned_next_stop_id(run: TripRun, trip: Trip, st: dict) -> str | None:
+    """The charger the plan in force is actually heading for, if any."""
+    ahead = _planned_stops_ahead(run, trip, st)
+    return ahead[0] if ahead else None
 
 
 def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
@@ -877,7 +916,9 @@ async def ping(
     # path is deliberately cheap enough to sit on the event loop.
     if stop_id and not run.state.get("at_charger_id"):
         new_st = {
-            **new_st,
+            # Reaching a charger ends the leg an accepted stretch was accepted
+            # for — see `_clear_first_leg_floor`.
+            **_clear_first_leg_floor(new_st),
             "need_soc_next": _soc_needed_next(
                 run, trip, veh, params, float(new_st["offset_m"])
             ),
@@ -1011,7 +1052,9 @@ async def arrive(
     # from the other side, exactly as the ping path does.
     charge_kw = float(node.power_kw) if node and node.power_kw else None
     run.state = {
-        **new_st,
+        # Same transition as a ping's, declared by hand — and the same end of
+        # the leg an accepted stretch belonged to.
+        **(_clear_first_leg_floor(new_st) if node else new_st),
         "at_charger_id": node.charger_id if node else None,
         "stale": False,
         **(
@@ -1497,7 +1540,8 @@ async def alternatives(
     # now stands nearest the rejected one's position, which is a different pick
     # entirely: reporting `stops[0]` there would answer about a stop the driver
     # never mentioned.
-    planned_next = _planned_next_stop_id(run, st)
+    planned_ahead = _planned_stops_ahead(run, trip, st)
+    planned_next = planned_ahead[0] if planned_ahead else None
     swapping_next = (
         body.reject_charger_id is None or body.reject_charger_id == planned_next
     )
@@ -1537,6 +1581,108 @@ async def alternatives(
             return None
         return best
 
+    async def _plan_in_force(swap_id: str) -> tuple[float, AlternativeOut] | None:
+        """The remaining journey as the plan INTENDS it, priced from here.
+
+        The baseline used to be a free re-optimisation from the current
+        position, and the row built from it was labelled "planned now" — which
+        is a claim about the PLAN, and the two are not the same thing. They
+        diverge for entirely ordinary reasons: the plan was made further back,
+        the driver has corrected the battery upwards since, and a DP run from
+        here may now prefer to push straight past the next stop. The panel then
+        named a charger 64 km away as planned, directly beneath a card saying
+        the next stop was 43 km away, about a different charger. Reported from
+        the road, in those words.
+
+        Restricting the DP's candidates to the plan's own stops is NOT enough:
+        with a better battery than the plan assumed it simply skips the first
+        of them and stops at the second, which is a different plan again. So
+        the stop being swapped is FORCED — its leg is priced directly off the
+        route profile, at the departure percentage the plan chose — and only
+        the tail after it goes back through the DP. That tail is re-optimised
+        on purpose: swapping any stop moves everything behind it, and the
+        alternatives are costed the same way, so the two are comparable.
+
+        Returns the cost of following the plan and the row describing its stop.
+        `None` when the plan cannot be followed from here at all — the battery
+        has moved on — and the free optimum is then the honest reference, which
+        is what it always was.
+        """
+        found = _plan_stop(run, trip, swap_id)
+        node = next(
+            (
+                c
+                for c in live.snapshot_chargers(snapshot)
+                if c.charger_id == swap_id
+            ),
+            None,
+        )
+        if found is None or node is None:
+            return None
+        plan_stop, base = found
+        stop_at = float(plan_stop["offset_m"]) + base
+        leg_m = stop_at - st["offset_m"]
+        if leg_m <= 0.0:
+            return None
+
+        # The forced leg, straight off the profile — no chargers, so the DP
+        # cannot decide to stop somewhere else on the way.
+        head = slice_route(live.snapshot_segments(snapshot), [], st["offset_m"])
+        if not head.segments or leg_m > head.total_dist_m:
+            return None
+        prof = RouteProfile(head.segments, speed, veh, params, head.index_offset)
+        arrive = soc_now - prof.kwh_at(leg_m) / max(veh.usable_kwh, 1e-6) * 100.0
+        if arrive < 0.0:
+            return None
+        leg_min = prof.time_at(leg_m)
+
+        # What the plan says to leave on, never less than it arrived with.
+        depart = max(arrive, float(plan_stop.get("depart_soc") or arrive))
+        site_kw = float(node.power_kw) * params.site_power_factor
+        stop_min = charge_minutes(
+            veh, arrive, depart, site_kw, params.charge_power_factor
+        ) + float(node.detour_min or 0.0)
+
+        # …and the rest, re-optimised from that stop exactly as a swap would be.
+        tail = _remaining_slice(snapshot, stop_at, already)
+        tail_min = 0.0
+        if tail.segments:
+            tail_p = replace(
+                params,
+                depart_soc=depart,
+                prior_drive_min=st["at_min"] + leg_min + stop_min,
+                # The floor is a fact about the leg being driven, and that leg
+                # ends at this stop.
+                first_leg_reserve_soc=None,
+            )
+            best_tail = optimum(
+                await asyncio.to_thread(sweep_slice, tail, veh, [speed], tail_p)
+            )
+            if best_tail is None or best_tail.total_min is None:
+                return None
+            tail_min = best_tail.total_min
+
+        row = AlternativeOut(
+            charger_id=node.charger_id,
+            name=node.name,
+            food_hint=amenities.food_hint(node.name),
+            operator=node.operator,
+            power_kw=node.power_kw,
+            n_points=node.n_points,
+            lat=round(node.lat, 5),
+            lon=round(node.lon, 5),
+            offset_m=round(stop_at),
+            dist_from_here_m=round(leg_m),
+            arrive_soc=round(arrive, 1),
+            depart_soc=round(depart, 1),
+            charge_min=round(stop_min, 1),
+            delta_min=0.0,
+            exclude_charger_ids=[],
+            below_reserve=arrive < params.reserve_soc,
+            min_arrival_soc=_first_leg_floor(st),
+        )
+        return leg_min + stop_min + tail_min, row
+
     def _as_alt(best, stop, *, below_reserve: bool) -> AlternativeOut:
         return AlternativeOut(
             charger_id=stop.charger_id,
@@ -1562,8 +1708,22 @@ async def alternatives(
             min_arrival_soc=STRETCH_FLOOR_SOC if below_reserve else None,
         )
 
+    # 0. What the driver is doing now, priced from here. The reference every
+    #    `delta_min` below is measured against, and the one row on this panel
+    #    that makes a claim about the PLAN rather than about the model.
+    swap_id = body.reject_charger_id or planned_next
+    in_force = await _plan_in_force(swap_id) if swap_id else None
+    if in_force is not None:
+        baseline_min, current = in_force
+        target_offset = current.dist_from_here_m
+        turned_down.append(current.charger_id)
+
     # 1. The ones a plan can already reach, ranked by successive exclusion.
-    for _ in range(MAX_ALTERNATIVES + 1):
+    #    The plan's own stop is already turned down when there was one, so the
+    #    first pass here is genuinely "what else" — including, when a fresh DP
+    #    from this position would do better, an option that costs LESS than the
+    #    plan and says so with a negative delta.
+    for _ in range(MAX_ALTERNATIVES if current is not None else MAX_ALTERNATIVES + 1):
         best = await _next_best(already | set(turned_down), params)
         if best is None:
             break
@@ -1572,6 +1732,9 @@ async def alternatives(
             break
         alt = _as_alt(best, stop, below_reserve=False)
         if baseline_min is None:
+            # No plan to price against — an un-replanned drive whose itinerary
+            # is no longer feasible from here. The free optimum is the honest
+            # reference then, exactly as it was before.
             baseline_min = best.total_min or 0.0
             current = alt
             target_offset = stop.offset_m

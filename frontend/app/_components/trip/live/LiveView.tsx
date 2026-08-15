@@ -17,12 +17,13 @@
  *   live ETAs that disagree make the reader distrust both.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
+import { projectedSoc } from "@/lib/liveSoc"
 import { remainingRouteLegs } from "@/lib/maps"
 import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
@@ -57,14 +58,57 @@ export default function LiveView({
   )
 
   const live = useLiveRun(trip.id, routeIndex, initial)
-  const { state, run, isDriver } = live
+  const { run, isDriver } = live
 
   // Derived from the server, NOT held locally: a watcher polls `run`, and a
   // re-plan the driver made is the single most important thing to reach them.
   const revised = run?.plan ?? null
 
-  const distM = live.localOffsetM ?? state?.offset_m ?? 0
+  const distM = live.localOffsetM ?? live.state?.offset_m ?? 0
   const finished = run?.status === "finished"
+
+  // The battery, smoothed between server updates.
+  //
+  // The server owns the model and every figure here starts from its last
+  // answer — this only carries that answer forward over the seconds since it
+  // arrived, using the same maths (`lib/liveSoc.ts`). Without it the position
+  // moves smoothly, because the GPS watch projects it locally, and the
+  // percentage next to it jumps a whole point every ~25 s and reads as stale.
+  // Reported from the road in those words.
+  //
+  // One tick, one derived state, and every consumer downstream reads that —
+  // the HUD, the stop card, the battery row — so nothing on the screen can
+  // show a different battery from anything else.
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (finished) return
+    const h = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(h)
+  }, [finished])
+
+  const heldSpeed =
+    revised?.optimum_speed ?? result?.speed_kph ?? trip.result.optimum_speed ?? 120
+  const state = useMemo(() => {
+    const st = live.state
+    if (!st || finished || !run) return st
+    const soc = projectedSoc({
+      state: st,
+      startedAt: run.started_at,
+      vehicle: trip.result.vehicle,
+      distM,
+      speedKph: heldSpeed,
+      now: Date.now(),
+    })
+    // Only the number. `soc_is_measured` is left exactly as the server sent
+    // it: flipping it here would turn "confirmed just now" into "estimated" a
+    // second after the driver typed their reading, which reads as the app
+    // discarding it. The projection is tenths of a point over a ping's window
+    // and the server flips the flag itself on the next one.
+    return Math.abs(soc - st.soc) < 0.05 ? st : { ...st, soc }
+    // `tick` is the clock: it has no other reader, and dropping it would
+    // freeze the projection at whatever the last render happened to compute.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live.state, run, finished, distM, heldSpeed, trip.result.vehicle, tick])
 
   // Which plan is in force. After a re-plan the original is a benchmark, not
   // an instruction.

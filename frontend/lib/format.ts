@@ -55,6 +55,26 @@ export function parseLocalIso(iso: string): Date {
   return new Date(y, (mo || 1) - 1, d || 1, h || 0, mi || 0, 0, 0)
 }
 
+/**
+ * A server timestamp → milliseconds since the epoch.
+ *
+ * The API serialises `datetime.utcnow()`, which is naive: "2026-08-15T08:36:17"
+ * with no zone on it. JavaScript reads a date-TIME form with no offset as LOCAL
+ * time, so on a phone in CEST that value parses two hours into the future and
+ * anything measuring elapsed time against it gets a negative answer. The bug
+ * hides, too — code that guards against a nonsense gap simply stops doing its
+ * job, silently, for everyone outside UTC.
+ *
+ * Which is the opposite convention from `parseLocalIso` above, deliberately:
+ * that one reads a departure the user TYPED, which is naive local by design;
+ * this one reads an instant the server RECORDED, which is naive UTC. Same
+ * shape, different meaning, so they cannot share an implementation.
+ */
+export function parseServerTime(iso: string): number {
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso)
+  return Date.parse(hasZone ? iso : `${iso}Z`)
+}
+
 /** A local Date → "2026-08-14T22:00", the naive local string the API stores. */
 export function toLocalIso(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`

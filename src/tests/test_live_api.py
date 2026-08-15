@@ -1288,12 +1288,13 @@ class TestTurningDownAStop:
         assert out["current"]["charger_id"] not in ids
         assert len(ids) == len(out["alternatives"])
         for a in out["alternatives"]:
-            # Priced against the whole remaining journey. Under the same
-            # reserve the current stop IS the optimum, so nothing can be
-            # quicker — but a stretch option is computed under a lower floor
-            # for the leg being driven, and going further before stopping is
-            # exactly how it can come back faster. That is the trade being
-            # offered, not a bug in the ranking.
+            # Priced against the whole remaining journey, and against the plan
+            # the driver is ON rather than against a fresh optimum — so a
+            # negative delta is meaningful here rather than impossible: it says
+            # a re-plan from this position would beat the itinerary on screen.
+            # On a plan that has just been made from here the two agree, which
+            # is what this asserts; the case where they do not is
+            # `TestThePanelPricesThePlanYouAreOn`.
             if not a["below_reserve"]:
                 assert a["delta_min"] >= 0
             # What to send to `replan` to take this one: everything ranked
@@ -1702,6 +1703,17 @@ class TestReview:
         assert resp.status_code == 404
 
 
+async def _the_run(db_session) -> TripRun:
+    """The one run these tests create, read straight off the database.
+
+    Some of what the drive remembers is deliberately not in any read response —
+    an accepted stretch floor is a planning input, not something the screen
+    shows — so the only honest way to assert on it is to look at the row.
+    """
+    db_session.expire_all()
+    return (await db_session.execute(select(TripRun))).scalars().first()
+
+
 async def _wind_clock_back(db_session, minutes: float) -> None:
     """Move the run's departure back, which is the only way to make wall-clock
     time pass inside a test. The charge is projected from `datetime.utcnow()`
@@ -1868,3 +1880,181 @@ class TestTheStopFromArrivalToDeparture:
             f"/api/trips/{trip['id']}/soc", json={"soc": 71.0, "leaving": True}
         )
         assert resp.status_code == 404
+
+
+class TestThePanelPricesThePlanYouAreOn:
+    """"Somewhere else to charge" makes exactly one claim about the PLAN — the
+    row labelled as the stop you are heading for — and it used to be a claim
+    about the model instead.
+
+    The baseline was a free re-optimisation from the current position, which
+    diverges from the plan for entirely ordinary reasons: the plan was made
+    further back, the driver has corrected the battery upwards since, and a DP
+    run from here may prefer to push past the next stop altogether. The panel
+    then named a charger 64 km away as "planned now" directly beneath a card
+    saying the next stop was 43 km away, about a different charger. Reported
+    from the road.
+    """
+
+    async def _drive_a_bit(self, client, trip, run):
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+    def _planned_next(self, trip, state):
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        return next(
+            s for s in speed["stops"] if s["offset_m"] > state["offset_m"] + 200.0
+        )
+
+    async def test_the_current_row_is_the_stop_the_plan_is_heading_for(
+        self, client
+    ):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._drive_a_bit(client, trip, run)
+
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        assert out["current"]["charger_id"] == self._planned_next(trip, state)[
+            "charger_id"
+        ]
+        assert out["current"]["delta_min"] == 0.0
+
+    async def test_it_holds_when_a_fresh_plan_would_push_straight_past(
+        self, client
+    ):
+        """The case that produced the report, and the only one that separates
+        "the plan" from "the optimum": the driver corrects the battery upwards,
+        so a DP run from this position can now skip the stop the plan is
+        heading for. The plan has not changed — nobody pressed re-plan — so the
+        row that says what is planned must still name the plan's stop, and the
+        quicker option belongs in the list underneath with a negative delta."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._drive_a_bit(client, trip, run)
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        planned = self._planned_next(trip, state)
+
+        # Far more battery than the model believed. Nothing re-plans.
+        await client.post(
+            f"/api/runs/{run['run_id']}/soc",
+            json={"soc": min(100.0, state["soc"] + 30.0)},
+        )
+
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        assert out["current"] is not None
+        assert out["current"]["charger_id"] == planned["charger_id"], (
+            "the panel named a charger the plan is not heading for"
+        )
+        assert out["current"]["delta_min"] == 0.0
+        # Whatever the free optimum now prefers is offered as an ALTERNATIVE,
+        # never as the plan, and never twice.
+        assert planned["charger_id"] not in {
+            a["charger_id"] for a in out["alternatives"]
+        }
+
+    async def test_it_still_agrees_after_a_re_plan(self, client):
+        """The revised slice is the plan in force, so the panel has to read
+        that one and not the original itinerary."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._drive_a_bit(client, trip, run)
+        revised = (
+            await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        ).json()
+        assert revised["remaining"]["stops"], "expected the revision to stop"
+        expected = revised["remaining"]["stops"][0]["charger_id"]
+
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        assert out["current"]["charger_id"] == expected
+        assert expected not in {a["charger_id"] for a in out["alternatives"]}
+
+    async def test_a_rejected_stop_moves_the_reference_with_it(self, client):
+        """Take an alternative, and the panel's "planned now" has to become the
+        stop just chosen — it is the plan now."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._drive_a_bit(client, trip, run)
+        alts = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        chosen = alts["alternatives"][0]
+
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={
+                "exclude_charger_ids": chosen["exclude_charger_ids"],
+                "min_arrival_soc": chosen["min_arrival_soc"],
+            },
+        )
+        again = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        assert again["current"]["charger_id"] == chosen["charger_id"]
+        assert chosen["charger_id"] not in {
+            a["charger_id"] for a in again["alternatives"]
+        }
+
+
+class TestAnAcceptedStretchIsAboutOneLeg:
+    """`first_leg_reserve_soc` is a decision about the leg being driven — "I'll
+    arrive at those services under the reserve rather than stop short of them".
+    It is persisted so the standing "Re-plan" button cannot silently refuse the
+    stop the driver just chose, and nothing ever took it off again: a risk
+    accepted on the first leg was still lowering the floor on the fourth, and
+    every plan after it was quietly computed against a number nobody had agreed
+    to.
+    """
+
+    async def _accept_a_stretch(self, client, trip, run):
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan", json={"min_arrival_soc": 5.0}
+        )
+
+    async def test_it_survives_the_next_re_plan_on_the_same_leg(
+        self, client, db_session
+    ):
+        """The half that has to keep working: a rejection that lasts one
+        request is not a rejection."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._accept_a_stretch(client, trip, run)
+
+        run_row = await _the_run(db_session)
+        assert run_row.state.get("first_leg_floor_soc") == 5.0
+
+        await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        run_row = await _the_run(db_session)
+        assert run_row.state.get("first_leg_floor_soc") == 5.0
+
+    async def test_arriving_at_a_charger_ends_it(self, client, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._accept_a_stretch(client, trip, run)
+
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > state["offset_m"] + 20_000
+        )
+        await client.post(
+            f"/api/runs/{run['run_id']}/arrive",
+            json={"charger_id": stop["charger_id"]},
+        )
+
+        run_row = await _the_run(db_session)
+        assert run_row.state.get("first_leg_floor_soc") is None
