@@ -57,6 +57,17 @@ AT_CHARGER_M = 150.0
 # requires the car to have stopped moving.
 AT_CHARGER_MATCH_M = 250.0
 
+# How far a car with a LIVE charge session has to move before it counts as
+# having driven away. Wider than `AT_CHARGER_M`, which is the threshold for
+# noticing an arrival, because ending a stop and spotting one are not the same
+# risk: a stationary phone between the buildings of a services drifts, the
+# offset is clamped forward so that drift only ever accumulates, and 150 m of
+# it would close the stop under a car that is still plugged in. A car that is
+# charging is not moving, so the evidence for "left" should be unambiguous —
+# and it still is at any real speed, where one ping covers several hundred
+# metres.
+LEFT_CHARGER_M = 400.0
+
 # Below this the observed "speed" is noise, not driving.
 MIN_OBSERVED_KPH = 5.0
 
@@ -299,8 +310,12 @@ def advance(
     if off_route_m > OFF_ROUTE_M:
         # Snapping this to the polyline would report no progress while the car
         # is demonstrably burning energy somewhere else. Say "unknown" instead.
+        #
+        # The stop is NOT ended here. A car that is standing at a charger has
+        # not gone anywhere, and a fix that wanders off the polyline while it
+        # sits there — a phone carried into the services, a poor stationary fix
+        # between buildings — is a fact about the fix, not about the car.
         out["stale"] = True
-        out["at_charger_id"] = None
         return out
     out["stale"] = False
 
@@ -308,8 +323,33 @@ def advance(
     dx = max(0.0, offset_m - prev_offset)
     out["offset_m"] = max(prev_offset, offset_m)
 
-    parked = at_charger_id is not None and dx < AT_CHARGER_M
-    if parked and stop_power_kw:
+    # A stop ends when the car MOVES, or when the driver says it does. Never
+    # merely because this ping's fix stopped matching a charger.
+    #
+    # `parked` used to be `at_charger_id is not None and …`, where
+    # `at_charger_id` is what `nearest_charger` matched on THIS fix — so a
+    # drift past its 250 m radius closed the stop under a car that had not
+    # moved a metre. That is an ordinary thing for a fix to do at a big
+    # services, and it is guaranteed after a HAND-DECLARED arrival, where the
+    # driver pressed "I'm plugged in here now" precisely because the phone did
+    # not know where it was: the next automatic ping then quietly overruled
+    # them, the stop card vanished, and the screen went back to counting down
+    # to the next charger while they were still plugged in. Reported from the
+    # road, mid-charge.
+    #
+    # So a held arrival survives a fix that says nothing, and a fresh match
+    # still wins when there is one — moving from one plug to another is a real
+    # thing to do, and it is the position that knows.
+    held = state.get("at_charger_id")
+    still = dx < (
+        LEFT_CHARGER_M if state.get("charge_anchor_soc") is not None else AT_CHARGER_M
+    )
+    here = at_charger_id if at_charger_id is not None else (held if still else None)
+    parked = here is not None and still
+    # Power for the site we are actually at: this fix's when it matched one,
+    # otherwise the power the session was anchored with.
+    kw = stop_power_kw if at_charger_id is not None else state.get("charge_kw")
+    if parked and kw:
         # Plugged in. The charge is not integrated here — see `charging_soc`:
         # a ping-driven integral stops the moment the phone sleeps, which is
         # the whole of the time this matters. What happens instead is that the
@@ -318,8 +358,8 @@ def advance(
         if out.get("charge_anchor_soc") is None:
             out["charge_anchor_soc"] = current_soc(out, veh.usable_kwh)
             out["charge_anchor_min"] = at_min
-            out["charge_kw"] = stop_power_kw
-        out["at_charger_id"] = at_charger_id
+            out["charge_kw"] = kw
+        out["at_charger_id"] = here
         # No aux draw: at a DC charger the cabin is served by the charger, not
         # the pack, which is what drivers actually observe.
         out["soc_is_measured"] = False
@@ -332,7 +372,7 @@ def advance(
         # otherwise bank the whole gap as charge.
         out = bank_charge(out, veh, p, at_min - dt_move_h * 60.0)
 
-    out["at_charger_id"] = at_charger_id if parked else None
+    out["at_charger_id"] = here if parked else None
 
     # The speed to price the drag at: the average while ACTUALLY MOVING, with
     # standing time billed separately below. The planned cruise would over-bill

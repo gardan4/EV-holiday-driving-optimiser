@@ -2058,3 +2058,145 @@ class TestAnAcceptedStretchIsAboutOneLeg:
 
         run_row = await _the_run(db_session)
         assert run_row.state.get("first_leg_floor_soc") is None
+
+
+class TestAStopEndsWhenTheDriverSaysSo:
+    """A stop used to end because a FIX stopped matching a charger.
+
+    `advance` decided "parked" from what `nearest_charger` matched on the
+    current ping, so a fix that drifted past its 250 m radius closed the stop
+    under a car that had not moved a metre — an ordinary thing for a fix to do
+    at a services, and guaranteed after a hand-declared arrival, where the
+    driver pressed "I'm plugged in here now" precisely because the phone did
+    not know where it was. The next automatic ping then overruled them: the
+    stop card vanished mid-charge and the screen went back to counting down to
+    the next charger. Reported from the road, while plugged in.
+
+    A stop now ends on movement, or when the driver says it does. Nothing else.
+    """
+
+    async def _plugged_in(self, client, trip, run):
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > before["offset_m"] + 20_000
+        )
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        assert st["at_charger"] is not None
+        return stop, st
+
+    async def _parked_by_gps(self, client, trip, run):
+        """Park at a charger the way the road does it: drive to it, then stop."""
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        node = next(n for n in nodes if n.offset_m > state["offset_m"] + 30_000)
+        frac = node.offset_m / total_seg
+        await client.post(
+            f"/api/runs/{run['run_id']}/ping",
+            json={**along(frac), "moving_s": 1800.0},
+        )
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={**along(frac), "moving_s": 0.0, "stationary_s": 120.0},
+            )
+        ).json()
+        assert st["at_charger_id"] == node.charger_id
+        assert st["charging"] is not None
+        return node, frac, st
+
+    async def test_a_fix_that_drifts_off_the_charger_does_not_end_it(
+        self, client
+    ):
+        """The exact shape of the report. A stationary phone at a services
+        drifts, and the offset is clamped forward so the drift only ever
+        accumulates: a few hundred metres of it puts the fix outside the 250 m
+        radius that says "at this charger", while the car sits plugged in.
+
+        This delta is ~280 m on the ground — past the match radius, nowhere
+        near `LEFT_CHARGER_M`. The car has not gone anywhere.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        node, frac, _st = await self._parked_by_gps(client, trip, run)
+
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={
+                    **along(frac + 0.00039),
+                    "moving_s": 0.0,
+                    "stationary_s": 120.0,
+                },
+            )
+        ).json()
+
+        assert after["at_charger_id"] == node.charger_id
+        assert after["at_charger"] is not None
+        assert after["charging"] is not None, "the session was thrown away"
+
+    async def test_an_off_route_fix_does_not_end_it_either(self, client):
+        """A phone carried into the services reports from between buildings.
+        That is a fact about the fix, not about the car."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        stop, _st = await self._plugged_in(client, trip, run)
+
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={"lat": 0.0, "lon": 0.0, "moving_s": 0.0, "stationary_s": 60.0},
+            )
+        ).json()
+        assert after["stale"] is True
+        assert after["at_charger_id"] == stop["charger_id"]
+
+    async def test_driving_away_still_ends_it(self, client):
+        """The stickiness must not make a stop permanent — the car leaving is
+        the other half of the rule."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        _stop, st = await self._plugged_in(client, trip, run)
+        segments, _nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={
+                    **along((st["offset_m"] + 40_000) / total_seg),
+                    "moving_s": 1200.0,
+                },
+            )
+        ).json()
+        assert after["at_charger_id"] is None
+        assert after["charging"] is None
+
+    async def test_the_driver_can_end_it_standing_still(self, client):
+        """The control the report actually asked for: confirm you are done and
+        pull out, without waiting for the app to notice."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._plugged_in(client, trip, run)
+
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc",
+                json={"soc": 68.0, "leaving": True},
+            )
+        ).json()
+        assert out["at_charger_id"] is None
+        assert out["charging"] is None
+        assert out["soc"] == pytest.approx(68.0, abs=0.05)

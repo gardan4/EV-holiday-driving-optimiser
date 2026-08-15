@@ -535,6 +535,27 @@ the pipeline is green before infra exists. Infra deploy is manual
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
+- **A stop ends when the car MOVES or the driver says so — never because a fix
+  stopped matching** (`live.advance`, `LEFT_CHARGER_M`). `parked` was decided
+  from what `nearest_charger` matched on the CURRENT ping, so a fix drifting
+  past its 250 m radius closed the stop under a car that had not moved a metre.
+  That is an ordinary thing for a fix to do at a services — a stationary phone
+  between buildings drifts, and the offset is clamped forward so the drift only
+  ever accumulates — and it is close to guaranteed after a HAND-DECLARED
+  arrival, where the driver pressed "I'm plugged in here now" precisely because
+  the phone did not know where it was. The next automatic ping then quietly
+  overruled them: the stop card vanished mid-charge, the session was banked,
+  and the screen went back to counting down to the next charger. Reported from
+  the road while plugged in. Three parts to the rule. A held arrival SURVIVES a
+  ping that matches nothing, and a fresh match still wins when there is one,
+  because moving from one plug to another is real and the position is what
+  knows. Going off-route no longer revokes it either — a phone carried into the
+  services is a fact about the fix, not about the car. And the distance that
+  counts as "left" is wider than the one that counts as "arrived"
+  (`LEFT_CHARGER_M` vs `AT_CHARGER_M`), because spotting an arrival and ending
+  a stop are not the same risk: a car that is charging is not moving, so the
+  evidence for having left should be unambiguous, and at any real speed one
+  ping still covers several hundred metres.
 - **A charging car's phone is in a pocket, so the charge runs on the CLOCK**
   (`live.charging_soc`, `live.bank_charge`, `ChargingOut`). Charging used to be
   integrated per ping, over the window each fix reported — which works only
