@@ -232,6 +232,45 @@ class ReplanRequest(BaseModel):
     speed_span_kph: float = Field(default=20.0, ge=0.0, le=60.0)
     speed_step: float = Field(default=5.0, ge=1.0, le=20.0)
     full_range: bool = False
+    # Chargers this driver has turned down. Merged into the set already on the
+    # run and kept there, or the next re-plan would hand back the stop they
+    # just rejected. Bounded because it is caller-supplied and persisted.
+    exclude_charger_ids: list[str] = Field(default_factory=list, max_length=40)
+
+
+class AlternativeOut(BaseModel):
+    """One other charger the drive could stop at instead, and what it costs.
+
+    `delta_min` is against the REMAINING journey, not the leg: swapping a
+    charger changes where every later stop falls, and "+6 min to the
+    destination" is the only version of that number worth acting on.
+    """
+
+    charger_id: str
+    name: str
+    operator: Optional[str] = None
+    power_kw: float
+    lat: float
+    lon: float
+    # On the whole route's axis, like every other stop the frontend draws.
+    offset_m: float
+    dist_from_here_m: float
+    arrive_soc: float
+    depart_soc: float
+    charge_min: float
+    delta_min: float
+    # What to send to `replan` to make this one the next stop. The server
+    # computed the alternative by turning these down, so the client does not
+    # have to reason about the ranking to act on it.
+    exclude_charger_ids: list[str] = []
+
+
+class AlternativesOut(BaseModel):
+    speed_kph: float
+    #: The stop currently planned, as the thing the alternatives are priced
+    #: against. Null when the plan has no stops left to swap.
+    current: Optional[AlternativeOut] = None
+    alternatives: list[AlternativeOut] = []
 
 
 class LiveStateOut(BaseModel):

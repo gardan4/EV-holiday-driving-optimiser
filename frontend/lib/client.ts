@@ -337,6 +337,32 @@ export interface RevisedPlan {
   benchmark: Benchmark
 }
 
+export interface Alternative {
+  charger_id: string
+  name: string
+  operator: string | null
+  power_kw: number
+  lat: number
+  lon: number
+  /** On the whole route's axis, like every other stop. */
+  offset_m: number
+  dist_from_here_m: number
+  arrive_soc: number
+  depart_soc: number
+  charge_min: number
+  /** Extra minutes to the DESTINATION, not to this stop — swapping a charger
+   *  moves everything after it. Zero for the stop currently planned. */
+  delta_min: number
+  /** Send these to `replanRun` to make this one the next stop. */
+  exclude_charger_ids: string[]
+}
+
+export interface Alternatives {
+  speed_kph: number
+  current: Alternative | null
+  alternatives: Alternative[]
+}
+
 export interface StartRunResult {
   run_id: string
   run_ref: string
@@ -445,9 +471,28 @@ export async function recordSoc(runId: string, soc: number): Promise<LiveState> 
   )
 }
 
-export async function replanRun(runId: string): Promise<RevisedPlan> {
+/** Re-optimise the rest of the drive.
+ *
+ *  `excludeChargerIds` are stops the driver has turned down; the server merges
+ *  them into the set it already holds for this run and keeps them, so a
+ *  rejection survives every later re-plan rather than lasting one request. */
+export async function replanRun(
+  runId: string,
+  excludeChargerIds: string[] = []
+): Promise<RevisedPlan> {
   return unwrap<RevisedPlan>(
-    await apiFetch(`/api/runs/${runId}/replan`, { method: "POST", body: "{}" })
+    await apiFetch(`/api/runs/${runId}/replan`, {
+      method: "POST",
+      body: JSON.stringify({ exclude_charger_ids: excludeChargerIds }),
+    })
+  )
+}
+
+/** Other chargers the drive could stop at instead of the next one. Read-only:
+ *  taking one means calling `replanRun` with its `exclude_charger_ids`. */
+export async function getAlternatives(runId: string): Promise<Alternatives> {
+  return unwrap<Alternatives>(
+    await apiFetch(`/api/runs/${runId}/alternatives`, { method: "POST" })
   )
 }
 

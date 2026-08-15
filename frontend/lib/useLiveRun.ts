@@ -14,10 +14,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  Alternatives,
   LiveRun,
   LiveState,
   RevisedPlan,
   finishRun,
+  getAlternatives,
   getLiveRun,
   pingRun,
   recordSoc,
@@ -94,7 +96,10 @@ export interface LiveHandle {
   /** Returns the state the reading produced, so the caller can react to what
    *  the correction revealed rather than to what it was before. */
   submitSoc: (soc: number) => Promise<LiveState | null>
-  requestReplan: () => Promise<RevisedPlan | null>
+  /** `exclude` are chargers the driver has turned down; the server keeps them. */
+  requestReplan: (exclude?: string[]) => Promise<RevisedPlan | null>
+  /** Other chargers for the next stop. Read-only — taking one is a re-plan. */
+  findAlternatives: () => Promise<Alternatives | null>
   end: () => Promise<void>
 }
 
@@ -285,13 +290,26 @@ export function useLiveRun(
     [runId]
   )
 
-  const requestReplan = useCallback(async () => {
+  const requestReplan = useCallback(
+    async (exclude: string[] = []) => {
+      if (!runId) return null
+      setBusy(true)
+      try {
+        const plan = await replanRun(runId, exclude)
+        setRun((r) => (r ? { ...r, plan } : r))
+        return plan
+      } finally {
+        setBusy(false)
+      }
+    },
+    [runId]
+  )
+
+  const findAlternatives = useCallback(async () => {
     if (!runId) return null
     setBusy(true)
     try {
-      const plan = await replanRun(runId)
-      setRun((r) => (r ? { ...r, plan } : r))
-      return plan
+      return await getAlternatives(runId)
     } finally {
       setBusy(false)
     }
@@ -334,6 +352,7 @@ export function useLiveRun(
     toggleSharing,
     submitSoc,
     requestReplan,
+    findAlternatives,
     end,
   }
 }

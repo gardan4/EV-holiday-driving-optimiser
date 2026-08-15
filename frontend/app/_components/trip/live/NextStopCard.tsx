@@ -23,7 +23,7 @@
  *   reader ends up trusting neither.
  */
 
-import { BatteryCharging, Flag, Navigation } from "lucide-react"
+import { BatteryCharging, Flag, Navigation, Search } from "lucide-react"
 import { Stop, Vehicle } from "@/lib/client"
 import { fmtDuration, fmtKm, mapsLink } from "@/lib/format"
 
@@ -39,6 +39,7 @@ export default function NextStopCard({
   vehicle,
   socVsPlan,
   revised,
+  onFindAlternatives,
 }: {
   /** The stop this card is about: the one under the car when plugged in,
    *  otherwise the next one ahead. Null when there are none left. */
@@ -54,6 +55,10 @@ export default function NextStopCard({
   socVsPlan: number
   /** Whether these figures come from a revised plan rather than the original. */
   revised: boolean
+  /** Driver only: look for somewhere else to stop. Absent for watchers, and
+   *  once the car is standing at the charger — at that point the question is
+   *  settled by the cable. */
+  onFindAlternatives?: () => void
 }) {
   if (!stop) {
     return (
@@ -149,6 +154,19 @@ export default function NextStopCard({
             {Math.round(stop.depart_soc)}%
           </span>
         </div>
+
+        {/* The stop is a decision, not just a number. Right under the figures
+            that make it look settled, because "how long am I here" and "do I
+            want to be here" are the same thought. */}
+        {!here && onFindAlternatives && (
+          <button
+            onClick={onFindAlternatives}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+          >
+            <Search className="h-3.5 w-3.5" />
+            Somewhere else?
+          </button>
+        )}
 
         <p className="mt-2 text-xs leading-relaxed text-ink-500">
           The plan {here ? "had" : "has"} you arriving on{" "}

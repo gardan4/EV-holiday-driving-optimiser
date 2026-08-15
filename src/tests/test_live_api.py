@@ -642,6 +642,96 @@ class TestReplanning:
         assert live["plan"]["plan_version"] == 1
 
 
+class TestTurningDownAStop:
+    """The planner optimises minutes; a stop can be bad for reasons minutes
+    cannot see — nowhere to eat, nowhere to sit, not at nine in the evening.
+    So the driver can turn one down, and what comes back has to be a real plan
+    rather than the same one re-ordered."""
+
+    async def test_it_offers_other_chargers_priced_against_the_current_one(
+        self, client
+    ):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+
+        assert out["current"] is not None
+        assert out["current"]["delta_min"] == 0.0
+        assert out["alternatives"], "expected at least one other charger"
+        ids = {a["charger_id"] for a in out["alternatives"]}
+        assert out["current"]["charger_id"] not in ids
+        assert len(ids) == len(out["alternatives"])
+        for a in out["alternatives"]:
+            # Priced against the whole remaining journey, and the current stop
+            # is the optimum, so nothing can be quicker than it.
+            assert a["delta_min"] >= 0
+            # What to send to `replan` to take this one: everything ranked
+            # above it, including the stop being replaced.
+            assert out["current"]["charger_id"] in a["exclude_charger_ids"]
+
+    async def test_taking_an_alternative_re_plans_around_it(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        alts = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        rejected = alts["current"]["charger_id"]
+        chosen = alts["alternatives"][0]
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={"exclude_charger_ids": chosen["exclude_charger_ids"]},
+        )
+        assert resp.status_code == 200, resp.text
+        stops = resp.json()["remaining"]["stops"]
+        assert stops[0]["charger_id"] == chosen["charger_id"]
+        assert all(s["charger_id"] != rejected for s in stops)
+
+    async def test_a_rejection_outlives_the_re_plan_that_made_it(self, client):
+        """A charger turned down stays turned down.
+
+        `run.state` is a plain JSON column, so this is really a test that the
+        exclusion was ASSIGNED rather than mutated in place — mutated, it is
+        dropped at commit, and the standing "Re-plan" button hands back the
+        stop the driver just walked away from.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        alts = (
+            await client.post(f"/api/runs/{run['run_id']}/alternatives")
+        ).json()
+        rejected = alts["current"]["charger_id"]
+
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={"exclude_charger_ids": [rejected]},
+        )
+        # A later re-plan asking for nothing in particular.
+        again = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert again.status_code == 200, again.text
+        assert all(
+            s["charger_id"] != rejected for s in again.json()["remaining"]["stops"]
+        )
+        # …and the alternatives no longer offer it either.
+        after = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+        assert after["current"]["charger_id"] != rejected
+        assert all(a["charger_id"] != rejected for a in after["alternatives"])
+
+    async def test_a_watcher_cannot_ask_for_alternatives(self, client):
+        """It is a write-token route like every other run endpoint: the trip id
+        reads the drive, it does not steer it."""
+        trip = await make_trip(client)
+        await start_run(client, trip)
+        resp = await client.post(f"/api/runs/{trip['id']}/alternatives")
+        assert resp.status_code == 404
+
+
 class TestPlanParity:
     """A drive must be simulated under the assumptions its plan was made with.
 

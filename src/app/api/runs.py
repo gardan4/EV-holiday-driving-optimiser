@@ -28,6 +28,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import (
+    AlternativeOut,
+    AlternativesOut,
     BenchmarkOut,
     LiveOut,
     LiveStateOut,
@@ -226,6 +228,43 @@ def _benchmark_timeline(run: TripRun, trip: Trip) -> list[tuple[float, float, fl
             ]
     speed = _planned_result(trip, run.planned_speed_kph)
     return _timeline_tuples(speed) if speed else []
+
+
+# How many other chargers to offer when the driver turns one down. Each one
+# costs a full DP over the remaining route, and a list this long is already
+# more than anybody reads at the wheel.
+MAX_ALTERNATIVES = 3
+
+
+def _excluded(st: dict) -> list[str]:
+    """Chargers this drive has turned down.
+
+    Carried in `run.state` rather than a column of its own: it is JSON,
+    `live.advance` and `live.apply_reading` both rebuild the state with
+    `dict(state)` so unknown keys survive every ping, and a preference this
+    small is not worth a migration on a table with live drives in it.
+    """
+    return [str(c) for c in (st.get("excluded_charger_ids") or [])]
+
+
+def _merge_exclusions(run: TripRun, incoming: list[str]) -> set[str]:
+    """The rejections in force, recorded on the run so they outlive the call.
+
+    `run.state` is a plain `JSON` column, so the assignment is the whole point:
+    an in-place `st[...] = ...` is invisible to SQLAlchemy and would be thrown
+    away on commit — the rejection would appear to work and be forgotten by
+    the next re-plan (see the note at the top of `models/__init__.py`).
+    """
+    merged = set(_excluded(run.state)) | {str(c) for c in incoming}
+    run.state = {**run.state, "excluded_charger_ids": sorted(merged)}
+    return merged
+
+
+def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
+    chargers = [
+        c for c in live.snapshot_chargers(snapshot) if c.charger_id not in exclude
+    ]
+    return slice_route(live.snapshot_segments(snapshot), chargers, offset_m)
 
 
 def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
@@ -578,11 +617,12 @@ async def replan(
     veh = VehicleParams.from_vehicle(vehicle)
     soc_now = live.current_soc(st, vehicle.usable_kwh)
 
-    sl = slice_route(
-        live.snapshot_segments(snapshot),
-        live.snapshot_chargers(snapshot),
-        st["offset_m"],
-    )
+    # Chargers this driver has turned down stay turned down. Merged and kept
+    # on the run, because a rejection that lasts until the next re-plan is not
+    # a rejection — the standing "Re-plan" button would hand back the stop they
+    # walked away from.
+    excluded = _merge_exclusions(run, body.exclude_charger_ids)
+    sl = _remaining_slice(snapshot, st["offset_m"], excluded)
     if not sl.segments:
         raise HTTPException(status_code=409, detail="You're already there.")
 
@@ -668,6 +708,109 @@ async def replan(
     )
     await db.commit()
     return out
+
+
+@router.post("/runs/{run_id}/alternatives", response_model=AlternativesOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_REPLAN, key_func=run_key)
+async def alternatives(
+    request: Request, run_id: str, db: AsyncSession = Depends(get_db)
+) -> AlternativesOut:
+    """Other chargers the drive could stop at instead of the next one.
+
+    The planner optimises minutes, and minutes are not the only reason a stop
+    is a bad stop: the fastest charger on the corridor can be a lay-by behind a
+    warehouse with nowhere to eat, at eight in the evening, with children in
+    the car. None of that is in OpenChargeMap and none of it is inferable, so
+    this does not try to judge — it hands back the next few candidates with the
+    only thing the model CAN say about them, which is what choosing each one
+    costs in arrival time.
+
+    Ranked by successive exclusion rather than by proximity: turn the current
+    stop down and re-run the DP, and what comes back is genuinely the next best
+    plan, with every later stop re-optimised around the swap. That is why
+    `delta_min` is against the remaining JOURNEY and not the leg — swapping a
+    charger moves everything after it, and a cost quoted per-leg would be
+    wrong in the direction that flatters the swap.
+
+    Read-only: nothing here changes the plan. `exclude_charger_ids` on each
+    alternative is what to send to `replan` to actually take it.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    st = run.state
+    if st.get("stale"):
+        raise HTTPException(
+            status_code=409,
+            detail="You're off the planned route. Rejoin it before swapping a stop.",
+        )
+
+    snapshot = run.route_snapshot
+    plan_req = PlanRequest.model_validate(trip.request)
+    veh = VehicleParams.from_vehicle(vehicle)
+    soc_now = live.current_soc(st, vehicle.usable_kwh)
+    base = _sim_params(plan_req, st.get("run_factor", 1.0))
+    params = SimParams(
+        **{
+            **{f: getattr(base, f) for f in base.__dataclass_fields__},
+            "depart_soc": soc_now,
+            "prior_drive_min": st["at_min"],
+            "prior_rest_credit_min": st.get("rest_credit_min", 0.0),
+        }
+    )
+
+    # One speed, not a sweep: this question is "which charger", and re-opening
+    # "how fast" alongside it would price each candidate against a different
+    # cruise. The speed in force is the revision's if there is one.
+    speed = float((run.plan or {}).get("optimum_speed") or run.planned_speed_kph)
+    speed = min(speed, veh.top_speed_kph)
+
+    already = set(_excluded(st))
+    turned_down: list[str] = []
+    baseline_min: float | None = None
+    current: AlternativeOut | None = None
+    found: list[AlternativeOut] = []
+
+    for _ in range(MAX_ALTERNATIVES + 1):
+        sl = _remaining_slice(snapshot, st["offset_m"], already | set(turned_down))
+        if not sl.segments:
+            break
+        results = await asyncio.to_thread(sweep_slice, sl, veh, [speed], params)
+        best = optimum(results)
+        if best is None or not best.stops:
+            break
+        stop = best.stops[0]
+        alt = AlternativeOut(
+            charger_id=stop.charger_id,
+            name=stop.name,
+            operator=stop.operator,
+            power_kw=stop.power_kw,
+            lat=round(stop.lat, 5),
+            lon=round(stop.lon, 5),
+            offset_m=round(stop.offset_m + st["offset_m"]),
+            dist_from_here_m=round(stop.offset_m),
+            arrive_soc=round(stop.arrive_soc, 1),
+            depart_soc=round(stop.depart_soc, 1),
+            charge_min=round(stop.charge_min, 1),
+            delta_min=(
+                0.0
+                if baseline_min is None
+                else round((best.total_min or 0.0) - baseline_min, 1)
+            ),
+            exclude_charger_ids=list(turned_down),
+        )
+        if baseline_min is None:
+            baseline_min = best.total_min or 0.0
+            current = alt
+        else:
+            found.append(alt)
+        turned_down.append(stop.charger_id)
+
+    return AlternativesOut(
+        speed_kph=speed, current=current, alternatives=found
+    )
 
 
 @router.post("/runs/{run_id}/finish", response_model=LiveStateOut)

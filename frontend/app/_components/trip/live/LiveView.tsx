@@ -21,13 +21,14 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
-import { LiveRun, Stop, Trip } from "@/lib/client"
+import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
 import { remainingRouteLegs } from "@/lib/maps"
 import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
 import JourneyHero, { LiveHeroState } from "../JourneyHero"
 import MapsRouteButton from "../MapsRouteButton"
+import AlternativeStops from "./AlternativeStops"
 import BatteryCheck from "./BatteryCheck"
 import NextStopCard from "./NextStopCard"
 
@@ -97,6 +98,10 @@ export default function LiveView({
   // view, or the tap looks like it did nothing.
   const batteryRef = useRef<HTMLDivElement>(null)
   const [socPrompt, setSocPrompt] = useState(0)
+  // Alternatives to the next stop, once the driver has asked for them. Held
+  // here rather than fetched on render: it is several DP runs on the server,
+  // so it happens when somebody wants it and not on every poll.
+  const [alts, setAlts] = useState<Alternatives | null>(null)
   const askForBattery = useCallback(() => {
     setSocPrompt((n) => n + 1)
     batteryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -135,6 +140,35 @@ export default function LiveView({
         </Link>
       </div>
     )
+  }
+
+  /** Look for another charger for the next stop. Read-only — the plan does not
+   *  move until the driver picks one. */
+  async function loadAlternatives() {
+    try {
+      const found = await live.findAlternatives()
+      if (found) setAlts(found)
+      if (found && found.alternatives.length === 0) {
+        toast.message("Nothing else on this stretch reaches the destination.")
+      }
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not look for alternatives"
+      )
+    }
+  }
+
+  /** Take one. The exclusions the server handed back are what make this
+   *  charger the next stop, and it keeps them, so the one turned down does not
+   *  come back on the next re-plan. */
+  async function takeAlternative(alt: Alternative) {
+    try {
+      await live.requestReplan(alt.exclude_charger_ids)
+      setAlts(null)
+      toast.success(`Stopping at ${alt.name} instead.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not swap the stop")
+    }
   }
 
   async function doReplan() {
@@ -233,6 +267,18 @@ export default function LiveView({
             vehicle={trip.result.vehicle}
             socVsPlan={state.soc_vs_plan}
             revised={revised != null}
+            onFindAlternatives={
+              isDriver ? () => void loadAlternatives() : undefined
+            }
+          />
+        )}
+
+        {alts && (
+          <AlternativeStops
+            data={alts}
+            busy={live.busy}
+            onTake={(alt) => void takeAlternative(alt)}
+            onClose={() => setAlts(null)}
           />
         )}
 

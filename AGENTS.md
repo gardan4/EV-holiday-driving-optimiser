@@ -58,7 +58,8 @@ Stack: **FastAPI** (async SQLAlchemy on Azure SQL / MSSQL) + **Next.js 16**
   expiry mid-drive cannot change the road being benchmarked against.
   `POST /runs/{id}/replan` re-sweeps the remaining slice; the ping path stays
   deliberately cheap (one route profile, two lerps) so it can sit on the event
-  loop.
+  loop. `POST /runs/{id}/alternatives` answers "not this one" — see the design
+  decision below.
 - **Usage counting** `src/app/api/events.py` + `src/app/core/visitor.py` +
   `src/app/services/usage.py` — first-party, no third-party script, no CSP
   change. `POST /api/events` takes an allowlisted event name; the read side is
@@ -330,6 +331,25 @@ the pipeline is green before infra exists. Infra deploy is manual
   `PlanRequest` is classified as reaching the simulator directly, reaching it
   transformed, or not being a simulator setting — because that decision being
   implicit is what the bug was.
+- **A stop can be wrong for reasons the model cannot see, so the driver can
+  turn one down** (`runs.alternatives`). The DP optimises minutes, and the
+  quickest charger on a corridor is regularly a lay-by behind a warehouse with
+  nowhere to eat — which matters at nine in the evening with a car full of
+  people, and is not in OpenChargeMap. So the app does not try to judge
+  amenities it has no data for: it hands back the next few candidates with the
+  one thing it CAN say, the cost in arrival time, says out loud that it does
+  not know what is there, and links each to Maps so a human can look. Three
+  properties hold it up. **Ranked by successive exclusion, not by proximity** —
+  turn the current stop down, re-run the DP, and what comes back is the real
+  next-best plan with every later stop re-optimised around the swap; a nearest
+  neighbours list would offer chargers no plan can use. **`delta_min` is
+  against the remaining JOURNEY, not the leg**, because swapping a charger
+  moves everything after it and a per-leg number flatters the swap. **A
+  rejection persists** on `run.state["excluded_charger_ids"]` — a rejection
+  that lasts one request is not a rejection, since the standing "Re-plan"
+  button would hand back the stop the driver walked away from. That state is a
+  plain `JSON` column, so it is ASSIGNED and never mutated in place; the test
+  that re-plans twice is really a test of that assignment.
 - **The phone drives the plan the reader chose, not the optimum.** "Drive this"
   hands `/trip/[id]/drive?speed=` to the phone, appended only when the
   selection is not `optimum_speed` so ordinary links and the QR for an
