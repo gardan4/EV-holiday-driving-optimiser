@@ -379,7 +379,18 @@ the pipeline is green before infra exists. Infra deploy is manual
   next-best plan with every later stop re-optimised around the swap; a nearest
   neighbours list would offer chargers no plan can use. **`delta_min` is
   against the remaining JOURNEY, not the leg**, because swapping a charger
-  moves everything after it and a per-leg number flatters the swap. **A
+  moves everything after it and a per-leg number flatters the swap. **And the
+  panel is a SNAPSHOT of a moving car, so what it can render live and what it
+  cannot must be told apart.** `dist_from_here_m` is measured from the DP
+  slice, which starts wherever the car stood when the server answered, and the
+  panel does not close itself: left open on a long leg it said a charger was
+  "in 136 km" directly under a stop card saying 261 km, about the same charger,
+  on the same screen. Distances therefore render from `offset_m` (the whole
+  route's axis) against the live position, exactly as `PlanAhead` does, and
+  cannot drift again. The arrival percentages and the minute costs cannot be
+  re-derived in the browser, so past `STALE_AFTER_M` the panel says how far
+  back they come from and offers "Redo from here". A re-plan closes it
+  outright — those were options against a plan that no longer exists. **A
   rejection persists** on `run.state["excluded_charger_ids"]` — a rejection
   that lasts one request is not a rejection, since the standing "Re-plan"
   button would hand back the stop the driver walked away from. That state is a

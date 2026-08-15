@@ -37,6 +37,7 @@ import {
   Info,
   Loader2,
   MapPin,
+  RefreshCw,
   UtensilsCrossed,
   X,
 } from "lucide-react"
@@ -48,18 +49,42 @@ import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
  *  ever becomes so, this has to come down the wire with the alternatives. */
 const RESERVE_PCT = 10
 
+/** How far the car can move before the arrival percentages and the minute
+ *  costs in this panel are describing a different journey. Distances re-render
+ *  from the live position and never go stale; these cannot, because they came
+ *  out of a DP run from where the car was standing when it was asked. */
+const STALE_AFTER_M = 5_000
+
 export default function AlternativeStops({
   data,
+  distM,
+  fetchedAtM,
   busy,
   onTake,
+  onRefresh,
   onClose,
 }: {
   data: Alternatives
+  /** How far the car has come, NOW. Distances are rendered against this rather
+   *  than against `dist_from_here_m`, which was measured from wherever the car
+   *  stood when the panel was fetched — a panel left open for an hour said a
+   *  charger was 136 km ahead while the stop card above it said 261 km, about
+   *  the same charger, on the same screen. */
+  distM: number
+  /** `distM` at the moment this answer was fetched. */
+  fetchedAtM: number
   busy: boolean
   onTake: (alt: Alternative) => void
+  /** Ask the server again, for the same stop, from where the car is now. */
+  onRefresh?: () => void
   onClose: () => void
 }) {
   const [taking, setTaking] = useState<string | null>(null)
+  // How far the car has come since this answer was computed. The distances
+  // below re-render against the live position, so they stay honest; the arrival
+  // percentages and the minute costs cannot, because they came out of a DP run
+  // from a standing start back there.
+  const moved = Math.max(distM - fetchedAtM, 0)
   // Whether the food question got an answer at all. On a German motorway the
   // fast chargers are called "Tesla Supercharger Geiselwind" and "IONITY
   // Holzkirchen Süd" — network plus place — so the reading comes back empty for
@@ -82,6 +107,28 @@ export default function AlternativeStops({
           <p className="mt-0.5 text-xs text-ink-500">
             Cost is to your arrival, at {Math.round(data.speed_kph)} km/h.
           </p>
+          {moved >= STALE_AFTER_M && (
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-amber-800">
+              <span>
+                Worked out {fmtKm(moved)} back — the percentages and minutes are
+                from there.
+              </span>
+              {onRefresh && (
+                <button
+                  onClick={onRefresh}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-lg border border-amber-300 px-2 py-1 font-semibold text-amber-900 disabled:opacity-50"
+                >
+                  {busy ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3" />
+                  )}
+                  Redo from here
+                </button>
+              )}
+            </p>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -97,7 +144,7 @@ export default function AlternativeStops({
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
             Planned now
           </div>
-          <Row alt={data.current} />
+          <Row alt={data.current} distM={distM} />
         </div>
       )}
 
@@ -113,7 +160,7 @@ export default function AlternativeStops({
               key={alt.charger_id}
               className="rounded-xl border border-ink-100 p-2.5"
             >
-              <Row alt={alt} />
+              <Row alt={alt} distM={distM} />
               {alt.below_reserve && (
                 <p className="mt-1 text-[11px] font-medium text-amber-800">
                   Under the {RESERVE_PCT}% reserve — the planner won&apos;t
@@ -206,7 +253,7 @@ export default function AlternativeStops({
  *  for the leg being driven, and going further before stopping is exactly what
  *  that buys — so "4 min sooner, arriving on 6%" is a real row, and rendering
  *  it as "same" would hide half of the trade. */
-function Row({ alt }: { alt: Alternative }) {
+function Row({ alt, distM }: { alt: Alternative; distM: number }) {
   const later = alt.delta_min >= 0.5
   const sooner = alt.delta_min <= -0.5
   return (
@@ -219,7 +266,10 @@ function Row({ alt }: { alt: Alternative }) {
           {alt.operator && <span>{alt.operator} · </span>}
           {Math.round(alt.power_kw)} kW
           {fmtBays(alt.n_points) && <span> · {fmtBays(alt.n_points)}</span>} · in{" "}
-          {fmtKm(alt.dist_from_here_m)}
+          {/* From where the car is NOW, on the same axis as the stop card and
+              the plan list — never `dist_from_here_m`, which is frozen at the
+              moment of the fetch. */}
+          {fmtKm(Math.max(alt.offset_m - distM, 0))}
         </div>
         {alt.food_hint && (
           <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">

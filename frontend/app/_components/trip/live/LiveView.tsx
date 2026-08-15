@@ -127,6 +127,14 @@ export default function LiveView({
   // here rather than fetched on render: it is several DP runs on the server,
   // so it happens when somebody wants it and not on every poll.
   const [alts, setAlts] = useState<Alternatives | null>(null)
+  // Which stop the open panel is about, and how far the car had come when the
+  // server answered. Both are needed because the answer is a SNAPSHOT: the
+  // charger id so "Redo from here" asks the same question again, the distance
+  // so the panel can say how far back its percentages come from. Without them
+  // a panel left open kept reporting distances measured an hour ago — "in
+  // 136 km" under a stop card saying 261 km, about the same charger.
+  const [altsFor, setAltsFor] = useState<string | undefined>(undefined)
+  const [altsAtM, setAltsAtM] = useState(0)
   // Which stop is being looked up, so the button that was pressed can say so.
   // The ref is the guard and the state is the pixels: two taps inside one
   // render both read the same stale state, and it is precisely the second tap
@@ -188,7 +196,11 @@ export default function LiveView({
     setPendingAltFor(altsPending.current)
     try {
       const found = await live.findAlternatives(rejectChargerId)
-      if (found) setAlts(found)
+      if (found) {
+        setAlts(found)
+        setAltsFor(rejectChargerId)
+        setAltsAtM(distM)
+      }
       if (found && found.alternatives.length === 0) {
         toast.message("Nothing else on this stretch reaches the destination.")
       }
@@ -229,6 +241,8 @@ export default function LiveView({
   async function holdSpeed(speedKph: number | null) {
     try {
       const plan = await live.requestReplan([], null, speedKph)
+      // The panel is an alternative to a plan that no longer exists.
+      if (plan) setAlts(null)
       if (plan) {
         toast.success(
           speedKph == null
@@ -286,6 +300,8 @@ export default function LiveView({
   async function doReplan() {
     try {
       const plan = await live.requestReplan()
+      // Same as above: whatever was on offer was on offer against the old plan.
+      if (plan) setAlts(null)
       if (plan) {
         toast.success(
           plan.benchmark.delta_min > 1
@@ -447,8 +463,13 @@ export default function LiveView({
         {alts && (
           <AlternativeStops
             data={alts}
+            distM={distM}
+            fetchedAtM={altsAtM}
             busy={live.busy}
             onTake={(alt) => void takeAlternative(alt)}
+            onRefresh={
+              isDriver ? () => void loadAlternatives(altsFor) : undefined
+            }
             onClose={() => setAlts(null)}
           />
         )}
