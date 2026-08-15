@@ -95,6 +95,28 @@ export default function LiveView({
   )
   const nextStop = useMemo(() => heroStop(ahead[0] ?? null, distM), [ahead, distM])
 
+  // What the card can page through: the stop under the car first, when there
+  // is one, then everything still in front. `ahead` drops the charger you are
+  // plugged INTO — right for navigation, and wrong for the twenty minutes you
+  // spend standing at it wondering how much longer.
+  const focusable = useMemo(
+    () => (atStop ? [atStop, ...ahead] : ahead),
+    [atStop, ahead]
+  )
+  // Held as a charger id rather than an index: the list shortens as the car
+  // passes stops, and an index would silently start pointing at a different
+  // charger every time it did.
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const focusIdx = Math.max(
+    0,
+    focusable.findIndex((s) => s.charger_id === focusId)
+  )
+  const focused = focusable[focusIdx] ?? null
+  function stepFocus(delta: 1 | -1) {
+    const next = focusable[Math.min(Math.max(focusIdx + delta, 0), focusable.length - 1)]
+    if (next) setFocusId(next.charger_id)
+  }
+
   // Correcting the battery from the HUD. The scene is full-bleed, so on a phone
   // the check itself is below the fold — asking for it has to bring it into
   // view, or the tap looks like it did nothing.
@@ -296,15 +318,21 @@ export default function LiveView({
             leave on — were only ever on the results page. */}
         {!finished && (
           <NextStopCard
-            stop={atStop ?? ahead[0] ?? null}
-            here={atStop != null}
+            stop={focused}
+            here={focused != null && focused.charger_id === atChargerId}
             distM={distM}
             destLabel={trip.request.dest.label.split(",")[0]}
             vehicle={trip.result.vehicle}
             socVsPlan={state.soc_vs_plan}
             revised={revised != null}
+            liveSoc={state.soc}
+            index={focusIdx}
+            total={focusable.length}
+            onStep={stepFocus}
             onFindAlternatives={
-              isDriver ? () => void loadAlternatives() : undefined
+              isDriver && focused
+                ? () => void loadAlternatives(focused.charger_id)
+                : undefined
             }
           />
         )}
@@ -314,8 +342,11 @@ export default function LiveView({
             about it has been made for you. */}
         {!finished && (
           <PlanAhead
-            stops={ahead}
+            stops={focusable}
             distM={distM}
+            atChargerId={atChargerId}
+            focusedId={focused?.charger_id ?? null}
+            onFocus={setFocusId}
             destLabel={trip.request.dest.label.split(",")[0]}
             destArrivalClock={clockAt(run.started_at, etaMin)}
             onSwap={

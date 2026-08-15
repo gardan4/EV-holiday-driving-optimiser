@@ -32,13 +32,22 @@ import { fmtBays, fmtKm } from "@/lib/format"
 export default function PlanAhead({
   stops,
   distM,
+  atChargerId = null,
+  focusedId = null,
+  onFocus,
   destLabel,
   destArrivalClock,
   onSwap,
 }: {
-  /** Stops still ahead of the car, on whichever plan is in force. */
+  /** The stop under the car, if any, then everything still ahead. */
   stops: Stop[]
   distM: number
+  /** The charger the car is plugged into. Marked, and never "in 0 km". */
+  atChargerId?: string | null
+  /** The one the card above is showing. */
+  focusedId?: string | null
+  /** Tap a row to bring it into the card. */
+  onFocus?: (chargerId: string) => void
   destLabel: string
   /** Clock time at the destination, on the plan in force. */
   destArrivalClock: string
@@ -59,18 +68,40 @@ export default function PlanAhead({
       </div>
 
       <ol className="mt-2 space-y-1.5">
-        {stops.map((s) => (
+        {stops.map((s) => {
+          const atThis = s.charger_id === atChargerId
+          const focused = s.charger_id === focusedId
+          return (
           <li
             key={s.charger_id}
-            className="flex items-start gap-2.5 rounded-xl border border-ink-100 p-2.5"
+            className={`flex items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${
+              focused
+                ? "border-brand-300 bg-brand-50/50"
+                : "border-ink-100"
+            }`}
           >
-            <BatteryCharging className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
-            <div className="min-w-0 flex-1">
+            <BatteryCharging
+              className={`mt-0.5 h-4 w-4 shrink-0 ${
+                atThis ? "text-brand-700" : "text-brand-600"
+              }`}
+            />
+            {/* The whole row focuses the card. A stop is a thing you look at
+                before it is a thing you act on. */}
+            <button
+              onClick={() => onFocus?.(s.charger_id)}
+              disabled={!onFocus}
+              className="min-w-0 flex-1 text-left disabled:cursor-default"
+            >
               <div className="truncate text-sm font-medium text-ink-900">
                 {s.name}
+                {atThis && (
+                  <span className="ml-1.5 rounded bg-brand-100 px-1 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-brand-800">
+                    charging
+                  </span>
+                )}
               </div>
               <div className="mt-0.5 text-[11px] text-ink-500">
-                in {fmtKm(Math.max(s.offset_m - distM, 0))} ·{" "}
+                {atThis ? "here now" : `in ${fmtKm(Math.max(s.offset_m - distM, 0))}`} ·{" "}
                 {Math.round(s.arrive_soc)}→{Math.round(s.depart_soc)}% ·{" "}
                 {Math.round(s.charge_min)} min
                 {fmtBays(s.n_points) && <> · {fmtBays(s.n_points)}</>}
@@ -81,7 +112,7 @@ export default function PlanAhead({
                   reads like {s.food_hint}
                 </div>
               )}
-            </div>
+            </button>
             {onSwap && (
               <button
                 onClick={() => onSwap(s.charger_id)}
@@ -92,7 +123,8 @@ export default function PlanAhead({
               </button>
             )}
           </li>
-        ))}
+          )
+        })}
 
         {/* The destination closes the list, so the tail reads as a journey
             rather than as a set of chargers that stops in mid-air. */}

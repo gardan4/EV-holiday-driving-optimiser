@@ -23,13 +23,47 @@
  *   reader ends up trusting neither.
  */
 
-import { BatteryCharging, Flag, Navigation, Search } from "lucide-react"
+import {
+  BatteryCharging,
+  ChevronLeft,
+  ChevronRight,
+  Flag,
+  Navigation,
+  Search,
+} from "lucide-react"
 import { Stop, Vehicle } from "@/lib/client"
 import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { chargeMinutes } from "@/lib/vehicles"
 
 /** Beyond this the plan's arrival percentage is worth a caveat. Matches the
  *  band the HUD already colours the battery readout at. */
 const DRIFT_BAND = 5
+
+/** Paging arrow. 36px, which is the floor for something pressed in a car. */
+function Step({
+  dir,
+  disabled,
+  onClick,
+}: {
+  dir: "prev" | "next"
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={dir === "prev" ? "Previous stop" : "Next stop"}
+      className="grid h-9 w-9 place-items-center rounded-lg border border-ink-200 text-ink-600 disabled:opacity-30"
+    >
+      {dir === "prev" ? (
+        <ChevronLeft className="h-4 w-4" />
+      ) : (
+        <ChevronRight className="h-4 w-4" />
+      )}
+    </button>
+  )
+}
 
 export default function NextStopCard({
   stop,
@@ -40,6 +74,10 @@ export default function NextStopCard({
   socVsPlan,
   revised,
   onFindAlternatives,
+  liveSoc = null,
+  index = 0,
+  total = 1,
+  onStep,
 }: {
   /** The stop this card is about: the one under the car when plugged in,
    *  otherwise the next one ahead. Null when there are none left. */
@@ -59,6 +97,14 @@ export default function NextStopCard({
    *  once the car is standing at the charger — at that point the question is
    *  settled by the cable. */
   onFindAlternatives?: () => void
+  /** The battery now. Only used while plugged in, to answer the one question
+   *  standing at a charger asks: how much longer. Null when unknown. */
+  liveSoc?: number | null
+  /** Which stop of the remaining plan this is, and how many there are, so the
+   *  card can be paged rather than being permanently about the next one. */
+  index?: number
+  total?: number
+  onStep?: (delta: 1 | -1) => void
 }) {
   if (!stop) {
     return (
@@ -86,6 +132,27 @@ export default function NextStopCard({
   const kwh = (added / 100) * vehicle.usable_kwh
   const drifting = Math.abs(socVsPlan) >= DRIFT_BAND
 
+  // How much longer at this plug, from the battery NOW.
+  //
+  // Estimated with the SITE's power, then scaled by whatever the plan's own
+  // charge time implies. That ratio is how the server's cold-weather charge
+  // factor gets in: it is not on the wire, but the plan's `charge_min` for a
+  // known SoC window is enough to recover it, and a "12 min left" that
+  // contradicts the plan it sits under is worse than no number.
+  let leftMin: number | null = null
+  if (here && liveSoc != null && liveSoc < stop.depart_soc) {
+    const raw = chargeMinutes(vehicle, liveSoc, stop.depart_soc, stop.power_kw)
+    const modelled = chargeMinutes(
+      vehicle,
+      stop.arrive_soc,
+      stop.depart_soc,
+      stop.power_kw
+    )
+    const scale =
+      modelled > 0.5 && stop.charge_min > 0 ? stop.charge_min / modelled : 1
+    leftMin = raw * (scale > 0.2 && scale < 5 ? scale : 1)
+  }
+
   return (
     <div className="mt-3 rounded-2xl border border-brand-200 bg-white p-3 sm:p-4">
       {/* The name gets the whole width. It used to share the row with the
@@ -98,8 +165,13 @@ export default function NextStopCard({
 
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">
-            {here ? "Charging here" : "Next stop"}
-            {revised && " · revised plan"}
+            {here ? "Charging here" : index === 0 ? "Next stop" : "Later stop"}
+            {total > 1 && (
+              <span className="font-mono text-ink-400"> · {index + 1}/{total}</span>
+            )}
+            {/* Which plan these figures are from. The revised panel says it
+                too, but this card is the one people actually read. */}
+            {revised && <span className="text-ink-400"> · revised</span>}
           </p>
           <h2 className="mt-0.5 font-display text-base font-semibold leading-tight text-ink-900">
             {stop.name}
@@ -111,6 +183,21 @@ export default function NextStopCard({
             {!here && <> · {fmtKm(toGo)} to go</>}
           </p>
         </div>
+
+        {onStep && total > 1 && (
+          <div className="flex shrink-0 items-center gap-1">
+            <Step
+              dir="prev"
+              disabled={index === 0}
+              onClick={() => onStep(-1)}
+            />
+            <Step
+              dir="next"
+              disabled={index >= total - 1}
+              onClick={() => onStep(1)}
+            />
+          </div>
+        )}
       </div>
 
       {/* The answer to "how much do I need to charge", as one line of numbers
@@ -121,8 +208,14 @@ export default function NextStopCard({
           <p className="font-display text-lg font-semibold text-ink-900">
             Charge to {Math.round(stop.depart_soc)}%
           </p>
+          {/* Standing at the plug, "23 min plugged in" is a fact about the
+              past. What is left is the only number worth the space, and it is
+              estimated from the battery NOW rather than from the plan's
+              prediction of what you arrived on. */}
           <p className="font-mono text-sm font-bold text-brand-700">
-            ~{fmtDuration(stop.charge_min)} plugged in
+            {here && leftMin != null
+              ? `~${fmtDuration(leftMin)} left`
+              : `~${fmtDuration(stop.charge_min)} plugged in`}
           </p>
         </div>
 
