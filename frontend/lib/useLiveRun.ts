@@ -18,6 +18,7 @@ import {
   LiveRun,
   LiveState,
   RevisedPlan,
+  ArriveResult,
   arriveAt,
   finishRun,
   getAlternatives,
@@ -108,9 +109,28 @@ export interface LiveHandle {
   /** Other chargers for a stop. Read-only — taking one is a re-plan.
    *  `rejectChargerId` names which stop; omit it for the next one. */
   findAlternatives: (rejectChargerId?: string) => Promise<Alternatives | null>
-  /** Tell the drive you are standing at this charger. */
-  markArrived: (chargerId: string) => Promise<LiveState | null>
+  /** Tell the drive you are standing at a charger. Uses the phone's position
+   *  when it can get one, falling back to `chargerId`. Returns what it
+   *  matched, so the caller can say which charger it decided on. */
+  markArrived: (chargerId: string | null) => Promise<ArriveResult | null>
   end: () => Promise<void>
+}
+
+/** One fix, quickly or not at all. A driver standing at a charger should not
+ *  watch a spinner while the phone hunts for satellites — the button has a
+ *  charger id to fall back on. */
+function currentPosition(): Promise<{ lat: number; lon: number }> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("no geolocation"))
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      reject,
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30_000 }
+    )
+  })
 }
 
 export function useLiveRun(
@@ -347,16 +367,21 @@ export function useLiveRun(
   )
 
   const markArrived = useCallback(
-    async (chargerId: string) => {
+    async (chargerId: string | null) => {
       if (!runId) return null
       setBusy(true)
       try {
-        const st = await arriveAt(runId, chargerId)
-        setState(st)
+        // A fresh fix, if the phone will give one within a few seconds. The
+        // page is in the foreground — the driver just pressed a button — so
+        // this usually succeeds even though the background watch has been
+        // asleep for the whole charge.
+        const here = await currentPosition().catch(() => null)
+        const res = await arriveAt(runId, chargerId, here)
+        setState(res.state)
         // The car has moved; the locally snapped offset is from before the
         // jump and would drag the scene back until the next fix.
         setLocalOffsetM(null)
-        return st
+        return res
       } finally {
         setBusy(false)
       }

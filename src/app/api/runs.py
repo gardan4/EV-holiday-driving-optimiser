@@ -32,6 +32,7 @@ from app.api.schemas import (
     AlternativeOut,
     AlternativesOut,
     AlternativesRequest,
+    ArriveOut,
     ArriveRequest,
     BenchmarkOut,
     LiveOut,
@@ -57,6 +58,7 @@ from app.models import Trip, TripEvent, TripRun, Vehicle
 from app.services import amenities
 from app.services import chargers as chargers_svc
 from app.services import live, routing
+from app.services.geo import haversine_m
 from app.services.simulator import (
     SimParams,
     VehicleParams,
@@ -251,6 +253,12 @@ MAX_STRETCH = 2
 # a car park and another lay-by — so "is there anywhere to EAT" can be a
 # question none of them answers. Bounded, because each step is another DP.
 MAX_FOOD_SEARCH = 5
+
+# How near a charger the phone has to be for "I'm plugged in here" to mean that
+# one. Generous: a services can be 400 m end to end, the fix is taken between
+# buildings, and the alternative to matching is telling somebody standing at a
+# charger that they are not at one.
+ARRIVE_MATCH_M = 1_500.0
 
 # The floor those are computed against. Not zero: a plan that arrives on
 # vapour is not an option, it is a breakdown with extra steps. Applied to the
@@ -638,14 +646,14 @@ async def ping(
     return _state_out(run, trip, vehicle.usable_kwh)
 
 
-@router.post("/runs/{run_id}/arrive", response_model=LiveStateOut)
+@router.post("/runs/{run_id}/arrive", response_model=ArriveOut)
 @limiter.limit(settings.RATE_LIMIT_LIVE_PING, key_func=run_key)
 async def arrive(
     request: Request,
     run_id: str,
     body: ArriveRequest,
     db: AsyncSession = Depends(get_db),
-) -> LiveStateOut:
+) -> ArriveOut:
     """The driver says which stop they are standing at.
 
     Position comes from GPS, and GPS comes from a page that is being looked
@@ -654,6 +662,16 @@ async def arrive(
     short of the charger you are plugged into, showing a plan for a stretch of
     road you have already driven — reported from a charger, mid-charge, with
     "no update for 15 minutes" above it.
+
+    WHERE, by preference, is the phone's own position rather than the stop the
+    screen happens to be showing. A driver charging somewhere the plan never
+    chose — a services they liked the look of, a stop picked an hour ago, the
+    only free stall in the town — would otherwise be told they are at
+    Geiselwind because Geiselwind is what the card was on. The snapshot holds
+    every candidate charger on the corridor and not just the planned stops, so
+    the site they are standing at is usually IN it; when nothing is within
+    `ARRIVE_MATCH_M` the car still moves to where they are, and the answer says
+    no charger was recognised rather than inventing one.
 
     The missing kilometres are BILLED, not skipped. Moving the offset forward
     without pricing the drag would hand back a battery estimate that never
@@ -669,24 +687,35 @@ async def arrive(
     trip, vehicle = await _trip_and_vehicle(db, run)
 
     snapshot = run.route_snapshot
-    node = next(
-        (
-            c
-            for c in live.snapshot_chargers(snapshot)
-            if c.charger_id == body.charger_id
-        ),
-        None,
-    )
-    if node is None:
+    nodes = live.snapshot_chargers(snapshot)
+
+    node = None
+    offset_m: float | None = None
+    if body.lat is not None and body.lon is not None:
+        # Where the phone says the car is, snapped to the route.
+        geom_off, _off_route = _geometry(snapshot).project(body.lat, body.lon)
+        offset_m = _geom_to_segment(snapshot, geom_off)
+        node = min(
+            (
+                c
+                for c in nodes
+                if haversine_m(body.lat, body.lon, c.lat, c.lon) <= ARRIVE_MATCH_M
+            ),
+            key=lambda c: haversine_m(body.lat, body.lon, c.lat, c.lon),
+            default=None,
+        )
+    if node is None and body.charger_id:
+        node = next((c for c in nodes if c.charger_id == body.charger_id), None)
+    if node is None and offset_m is None:
         raise HTTPException(status_code=404, detail="Not a charger on this route.")
 
-    # The PLAN's offset for this stop, not the snapshot node's: the plan is
-    # what the screen is drawn from, and the two axes differ by a few hundred
-    # metres over a long route. Landing the car anywhere but where the list
-    # says the stop is would leave it "0 km away" and still not there.
-    offset_m = _plan_stop_offset(run, trip, body.charger_id)
-    if offset_m is None:
-        offset_m = node.offset_m
+    if node is not None:
+        # The PLAN's offset for this stop when it has one, not the snapshot
+        # node's: the plan is what the screen is drawn from, and the two axes
+        # differ by a few hundred metres over a long route. Landing the car
+        # anywhere but where the list says the stop is would leave it "0 km
+        # away" and still not there.
+        offset_m = _plan_stop_offset(run, trip, node.charger_id) or offset_m or node.offset_m
 
     now = datetime.utcnow()
     at_min = max((now - run.started_at).total_seconds() / 60.0, run.state["at_min"])
@@ -702,8 +731,8 @@ async def arrive(
         veh=veh,
         p=params,
         offset_m=max(float(offset_m), run.state["offset_m"]),
-        lat=node.lat,
-        lon=node.lon,
+        lat=node.lat if node else (body.lat or run.state["lat"]),
+        lon=node.lon if node else (body.lon or run.state["lon"]),
         at_min=at_min,
         off_route_m=0.0,
         # The gap was spent getting here. Capped like a ping's own window, so a
@@ -713,20 +742,26 @@ async def arrive(
     )
     run.state = {
         **new_st,
-        "at_charger_id": body.charger_id,
+        "at_charger_id": node.charger_id if node else None,
         "stale": False,
     }
     run.last_seen_at = now
     db.add(
         TripEvent(
             run_id=run.id, at=now, kind="arrive", offset_m=float(offset_m),
-            lat=node.lat, lon=node.lon,
+            lat=run.state["lat"], lon=run.state["lon"],
             soc=live.current_soc(run.state, vehicle.usable_kwh),
-            payload={"charger_id": body.charger_id, "name": node.name},
+            payload={
+                "charger_id": node.charger_id if node else None,
+                "name": node.name if node else None,
+            },
         )
     )
     await db.commit()
-    return _state_out(run, trip, vehicle.usable_kwh)
+    return ArriveOut(
+        state=_state_out(run, trip, vehicle.usable_kwh),
+        matched_name=node.name if node else None,
+    )
 
 
 @router.post("/runs/{run_id}/soc", response_model=LiveStateOut)

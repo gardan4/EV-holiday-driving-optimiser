@@ -333,7 +333,12 @@ class ArriveRequest(BaseModel):
     you have already made. This is the driver saying so.
     """
 
-    charger_id: str = Field(max_length=64)
+    # Either is enough. `lat`/`lon` is the truthful one — it is where the phone
+    # says the car is — and `charger_id` is the fallback for when the driver
+    # taps this indoors, in a car park, or anywhere a fix does not arrive.
+    charger_id: Optional[str] = Field(default=None, max_length=64)
+    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
 
 
 class AlternativesRequest(BaseModel):
@@ -385,6 +390,15 @@ class BenchmarkOut(BaseModel):
     delta_min: float
     original_stops_remaining: int
     live_stops_remaining: int
+
+
+class ArriveOut(BaseModel):
+    state: LiveStateOut
+    # The charger the position was matched to, if any. Named back so the driver
+    # can see WHICH one it decided on: "charging at Geiselwind" is checkable,
+    # "moved" is not — and when the answer is "none of the ones I know", that
+    # is worth saying rather than quietly implying otherwise.
+    matched_name: Optional[str] = None
 
 
 class ReplanOut(BaseModel):

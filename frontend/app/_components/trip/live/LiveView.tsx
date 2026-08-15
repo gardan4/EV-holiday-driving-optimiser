@@ -228,9 +228,17 @@ export default function LiveView({
    *  the screen stops being about a stretch of road already driven. */
   async function markArrived(stop: Stop) {
     try {
-      await live.markArrived(stop.charger_id)
+      const res = await live.markArrived(stop.charger_id)
+      if (!res) return
+      // What it matched, not what the card was showing: the position wins, so
+      // saying "charging at Geiselwind" when the phone put you at a services
+      // 40 km further would be the same wrong answer in a friendlier voice.
       setFocusId(stop.charger_id)
-      toast.success(`Charging at ${stop.name}.`)
+      toast.success(
+        res.matched_name
+          ? `Charging at ${res.matched_name}.`
+          : "Moved to where you are — no charger recognised here."
+      )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not move the drive")
     }

@@ -10,7 +10,7 @@ it" is that the run id never leaves the response that creates it.
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 import pytest_asyncio
@@ -75,6 +75,15 @@ async def client(db_session, monkeypatch):
 
     segments, charger_nodes = nl_to_austria_route()
     geometry = RouteGeometry([ORIGIN, DEST])
+    # Put the chargers somewhere. `nl_to_austria_route` leaves lat/lon at their
+    # (0, 0) default because the DP only ever reads offsets — but anything that
+    # matches a POSITION to a charger (arriving by GPS) then has every site in
+    # the Gulf of Guinea, and a test of it would pass or fail for the wrong
+    # reason. Interpolated along the same straight line the geometry uses.
+    _total_seg = sum(s.dist_m for s in segments)
+    charger_nodes = [
+        replace(c, **along(c.offset_m / _total_seg)) for c in charger_nodes
+    ]
     # Segment-space and geometry-space totals differ wildly on this synthetic
     # pair, so give the run an explicit map instead of letting it guess.
     total_seg = sum(s.dist_m for s in segments)
@@ -664,7 +673,9 @@ class TestSayingYouAreThere:
             json={"charger_id": stop["charger_id"]},
         )
         assert resp.status_code == 200, resp.text
-        st = resp.json()
+        out = resp.json()
+        st = out["state"]
+        assert out["matched_name"] == stop["name"]
         assert st["at_charger_id"] == stop["charger_id"]
         assert st["offset_m"] == pytest.approx(stop["offset_m"], abs=1500)
         assert st["stale"] is False
@@ -689,8 +700,68 @@ class TestSayingYouAreThere:
                 f"/api/runs/{run['run_id']}/arrive",
                 json={"charger_id": stop["charger_id"]},
             )
-        ).json()
+        ).json()["state"]
         assert after["soc"] < before["soc"] - 1.0
+
+    async def test_the_phone_s_position_beats_the_stop_on_screen(self, client):
+        """A driver charging somewhere the plan never chose — a services they
+        liked the look of, the only free stall in town — must not be told they
+        are at the stop the card happened to be showing. The snapshot holds
+        every candidate on the corridor, not just the planned stops, so the
+        site they are standing at is usually in it."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        on_screen = speed["stops"][0]
+        # Standing at a DIFFERENT charger, and naming the on-screen one as the
+        # fallback exactly as the button does.
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        node = next(
+            n
+            for n in nodes
+            if n.charger_id != on_screen["charger_id"]
+            and n.offset_m > on_screen["offset_m"]
+        )
+        elsewhere = replace(node, **along(node.offset_m / total_seg))
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={
+                    "charger_id": on_screen["charger_id"],
+                    "lat": elsewhere.lat,
+                    "lon": elsewhere.lon,
+                },
+            )
+        ).json()
+        assert out["state"]["at_charger_id"] == elsewhere.charger_id
+        assert out["matched_name"] == elsewhere.name
+
+    async def test_a_position_at_no_known_charger_still_moves_the_car(self, client):
+        """Being somewhere we have no charger for is a fact about our data, not
+        a reason to leave the drive believing the car is 69 km back."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        before = (await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)).json()
+        # Halfway between two consecutive chargers — tens of kilometres from
+        # either, so nothing can match however generous the radius.
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        ahead = sorted(n.offset_m for n in nodes if n.offset_m > before["offset_m"])
+        middle = (ahead[0] + ahead[1]) / 2
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive", json=along(middle / total_seg)
+            )
+        ).json()
+        assert out["matched_name"] is None
+        assert out["state"]["at_charger_id"] is None
+        assert out["state"]["offset_m"] > before["offset_m"]
 
     async def test_a_charger_that_is_not_on_this_route_is_refused(self, client):
         trip = await make_trip(client)

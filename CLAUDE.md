@@ -400,7 +400,16 @@ the pipeline is green before infra exists. Infra deploy is manual
   the energy to get there, which is a worse lie than the stale position. And
   the charger is marked BY HAND afterwards, because `advance` only recognises a
   stop the car creeps up on (`dx < AT_CHARGER_M`) and this one arrives in a
-  single leap. The offset comes from the PLAN's stop, not the snapshot node —
+  single leap. **The phone's POSITION beats the stop on screen**: a driver
+  charging somewhere the plan never chose — a services they liked the look of,
+  the only free stall in town — must not be told they are at whichever stop the
+  card happened to be showing, and the snapshot holds every candidate charger
+  on the corridor rather than only the planned stops, so the site they are
+  standing at is usually in it. `charger_id` is the fallback for when no fix
+  arrives; nothing within `ARRIVE_MATCH_M` still moves the car and says no
+  charger was recognised, because being somewhere we have no data for is a
+  fact about our data and not a reason to leave the drive 69 km back. The
+  offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
 - **The driver picks the speed they are going to hold, mid-drive**

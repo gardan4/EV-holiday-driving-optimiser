@@ -539,17 +539,31 @@ export async function getAlternatives(
   )
 }
 
-/** "I'm standing at this one now." A locked phone reports no position, which
- *  is the state a phone is in while its car charges — so the drive has to be
- *  tellable by hand. The server bills the kilometres it skips. */
+export interface ArriveResult {
+  state: LiveState
+  /** The charger the position matched, or null when none was near enough. */
+  matched_name: string | null
+}
+
+/** "I'm standing here now." A locked phone reports no position, which is the
+ *  state a phone is in while its car charges — so the drive has to be tellable
+ *  by hand. `lat`/`lon` wins when given, because a driver charging somewhere
+ *  the plan never chose must not be told they are at the stop that happened to
+ *  be on screen; `chargerId` is the fallback when no fix arrives. The server
+ *  bills the kilometres it skips. */
 export async function arriveAt(
   runId: string,
-  chargerId: string
-): Promise<LiveState> {
-  return unwrap<LiveState>(
+  chargerId: string | null,
+  here?: { lat: number; lon: number } | null
+): Promise<ArriveResult> {
+  return unwrap<ArriveResult>(
     await apiFetch(`/api/runs/${runId}/arrive`, {
       method: "POST",
-      body: JSON.stringify({ charger_id: chargerId }),
+      body: JSON.stringify({
+        charger_id: chargerId,
+        lat: here?.lat ?? null,
+        lon: here?.lon ?? null,
+      }),
     })
   )
 }
