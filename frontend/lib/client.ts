@@ -532,13 +532,22 @@ export async function replanRun(
    *  the optimiser; a number pins it. The key is OMITTED when undefined,
    *  because the server tells "unchanged" from "clear it" by whether the field
    *  was sent at all. */
-  holdSpeedKph: number | null | undefined = undefined
+  holdSpeedKph: number | null | undefined = undefined,
+  /** Where the phone says the car is. Sent so the re-plan starts from HERE
+   *  rather than from the last fix that happened to reach the server — and it
+   *  is the only call allowed to move the car backwards, which is what makes
+   *  it the way out of a mis-tapped arrival. */
+  here?: { lat: number; lon: number } | null
 ): Promise<RevisedPlan> {
   const body: Record<string, unknown> = {
     exclude_charger_ids: excludeChargerIds,
     min_arrival_soc: minArrivalSoc,
   }
   if (holdSpeedKph !== undefined) body.hold_speed_kph = holdSpeedKph
+  if (here) {
+    body.lat = here.lat
+    body.lon = here.lon
+  }
   return unwrap<RevisedPlan>(
     await apiFetch(`/api/runs/${runId}/replan`, {
       method: "POST",

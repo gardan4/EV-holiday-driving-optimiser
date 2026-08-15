@@ -974,11 +974,53 @@ async def replan(
     ordinary sweep — the DP is untouched. What makes the answer comparable to
     the original is carrying the slice's `index_offset` (so the same autobahn
     stretches count as open) and the break already earned.
+
+    "Where the car actually is" means the fix the phone sends WITH this
+    request, when it sends one. That is the difference between re-planning from
+    here and re-planning from the last position that happened to reach us,
+    which on a phone is not the same place: GPS runs while the page is being
+    looked at, so a driver who unlocks their phone at a services and presses
+    Re-plan was, as far as the drive knew, still twenty minutes up the road.
+    And because a re-plan is an explicit "from HERE", the fix may move the car
+    BACKWARDS — the one place in the app where that is allowed. `advance`
+    clamps forward for good reasons and that clamp is exactly why a mis-tapped
+    "I'm plugged in here now" used to be permanent; this is the way out that
+    does not involve ending the drive.
     """
     run = await _load_run(db, run_id)
     if run.status != "active":
         raise HTTPException(status_code=409, detail="This drive has finished.")
     trip, vehicle = await _trip_and_vehicle(db, run)
+
+    snapshot = run.route_snapshot
+    plan_req = PlanRequest.model_validate(trip.request)
+    veh = VehicleParams.from_vehicle(vehicle)
+
+    if body.lat is not None and body.lon is not None:
+        geom_off, off_route = _geometry(snapshot).project(body.lat, body.lon)
+        if off_route > live.OFF_ROUTE_M:
+            raise HTTPException(
+                status_code=409,
+                detail="You're off the planned route. Rejoin it before re-planning.",
+            )
+        now = datetime.utcnow()
+        run.state = live.resync(
+            run.state,
+            segments=live.snapshot_segments(snapshot),
+            veh=veh,
+            p=_sim_params(plan_req, run.state.get("run_factor", 1.0)),
+            offset_m=_geom_to_segment(snapshot, geom_off),
+            lat=body.lat,
+            lon=body.lon,
+            at_min=(now - run.started_at).total_seconds() / 60.0,
+            off_route_m=off_route,
+            # The plan in force is the honest stand-in: a correction has no
+            # window to observe a speed over.
+            speed_kph=float(
+                (run.plan or {}).get("optimum_speed") or run.planned_speed_kph
+            ),
+        )
+        run.last_seen_at = now
 
     st = run.state
     if st.get("stale"):
@@ -987,9 +1029,6 @@ async def replan(
             detail="You're off the planned route. Rejoin it before re-planning.",
         )
 
-    snapshot = run.route_snapshot
-    plan_req = PlanRequest.model_validate(trip.request)
-    veh = VehicleParams.from_vehicle(vehicle)
     soc_now = live.current_soc(st, vehicle.usable_kwh)
 
     # Chargers this driver has turned down stay turned down. Merged and kept

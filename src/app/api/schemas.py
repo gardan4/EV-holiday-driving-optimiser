@@ -280,6 +280,15 @@ class ReplanRequest(BaseModel):
     # the choice back to the optimiser — the two are distinguished by
     # `model_fields_set`, so "unchanged" and "clear it" cannot collide.
     hold_speed_kph: Optional[float] = Field(default=None, ge=60.0, le=220.0)
+    # Where the car is, right now, from the phone that is asking. A re-plan is
+    # the one moment the driver explicitly means "from HERE", so a fix sent
+    # with it is taken at face value and moves the car — in either direction,
+    # unlike a ping, which may only ever walk it forward. That is what makes a
+    # re-plan the way out of a position no later ping can correct: a mis-tapped
+    # arrival, or a phone that reported from a services and then slept while
+    # the car drove on. Omit both to plan from the last known position.
+    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
 
 
 class AlternativeOut(BaseModel):

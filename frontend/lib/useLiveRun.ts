@@ -347,7 +347,20 @@ export function useLiveRun(
       if (!runId) return null
       setBusy(true)
       try {
-        const plan = await replanRun(runId, exclude, minArrivalSoc, holdSpeedKph)
+        // A fresh fix first, so the plan starts from where the car is rather
+        // than from the last position that reached the server. `maximumAge`
+        // means a page that is already reporting pays nothing for this; a
+        // phone just unlocked at a services waits a couple of seconds and gets
+        // a plan about the road in front of it. Best-effort: no fix simply
+        // plans from the last known position, as it always did.
+        const here = await currentPosition().catch(() => null)
+        const plan = await replanRun(
+          runId,
+          exclude,
+          minArrivalSoc,
+          holdSpeedKph,
+          here
+        )
         setRun((r) => (r ? { ...r, plan } : r))
         return plan
       } finally {

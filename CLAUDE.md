@@ -456,6 +456,28 @@ the pipeline is green before infra exists. Infra deploy is manual
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
+- **A re-plan starts from the fix the phone sends with it, and is the only
+  call that may move the car BACKWARDS** (`runs.replan`, `live.resync`). Two
+  separate holes closed by one change. GPS runs while the page is being looked
+  at, so a phone unlocked at a services has not reported for twenty minutes and
+  "Re-plan" was re-planning a stretch of road already driven — the button whose
+  whole promise is "from where I am" was the one that did not ask. And
+  `advance` clamps the offset forward, which is right on a ping (a wobbly fix
+  must not rewrite the drive twenty times an hour) and is precisely why a
+  mis-tapped "I'm plugged in here now" was permanent: no later ping could
+  correct it, so the only ways out were `arrive/undo` — which exists, and only
+  helps arrivals made after it shipped — or ending the drive. A re-plan is the
+  one moment the driver is explicitly saying "from HERE", so a fix sent with it
+  is taken at face value in either direction. The energy is priced through the
+  same profile in both: forward it bills the drag exactly as a ping would,
+  backward it hands back energy billed for road never driven, so the battery
+  after a correction is the battery the drive would have had if the wrong
+  position had never been entered. Priced at the PLAN's cruise, because a
+  correction has no window to observe a speed over. An off-route fix is refused
+  rather than used — planning from a position that is not on the road being
+  driven is a guess — and a request with no fix still plans from the last known
+  position, because a phone indoors or with permission refused must not lose
+  the button.
 - **The driver picks the speed they are going to hold, mid-drive**
   (`runs.replan`, `HoldSpeed.tsx`). The re-plan swept a band and took its
   optimum, which decides something the person in the car is better placed to

@@ -820,6 +820,132 @@ class TestSayingYouAreThere:
         assert resp.status_code == 404
 
 
+class TestReplanningFromHere:
+    """A re-plan is the one moment the driver explicitly means "from where I
+    am", so it takes the fix the phone sends with it — and it is the only call
+    allowed to move the car backwards.
+
+    Both halves matter. GPS runs while the page is being looked at, so a phone
+    unlocked at a services has not reported for twenty minutes and the drive
+    would otherwise re-plan a stretch of road already driven. And `advance`
+    clamps the offset forward, which is right for pings and is exactly why a
+    mis-tapped arrival used to be permanent."""
+
+    async def test_it_plans_from_the_fix_it_is_given(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+
+        # A leg further on — the drive has heard nothing since the fix above,
+        # which is exactly what a phone in a pocket looks like.
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan", json=along(0.15)
+        )
+        assert resp.status_code == 200, resp.text
+        after = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert after["offset_m"] > before["offset_m"] + 20_000
+
+    async def test_it_can_move_the_car_back(self, client):
+        """The mis-tapped arrival, recovered without ending the drive. Nothing
+        else in the app may walk the car backwards; this may, because the
+        driver is asking for it by name."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        real = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+
+        # "I'm plugged in here now" at a stop far ahead — the wrong one.
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > real["offset_m"] + 20_000
+        )
+        wrong = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        assert wrong["offset_m"] > real["offset_m"] + 20_000
+
+        # A ping from the real position cannot fix it — that is the clamp.
+        pinged = (
+            await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        ).json()
+        assert pinged["offset_m"] == pytest.approx(wrong["offset_m"], abs=1.0)
+
+        # A re-plan can.
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan", json=FIRST_LEG
+        )
+        assert resp.status_code == 200, resp.text
+        back = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert back["offset_m"] == pytest.approx(real["offset_m"], abs=1500)
+        assert back["at_charger_id"] is None
+
+    async def test_moving_back_hands_the_energy_back(self, client):
+        """The arrival billed the kilometres it skipped. Correcting the
+        position without refunding them leaves a battery that paid for road
+        the car is about to drive — the same defect as never billing it, in
+        the other direction."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        real = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > real["offset_m"] + 20_000
+        )
+        wrong = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        assert wrong["soc"] < real["soc"] - 1.0
+
+        await client.post(f"/api/runs/{run['run_id']}/replan", json=FIRST_LEG)
+        back = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        # Back to roughly the battery it had before the wrong tap — not exact,
+        # because the jump was billed at the clamped observed speed and the
+        # refund is priced at the plan's cruise, and the residue is on the
+        # pessimistic side.
+        assert back["soc"] > wrong["soc"] + 1.0
+        assert back["soc"] <= real["soc"] + 0.1
+
+    async def test_a_fix_off_the_route_is_refused(self, client):
+        """Planning from a position that is not on the road being driven is
+        not a re-plan, it is a guess."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={"lat": ORIGIN[0] + 4.0, "lon": ORIGIN[1] + 4.0},
+        )
+        assert resp.status_code == 409
+
+    async def test_without_a_fix_it_still_plans_from_the_last_one(self, client):
+        """The phone may have no position to give — indoors, or permission
+        refused. The button has to keep working."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        resp = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert resp.status_code == 200, resp.text
+        after = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert after["offset_m"] == pytest.approx(before["offset_m"], abs=1.0)
+
+
 class TestTakingAnArrivalBack:
     """"I'm plugged in here now" is one tap under the stop card, next to
     another button, pressed on a phone in a moving car — and it is the only

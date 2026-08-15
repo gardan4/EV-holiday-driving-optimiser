@@ -118,6 +118,68 @@ def soc_uncertainty(state: dict) -> float:
     return min(band, SOC_UNCERTAINTY_CAP)
 
 
+def resync(
+    state: dict,
+    *,
+    segments: list[RouteSegment],
+    veh: VehicleParams,
+    p: SimParams,
+    offset_m: float,
+    lat: float,
+    lon: float,
+    at_min: float,
+    off_route_m: float,
+    speed_kph: float,
+) -> dict:
+    """Move the car to a position the driver has just asked us to plan from —
+    in EITHER direction.
+
+    `advance` clamps the offset forward, and must: a wobbly fix walking the car
+    backwards on an ordinary ping would rewrite the drive twenty times an hour.
+    But that clamp is the reason a wrong position is permanent. A tap on "I'm
+    plugged in here now" at the wrong stop, or a phone that reported from a
+    services and then slept while the car drove on, leaves an offset no later
+    ping can correct — the drive keeps planning from road the car has not
+    reached, and the only ways out were to end the drive or wait until reality
+    caught up.
+
+    A re-plan is the right place to fix that, because it is the one moment the
+    driver is explicitly asking "from where I am now". So this takes a fresh
+    fix at face value, and prices the difference through the same profile the
+    plan uses: forward, that bills the drag exactly as a ping would; backward,
+    it hands back energy that was billed for road never driven. That symmetry
+    is the point — it is the same arithmetic in both directions, so the battery
+    after a correction is the battery the drive would have had if the wrong
+    position had never been entered.
+
+    Priced at the plan's speed rather than an observed one: a correction has no
+    window to observe over, and the plan's cruise is the honest stand-in.
+    """
+    prev = state["offset_m"]
+    out = dict(state)
+    # Never rewind the clock. Time really has passed, whatever the position did.
+    out["at_min"] = max(at_min, state["at_min"])
+    out["lat"] = lat
+    out["lon"] = lon
+    out["off_route_m"] = off_route_m
+    out["stale"] = False
+    out["offset_m"] = offset_m
+
+    if abs(offset_m - prev) > 1e-6:
+        prof = RouteProfile(segments, speed_kph, veh, replace(p, aux_kw=0.0))
+        out["kwh_used"] = max(
+            0.0, out["kwh_used"] + (prof.kwh_at(offset_m) - prof.kwh_at(prev))
+        )
+    # Standing at a charger is a claim about a position that has just changed.
+    # `advance` re-establishes it on the next ping if the car really is there.
+    if abs(offset_m - prev) >= AT_CHARGER_M:
+        out["at_charger_id"] = None
+        # The undo would restore the state BEFORE an arrival, and that is no
+        # longer the state this position follows on from.
+        out.pop("arrive_undo", None)
+    return out
+
+
 def advance(
     state: dict,
     *,
