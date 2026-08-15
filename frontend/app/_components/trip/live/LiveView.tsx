@@ -30,6 +30,7 @@ import JourneyHero, { LiveHeroState } from "../JourneyHero"
 import MapsRouteButton from "../MapsRouteButton"
 import AlternativeStops from "./AlternativeStops"
 import BatteryCheck from "./BatteryCheck"
+import ChargingHere from "./ChargingHere"
 import HoldSpeed from "./HoldSpeed"
 import PlanAhead from "./PlanAhead"
 import NextStopCard from "./NextStopCard"
@@ -331,6 +332,24 @@ export default function LiveView({
           {fmtKm(trip.result.total_dist_m)}
           {isDriver ? " · you're driving" : " · you're watching"}
         </p>
+
+        {/* Where the car actually IS, when that is a charger the plan never
+            chose. Above the next stop, because a driver standing at a plug is
+            not asking about a charger 69 km up the road. */}
+        {!finished && state.at_charger && !state.at_charger.planned && (
+          <ChargingHere
+            charger={state.at_charger}
+            soc={state.soc}
+            socLabel={socLabel(
+              state.soc,
+              state.soc_is_measured,
+              state.soc_uncertainty_pct
+            )}
+            needSoc={state.need_soc_next ?? null}
+            vehicle={trip.result.vehicle}
+            nextName={ahead[0]?.name ?? null}
+          />
+        )}
 
         {/* What happens next, before anything about the drive as a whole. The
             HUD can only carry the charger's name and its distance; the two

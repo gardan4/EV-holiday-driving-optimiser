@@ -33,6 +33,7 @@ from app.api.schemas import (
     AlternativesOut,
     AlternativesRequest,
     ArriveOut,
+    AtChargerOut,
     ArriveRequest,
     BenchmarkOut,
     LiveOut,
@@ -60,6 +61,7 @@ from app.services import chargers as chargers_svc
 from app.services import live, routing
 from app.services.geo import haversine_m
 from app.services.simulator import (
+    RouteProfile,
     SimParams,
     VehicleParams,
     optimum,
@@ -348,6 +350,52 @@ def _plan_stop_offset(run: TripRun, trip: Trip, charger_id: str) -> float | None
     return None
 
 
+def _soc_needed_next(
+    run: TripRun,
+    trip: Trip,
+    veh: VehicleParams,
+    params: SimParams,
+    from_offset_m: float,
+) -> float | None:
+    """Battery needed to reach the next planned stop from here, reserve in.
+
+    The question a driver at an unplanned charger is actually asking — how
+    much do I have to put in before I can go — and the one the plan cannot
+    answer, because it never expected the car to be here. Priced through the
+    same profile the simulator uses, at the speed the plan is holding, so the
+    number agrees with everything else on the screen.
+    """
+    target = None
+    plan = run.plan or None
+    if plan:
+        base = float(plan.get("offset_base_m") or 0.0)
+        for s in (plan.get("remaining") or {}).get("stops") or []:
+            if s["offset_m"] + base > from_offset_m + 200.0:
+                target = s["offset_m"] + base
+                break
+    if target is None:
+        speed_res = _planned_result(trip, run.planned_speed_kph) or {}
+        for s in speed_res.get("stops", []):
+            if s["offset_m"] > from_offset_m + 200.0:
+                target = float(s["offset_m"])
+                break
+    snapshot = run.route_snapshot
+    if target is None:
+        # No stop left: what it takes to reach the destination, on its own
+        # arrival target rather than the between-stops reserve.
+        target = float(snapshot.get("total_dist_m") or 0.0)
+        reserve = params.target_soc
+    else:
+        reserve = params.reserve_soc
+    sl = slice_route(live.snapshot_segments(snapshot), [], from_offset_m)
+    if not sl.segments or target <= from_offset_m:
+        return None
+    speed = float((plan or {}).get("optimum_speed") or run.planned_speed_kph)
+    prof = RouteProfile(sl.segments, min(speed, veh.top_speed_kph), veh, params)
+    kwh = prof.kwh_at(target - from_offset_m)
+    return round(min(100.0, kwh / max(veh.usable_kwh, 1e-6) * 100.0 + reserve), 1)
+
+
 def _planned_next_stop_id(run: TripRun, st: dict) -> str | None:
     """The charger the plan in force is actually heading for, if any."""
     plan = run.plan or None
@@ -365,6 +413,36 @@ def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
         c for c in live.snapshot_chargers(snapshot) if c.charger_id not in exclude
     ]
     return slice_route(live.snapshot_segments(snapshot), chargers, offset_m)
+
+
+def _at_charger_out(run: TripRun, trip: Trip) -> AtChargerOut | None:
+    """The charger under the car, from the route snapshot rather than the plan.
+
+    The plan's stops are four sites out of the hundreds on the corridor, and
+    stopping at one of the others is an ordinary thing to do — so this is
+    looked up in the snapshot, and only afterwards asked whether the plan
+    happens to have chosen it.
+    """
+    cid = run.state.get("at_charger_id")
+    if not cid:
+        return None
+    node = next(
+        (c for c in live.snapshot_chargers(run.route_snapshot) if c.charger_id == cid),
+        None,
+    )
+    if node is None:
+        return None
+    return AtChargerOut(
+        charger_id=node.charger_id,
+        name=node.name,
+        operator=node.operator,
+        power_kw=node.power_kw,
+        n_points=node.n_points,
+        lat=round(node.lat, 5),
+        lon=round(node.lon, 5),
+        food_hint=amenities.food_hint(node.name),
+        planned=_plan_stop_offset(run, trip, cid) is not None,
+    )
 
 
 def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
@@ -398,6 +476,11 @@ def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
         needs_replan=flag,
         replan_reasons=reasons,
         status=run.status,
+        at_charger=_at_charger_out(run, trip),
+        # Computed when the driver says where they are, not on every ping: it
+        # is a property of the position and the route, and the car is not
+        # moving while it matters.
+        need_soc_next=st.get("need_soc_next"),
     )
 
 
@@ -744,6 +827,9 @@ async def arrive(
         **new_st,
         "at_charger_id": node.charger_id if node else None,
         "stale": False,
+        "need_soc_next": _soc_needed_next(
+            run, trip, veh, params, float(new_st["offset_m"])
+        ),
     }
     run.last_seen_at = now
     db.add(

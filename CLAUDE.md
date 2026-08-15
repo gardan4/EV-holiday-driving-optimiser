@@ -408,7 +408,16 @@ the pipeline is green before infra exists. Infra deploy is manual
   standing at is usually in it. `charger_id` is the fallback for when no fix
   arrives; nothing within `ARRIVE_MATCH_M` still moves the car and says no
   charger was recognised, because being somewhere we have no data for is a
-  fact about our data and not a reason to leave the drive 69 km back. The
+  fact about our data and not a reason to leave the drive 69 km back.
+  **An unplanned charger is described like any other** (`LiveStateOut.
+  at_charger`, from the SNAPSHOT rather than the plan) and carries the one
+  number the plan cannot give: `need_soc_next`, the battery required to reach
+  the next planned stop with the reserve intact. It is a floor and says so —
+  charging past it is the driver's call — and it is priced through the same
+  `RouteProfile` the simulator uses so it cannot become a second opinion. Only
+  computed when the driver says where they are, never per ping: it is a
+  property of the position and the route, and the car is not moving while it
+  matters. The
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.

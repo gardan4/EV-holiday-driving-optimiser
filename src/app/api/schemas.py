@@ -360,6 +360,28 @@ class AlternativesOut(BaseModel):
     alternatives: list[AlternativeOut] = []
 
 
+class AtChargerOut(BaseModel):
+    """The charger the car is standing at, whether or not the plan chose it.
+
+    Carried on the state because a driver can charge anywhere — the plan's
+    stops are four sites out of the hundreds on the corridor, and stopping at
+    one of the others is an ordinary thing to do. Without this the screen can
+    only describe stops it planned, so the one place the car actually IS stays
+    invisible.
+    """
+
+    charger_id: str
+    name: str
+    operator: Optional[str] = None
+    power_kw: float
+    n_points: int = 1
+    lat: float
+    lon: float
+    food_hint: Optional[str] = None
+    #: True when this is one of the stops the plan in force chose.
+    planned: bool = False
+
+
 class LiveStateOut(BaseModel):
     at_min: float                  # minutes since departure
     offset_m: float
@@ -381,6 +403,14 @@ class LiveStateOut(BaseModel):
     needs_replan: bool = False
     replan_reasons: list[str] = []
     status: str = "active"
+    # Where the car is plugged in, when it is — from the route snapshot, so a
+    # charger the plan never chose is described too.
+    at_charger: Optional[AtChargerOut] = None
+    # The battery needed to reach the next planned stop from here, reserve
+    # included. The question a driver at an UNPLANNED charger is actually
+    # asking — "how much do I have to put in before I can go?" — which the plan
+    # cannot answer, because it never expected the car to be here.
+    need_soc_next: Optional[float] = None
 
 
 class BenchmarkOut(BaseModel):

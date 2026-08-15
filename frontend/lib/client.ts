@@ -302,6 +302,19 @@ export async function releaseUsername(username: string): Promise<void> {
 // link simply has no token and gets the read-only view.
 // ---------------------------------------------------------------------------
 
+export interface AtCharger {
+  charger_id: string
+  name: string
+  operator: string | null
+  power_kw: number
+  n_points?: number
+  lat: number
+  lon: number
+  food_hint?: string | null
+  /** Whether the plan in force chose this one. */
+  planned: boolean
+}
+
 export interface LiveState {
   at_min: number
   offset_m: number
@@ -323,6 +336,12 @@ export interface LiveState {
   needs_replan: boolean
   replan_reasons: string[]
   status: string
+  /** Where the car is plugged in, when it is — including chargers the plan
+   *  never chose, which is the whole reason it is here. */
+  at_charger?: AtCharger | null
+  /** Battery needed to reach the next planned stop, reserve included. The
+   *  question a driver at an unplanned charger is asking. */
+  need_soc_next?: number | null
 }
 
 export interface Benchmark {

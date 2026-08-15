@@ -763,6 +763,46 @@ class TestSayingYouAreThere:
         assert out["state"]["at_charger_id"] is None
         assert out["state"]["offset_m"] > before["offset_m"]
 
+    async def test_an_unplanned_charger_is_still_described(self, client):
+        """The plan's stops are four sites out of the hundreds on the corridor.
+        Stopping at one of the others is ordinary, and the screen has to be
+        able to say what the car is standing at — with the one number the plan
+        cannot give: how much has to go in before you can leave."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        before = (
+            await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        ).json()
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        planned = {s["charger_id"] for s in speed["stops"]}
+        segments, nodes = nl_to_austria_route()
+        total_seg = sum(x.dist_m for x in segments)
+        node = next(
+            n
+            for n in nodes
+            if n.charger_id not in planned and n.offset_m > before["offset_m"]
+        )
+        here = replace(node, **along(node.offset_m / total_seg))
+
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"lat": here.lat, "lon": here.lon},
+            )
+        ).json()
+        at = out["state"]["at_charger"]
+        assert at is not None
+        assert at["charger_id"] == node.charger_id
+        assert at["planned"] is False, "this one is not in the plan"
+        assert at["power_kw"] > 0
+        # And the answer to "how much do I need before I can go".
+        need = out["state"]["need_soc_next"]
+        assert need is not None and 0 < need <= 100
+
     async def test_a_charger_that_is_not_on_this_route_is_refused(self, client):
         trip = await make_trip(client)
         run = await start_run(client, trip)
