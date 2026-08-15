@@ -12,12 +12,13 @@
  * which is what choosing it costs in arrival time, and lets the human do the
  * judging they were always better at.
  *
- * Three things that matter in the copy. **We say we don't know what's there** —
- * an app that silently ranked "services" above "lay-by" would be inventing
- * data — and every option links out to Maps, which is where a person can
- * actually see whether there is a building next to it. **The cost is to the
- * destination**, not to the stop: swapping a charger re-optimises every stop
- * after it, and a per-leg number would flatter the swap.
+ * Three things that matter in the copy. **The food hint is a reading of the
+ * site's NAME**, never amenity data we do not have — "reads like motorway
+ * services", not "has a restaurant" — and every option still links out to
+ * Maps, which is where a person can actually see whether there is a building
+ * next to it. **The cost is to the destination**, not to the stop: swapping a
+ * charger re-optimises every stop after it, and a per-leg number would flatter
+ * the swap.
  *
  * And **bays are capacity, never availability**. OpenChargeMap lists how many
  * DC points a site has; no operator publishes free-stall counts to us, and
@@ -28,7 +29,15 @@
  */
 
 import { useState } from "react"
-import { AlertTriangle, BatteryCharging, Check, Loader2, MapPin, X } from "lucide-react"
+import {
+  AlertTriangle,
+  BatteryCharging,
+  Check,
+  Loader2,
+  MapPin,
+  UtensilsCrossed,
+  X,
+} from "lucide-react"
 import { Alternative, Alternatives } from "@/lib/client"
 import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
 
@@ -60,9 +69,9 @@ export default function AlternativeStops({
           <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
             Priced against arriving, at {Math.round(data.speed_kph)} km/h. Bays
             are how many the site lists, <b className="font-semibold">not</b>{" "}
-            how many are free — nobody publishes live availability to us. And we
-            don&apos;t know what else is there, so open one in Maps if you need
-            somewhere to eat.
+            how many are free — nobody publishes live availability to us. Food
+            hints are read off the site&apos;s <em>name</em>, not from any
+            amenity data, so check one in Maps before counting on dinner.
           </p>
         </div>
         <button
@@ -160,6 +169,15 @@ function Row({ alt }: { alt: Alternative }) {
           {fmtBays(alt.n_points) && <span> · {fmtBays(alt.n_points)}</span>} · in{" "}
           {fmtKm(alt.dist_from_here_m)}
         </div>
+        {alt.food_hint && (
+          <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">
+            <UtensilsCrossed className="h-3 w-3 shrink-0" />
+            {/* "reads like" and not "has": this is a guess from the site's
+                name, and a chip that asserted amenities we do not have would
+                be the exact invention the panel above disclaims. */}
+            reads like {alt.food_hint}
+          </div>
+        )}
         <div
           className={`mt-0.5 flex items-center gap-1 text-xs ${
             alt.below_reserve ? "font-semibold text-amber-800" : "text-ink-500"

@@ -353,6 +353,10 @@ export interface Alternative {
   power_kw: number
   /** DC bays OpenChargeMap lists; see `Stop.n_points`. */
   n_points?: number
+  /** What the site's NAME suggests you could eat there — "motorway services",
+   *  "supermarket" — or null when it says nothing. A guess from a string, so
+   *  render it as one. Null is NOT a claim that there is nothing there. */
+  food_hint?: string | null
   lat: number
   lon: number
   /** On the whole route's axis, like every other stop. */

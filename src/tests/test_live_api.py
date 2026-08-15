@@ -884,6 +884,57 @@ class TestTurningDownAStop:
         assert seen, "expected at least the current stop"
         assert any(n > 1 for n in seen), "the fixture's hubs lost their bays"
 
+    async def test_a_stop_already_chosen_is_not_offered_as_an_alternative(
+        self, client
+    ):
+        """The one row guaranteed to look like a bug.
+
+        Taking a STRETCH option was the case that broke it: the plan in force
+        reaches that charger only under the relaxed floor, and this endpoint
+        re-planned with the full reserve — so the baseline pass picked
+        something else and handed the driver's own chosen stop back as an
+        alternative to itself. The endpoint now plans under the same floor the
+        plan was made with, and filters the planned stop out regardless.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        first = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+        chosen = next(a for a in first["alternatives"] if a["below_reserve"])
+
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={
+                "exclude_charger_ids": chosen["exclude_charger_ids"],
+                "min_arrival_soc": chosen["min_arrival_soc"],
+            },
+        )
+
+        after = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+        assert after["current"]["charger_id"] == chosen["charger_id"]
+        assert all(
+            a["charger_id"] != chosen["charger_id"] for a in after["alternatives"]
+        )
+
+    async def test_it_keeps_looking_until_it_finds_somewhere_to_eat(self, client):
+        """The list is ranked by minutes, and the quickest few stops are
+        regularly a lay-by, a car park and another lay-by — so "where can I
+        actually eat" can go unanswered by a list that is working perfectly."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        rows = [out["current"], *out["alternatives"]]
+        assert any(r["food_hint"] for r in rows), (
+            "expected at least one stop the name says you can eat at"
+        )
+        # And the guess is labelled with what it read, not a bare boolean —
+        # "motorway services" is checkable by a human, "true" is not.
+        assert all(
+            isinstance(r["food_hint"], str) for r in rows if r["food_hint"]
+        )
+
     async def test_a_watcher_cannot_ask_for_alternatives(self, client):
         """It is a write-token route like every other run endpoint: the trip id
         reads the drive, it does not steer it."""

@@ -52,6 +52,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter, run_key
 from app.models import Trip, TripEvent, TripRun, Vehicle
+from app.services import amenities
 from app.services import chargers as chargers_svc
 from app.services import live, routing
 from app.services.simulator import (
@@ -243,6 +244,12 @@ MAX_ALTERNATIVES = 3
 # see, and the model has no business hiding the option — only naming the risk.
 MAX_STRETCH = 2
 
+# How far down the ranking to keep looking for somewhere you can eat. The list
+# above is ranked by minutes, and the quickest few stops are regularly a lay-by,
+# a car park and another lay-by — so "is there anywhere to EAT" can be a
+# question none of them answers. Bounded, because each step is another DP.
+MAX_FOOD_SEARCH = 5
+
 # The floor those are computed against. Not zero: a plan that arrives on
 # vapour is not an option, it is a breakdown with extra steps. Applied to the
 # leg being driven and no other, so one accepted risk cannot become a journey
@@ -314,6 +321,18 @@ def _resolve_hold_speed(run: TripRun, body: ReplanRequest) -> float | None:
         return float(v) if v is not None else None
     run.state = {**run.state, "hold_speed_kph": body.hold_speed_kph}
     return body.hold_speed_kph
+
+
+def _planned_next_stop_id(run: TripRun, st: dict) -> str | None:
+    """The charger the plan in force is actually heading for, if any."""
+    plan = run.plan or None
+    if not plan:
+        return None
+    base = float(plan.get("offset_base_m") or 0.0)
+    for s in (plan.get("remaining") or {}).get("stops") or []:
+        if s["offset_m"] + base > st["offset_m"] + 200.0:
+            return str(s["charger_id"])
+    return None
 
 
 def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
@@ -851,6 +870,12 @@ async def alternatives(
             "depart_soc": soc_now,
             "prior_drive_min": st["at_min"],
             "prior_rest_credit_min": st.get("rest_credit_min", 0.0),
+            # The floor the plan in force was made under. Without it this
+            # endpoint plans a DIFFERENT journey than the one on screen: a
+            # driver who accepted a stretch stop got it back as an
+            # "alternative" to itself, because the full reserve cannot reach
+            # it and the baseline pass therefore picked something else.
+            "first_leg_reserve_soc": _first_leg_floor(st),
         }
     )
 
@@ -880,6 +905,7 @@ async def alternatives(
         return AlternativeOut(
             charger_id=stop.charger_id,
             name=stop.name,
+            food_hint=amenities.food_hint(stop.name),
             operator=stop.operator,
             power_kw=stop.power_kw,
             n_points=stop.n_points,
@@ -933,6 +959,34 @@ async def alternatives(
         # for, and dressing it up as a risk would be a lie.
         if stop.arrive_soc < params.reserve_soc:
             found.append(alt)
+
+    # 3. Somewhere to eat. The ranking above is by minutes, and the quickest
+    #    few are regularly a lay-by, a car park and another lay-by — so the
+    #    question "where can I actually eat" can go unanswered by a list that
+    #    is working perfectly. Keep going until one turns up, and offer it even
+    #    though it is slower, because that is the whole point of asking.
+    if current is not None and not any(
+        a.food_hint for a in [current, *found]
+    ):
+        for _ in range(MAX_FOOD_SEARCH):
+            best = await _next_best(already | set(turned_down), params)
+            if best is None:
+                break
+            stop = best.stops[0]
+            alt = _as_alt(best, stop, below_reserve=False)
+            turned_down.append(stop.charger_id)
+            if alt.food_hint:
+                found.append(alt)
+                break
+
+    # Never offer the stop the plan is already going to. The baseline pass
+    # normally IS that stop, but it is recomputed from where the car is now and
+    # the plan was made further back, so the two can disagree — and an
+    # "alternative" that is the stop you already chose is the one row guaranteed
+    # to look like a bug.
+    planned_next = _planned_next_stop_id(run, st)
+    if planned_next:
+        found = [a for a in found if a.charger_id != planned_next]
 
     return AlternativesOut(
         speed_kph=speed, current=current, alternatives=found

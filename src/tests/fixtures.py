@@ -78,7 +78,16 @@ def nl_to_austria_route() -> tuple[list[RouteSegment], list[ChargerNode]]:
     chargers = [
         ChargerNode(
             charger_id=f"chg-{i}",
-            name=f"{'Ionity' if c.power_kw >= 300 else 'Fastned'} km{int(c.offset_m / 1000)}",
+            # A realistic mix: the fast ones sit at motorway services, the
+            # rest are car-park chargers with nothing around them. The naming
+            # is what `services/amenities.py` reads, so a corridor of purely
+            # anonymous names would make "where can I eat" untestable.
+            name=(
+                f"Raststätte km{int(c.offset_m / 1000)}"
+                if i % 3 == 2
+                else f"{'Ionity' if c.power_kw >= 300 else 'Fastned'} "
+                f"km{int(c.offset_m / 1000)}"
+            ),
             offset_m=c.offset_m,
             power_kw=c.power_kw,
             detour_min=c.detour_min,

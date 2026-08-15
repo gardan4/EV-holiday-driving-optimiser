@@ -267,6 +267,11 @@ class AlternativeOut(BaseModel):
     operator: Optional[str] = None
     power_kw: float
     n_points: int = 1
+    # What the site's NAME suggests you could eat there — "motorway services",
+    # "supermarket" — or null when it says nothing. A guess from a string, and
+    # the UI must present it as one; null is not a claim that there is nothing
+    # there. See `services/amenities.py`.
+    food_hint: Optional[str] = None
     lat: float
     lon: float
     # On the whole route's axis, like every other stop the frontend draws.
