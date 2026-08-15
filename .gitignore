@@ -110,3 +110,9 @@ claude-code-main
 
 # Download cache for scripts/refit_curves.py (CC-BY profile dataset)
 src/.cache/
+
+# Next.js build output, wherever it lands. `frontend/.gitignore` roots its own
+# rule at that directory, so a build run from the wrong working directory —
+# which is exactly how `src/.next/` once got committed — was not covered by
+# anything.
+.next/
