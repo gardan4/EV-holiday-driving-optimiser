@@ -22,7 +22,7 @@ import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveRun, Stop, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
 import { remainingRouteLegs } from "@/lib/maps"
 import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
@@ -327,18 +327,6 @@ export default function LiveView({
       </div>
     </div>
   )
-}
-
-/**
- * "46%" once a human has confirmed it; a RANGE while it's inferred.
- *
- * A range reads as an estimate in a way "46% ± 2" doesn't — the latter looks
- * like a measurement with a footnote, which is exactly the impression this
- * number has not earned.
- */
-function socLabel(soc: number, measured: boolean, band: number): string {
-  if (measured || band < 1) return `${Math.round(soc)}%`
-  return `${Math.max(0, Math.round(soc - band))}-${Math.min(100, Math.round(soc + band))}%`
 }
 
 /**

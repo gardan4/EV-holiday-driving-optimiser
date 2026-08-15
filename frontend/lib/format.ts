@@ -64,6 +64,21 @@ export function fmtKm(meters: number): string {
   return `${Math.round(meters / 1000)} km`
 }
 
+/**
+ * The live battery, as text: "46%" once a human has confirmed it, a RANGE
+ * while it is inferred.
+ *
+ * A range reads as an estimate in a way "46% ± 2" doesn't — the latter looks
+ * like a measurement with a footnote, which is exactly the impression this
+ * number has not earned. Lives here rather than in the drive screen because
+ * the HUD and the read-only row a watcher sees must not describe the same
+ * battery two different ways.
+ */
+export function socLabel(soc: number, measured: boolean, band: number): string {
+  if (measured || band < 1) return `${Math.round(soc)}%`
+  return `${Math.max(0, Math.round(soc - band))}-${Math.min(100, Math.round(soc + band))}%`
+}
+
 /** Google Maps deep link for a charging stop (no in-app map in v1). */
 export function mapsLink(lat: number, lon: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`

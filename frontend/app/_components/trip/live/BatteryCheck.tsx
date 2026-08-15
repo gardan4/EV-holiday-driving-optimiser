@@ -24,13 +24,16 @@
  * that opens the full control. The prompting behaviour is unchanged; what
  * changed is that dismissing a prompt, or never getting one, no longer takes
  * the feature away.
+ *
+ * Watchers get that line too, without the button — reading the battery is not
+ * the capability being withheld from them, writing it is.
  */
 
 import { useEffect, useRef, useState } from "react"
 import { BatteryMedium, Check, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveState } from "@/lib/client"
-import { fmtDuration } from "@/lib/format"
+import { fmtDuration, socLabel } from "@/lib/format"
 
 /** Above this much uncertainty the estimate is worth confirming unprompted. */
 const NUDGE_BAND = 4
@@ -80,8 +83,44 @@ export default function BatteryCheck({
   }, [openSignal, state.soc])
 
   const nudging = !state.soc_is_measured && state.soc_uncertainty_pct >= NUDGE_BAND
-  // Only the driver can submit a reading, so only the driver is offered one.
-  if (!isDriver) return null
+
+  // A watcher sees the battery and cannot touch it.
+  //
+  // Only the driver can submit a reading, so this used to render nothing at
+  // all for anyone else — which meant the person at the other end of the share
+  // link, the one actually wondering whether the car will make it, had the
+  // number in the HUD and no idea how old it was or how firm. It is the same
+  // row, minus the button.
+  //
+  // Shown as a RANGE while it is inferred, unlike the driver's row: they have
+  // a correction one tap away and a dashboard in front of them, and a watcher
+  // has neither, so the width of the estimate is the honest thing to give
+  // them. Same helper the HUD uses, so the two cannot disagree.
+  if (!isDriver) {
+    return (
+      <div className="mt-2 flex items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
+        <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
+        <span className="min-w-0 truncate">
+          Battery{" "}
+          <strong className="text-ink-700">
+            {socLabel(
+              state.soc,
+              state.soc_is_measured,
+              state.soc_uncertainty_pct
+            )}
+          </strong>
+          {state.soc_is_measured && state.anchor_age_min < 1
+            ? " · just confirmed"
+            : state.soc_is_measured
+              ? ` · confirmed ${fmtDuration(state.anchor_age_min)} ago`
+              : " · estimated"}
+        </span>
+        <span className="ml-auto hidden shrink-0 text-ink-400 sm:inline">
+          the driving phone confirms it
+        </span>
+      </div>
+    )
+  }
 
   function openEditor() {
     setDraft(Math.round(state.soc))
