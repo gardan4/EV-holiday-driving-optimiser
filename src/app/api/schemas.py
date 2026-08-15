@@ -256,6 +256,12 @@ class PingRequest(BaseModel):
 
 class SocReadingRequest(BaseModel):
     soc: float = Field(ge=0.0, le=100.0)
+    # Where the driver was standing when they read it. A dashboard figure is
+    # ground truth about a battery AT A PLACE, and anchoring it to the last
+    # position a sleeping phone happened to report attaches it to the wrong
+    # point on the route — see `runs.record_soc`.
+    lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
+    lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
 
 
 class ReplanRequest(BaseModel):

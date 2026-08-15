@@ -932,11 +932,51 @@ async def record_soc(
 
     This both re-anchors the estimate and calibrates the consumption model
     against reality — see `live.apply_reading`.
+
+    The POSITION comes with it, and that is not a detail. A reading is ground
+    truth about a battery AT A PLACE: type 45% at a services and the app
+    anchored it to wherever the phone last reported, which after a charge stop
+    is tens of kilometres back. Nothing looked wrong until the next re-plan
+    sent a fresh fix, which correctly moved the car forward and billed the drag
+    for that gap — road the car had already covered BEFORE the reading was
+    taken, and therefore energy already reflected in the figure the driver had
+    just typed. The battery visibly re-adjusted itself moments after being
+    corrected, always downwards, and the same understated window skewed
+    `run_factor` low: the model came out of it believing the car was thriftier
+    than it is.
+
+    So the fix moves the car first and anchors afterwards. An off-route fix is
+    ignored rather than refused — a reading taken at a supermarket two streets
+    off the corridor is still the best number anyone has, and the position is
+    the only part of it we cannot use.
     """
     run = await _load_run(db, run_id)
     if run.status != "active":
         raise HTTPException(status_code=409, detail="This drive has finished.")
     trip, vehicle = await _trip_and_vehicle(db, run)
+
+    if body.lat is not None and body.lon is not None:
+        snapshot = run.route_snapshot
+        geom_off, off_route = _geometry(snapshot).project(body.lat, body.lon)
+        if off_route <= live.OFF_ROUTE_M:
+            now_fix = datetime.utcnow()
+            run.state = live.resync(
+                run.state,
+                segments=live.snapshot_segments(snapshot),
+                veh=VehicleParams.from_vehicle(vehicle),
+                p=_sim_params(
+                    PlanRequest.model_validate(trip.request),
+                    run.state.get("run_factor", 1.0),
+                ),
+                offset_m=_geom_to_segment(snapshot, geom_off),
+                lat=body.lat,
+                lon=body.lon,
+                at_min=(now_fix - run.started_at).total_seconds() / 60.0,
+                off_route_m=off_route,
+                speed_kph=float(
+                    (run.plan or {}).get("optimum_speed") or run.planned_speed_kph
+                ),
+            )
 
     before = live.current_soc(run.state, vehicle.usable_kwh)
     new_st = live.apply_reading(run.state, body.soc, vehicle.usable_kwh)

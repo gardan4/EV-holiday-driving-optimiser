@@ -325,8 +325,13 @@ export function useLiveRun(
       if (!runId) return null
       setBusy(true)
       try {
-        const st = await recordSoc(runId, soc)
+        // The reading is about here, so it travels with here. The page is in
+        // the foreground — the driver is typing into it — so a fix usually
+        // arrives even after a long quiet spell at a charger.
+        const here = await currentPosition().catch(() => null)
+        const st = await recordSoc(runId, soc, here)
         setState(st)
+        setLocalOffsetM(null)
         return st
       } finally {
         setBusy(false)

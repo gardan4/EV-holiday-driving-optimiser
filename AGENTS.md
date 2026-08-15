@@ -478,6 +478,21 @@ the pipeline is green before infra exists. Infra deploy is manual
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
+- **A battery reading is about a PLACE, so it travels with one**
+  (`runs.record_soc`). The figure a driver types off the dashboard is the only
+  ground truth this app ever gets, and it was anchored to whatever position the
+  phone last reported — which after a charge stop is tens of kilometres back,
+  because a locked phone reports nothing. Nothing looked wrong until the next
+  re-plan sent a fresh fix, correctly moved the car forward, and billed the drag
+  for that gap: road already covered BEFORE the reading, and therefore energy
+  already inside the number just typed. The battery visibly re-adjusted itself
+  moments after being corrected, always downwards, and `apply_reading`
+  calibrated against the same understated window — so `run_factor` came out
+  believing the car was thriftier than it is, and every later prediction
+  inherited it. `POST /soc` now takes the fix and resyncs BEFORE anchoring. An
+  off-route fix is ignored rather than refused: a reading taken at a
+  supermarket two streets off the corridor is still the best number anyone has,
+  and the position is the only part of it that cannot be used.
 - **A re-plan starts from the fix the phone sends with it, and is the only
   call that may move the car BACKWARDS** (`runs.replan`, `live.resync`). Two
   separate holes closed by one change. GPS runs while the page is being looked

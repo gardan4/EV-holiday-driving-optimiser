@@ -1048,6 +1048,75 @@ class TestTakingAnArrivalBack:
         assert resp.status_code == 404
 
 
+class TestAReadingIsAboutAPlace:
+    """A dashboard figure is ground truth about a battery AT A PLACE.
+
+    Anchored to wherever a sleeping phone last reported, it attaches to the
+    wrong point on the route — and the next re-plan, which correctly moves the
+    car forward on a fresh fix, then bills the drag for road already covered
+    BEFORE the reading was taken. The driver watches the number they just
+    typed correct itself downwards, and the same understated window teaches
+    `run_factor` that the car is thriftier than it is.
+    """
+
+    async def test_a_reading_with_a_fix_survives_the_next_re_plan(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        # The phone reports once, then goes quiet while the car drives on.
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        here = along(0.25)
+
+        typed = 45.0
+        after_reading = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc", json={"soc": typed, **here}
+            )
+        ).json()
+        assert after_reading["soc"] == pytest.approx(typed, abs=0.1)
+
+        # The re-plan sends the same fix — the car has not moved since — so it
+        # has nothing to bill and must leave the figure alone.
+        plan = await client.post(f"/api/runs/{run['run_id']}/replan", json=here)
+        assert plan.status_code == 200, plan.text
+        after_replan = (
+            await client.get(f"/api/trips/{trip['id']}/live")
+        ).json()["state"]
+        assert after_replan["soc"] == pytest.approx(typed, abs=0.1)
+
+    async def test_without_a_fix_the_gap_is_still_billed_twice(self, client):
+        """The shape of the old bug, kept as a description of what the position
+        buys. A reading with no position anchors where the drive last thought
+        the car was; a re-plan from further on then charges that stretch to a
+        battery already measured past it."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+        typed = 45.0
+        await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": typed})
+        await client.post(f"/api/runs/{run['run_id']}/replan", json=along(0.25))
+        blind = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert blind["soc"] < typed - 0.5
+
+    async def test_an_off_route_fix_is_ignored_not_refused(self, client):
+        """A reading taken at a supermarket two streets off the corridor is
+        still the best number anyone has. The position is the only part of it
+        that cannot be used."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/soc",
+            json={"soc": 33.0, "lat": 40.0, "lon": -3.0},
+        )
+        assert resp.status_code == 200, resp.text
+        st = resp.json()
+        assert st["soc"] == pytest.approx(33.0, abs=0.1)
+        assert st["offset_m"] == pytest.approx(before["offset_m"], abs=1.0)
+
+
 class TestHoldingASpeed:
     """The re-plan swept a band and took its optimum, which decides for the
     driver. Six hours in, "I'm going to sit at 120" is a fact about the road

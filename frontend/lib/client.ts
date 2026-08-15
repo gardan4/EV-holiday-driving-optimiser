@@ -516,11 +516,22 @@ export async function pingRun(
   )
 }
 
-export async function recordSoc(runId: string, soc: number): Promise<LiveState> {
+/** What the dashboard says, and WHERE it said it.
+ *
+ *  The position is not decoration: a reading is ground truth about a battery
+ *  at a place, and anchored to wherever a sleeping phone last reported it
+ *  attaches to the wrong point on the route. The next re-plan then bills the
+ *  gap — road already driven before the reading — and the figure the driver
+ *  just typed corrects itself downwards in front of them. */
+export async function recordSoc(
+  runId: string,
+  soc: number,
+  here?: { lat: number; lon: number } | null
+): Promise<LiveState> {
   return unwrap<LiveState>(
     await apiFetch(`/api/runs/${runId}/soc`, {
       method: "POST",
-      body: JSON.stringify({ soc }),
+      body: JSON.stringify({ soc, lat: here?.lat ?? null, lon: here?.lon ?? null }),
     })
   )
 }
