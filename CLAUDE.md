@@ -347,7 +347,18 @@ the pipeline is green before infra exists. Infra deploy is manual
   network that puts posts in car parks, and matching it would mark half of
   Europe as having a bakery. It is a guess from a string, labelled as one
   ("reads like motorway services", never "has a restaurant"), and a null hint
-  means the name says nothing rather than that there is nothing there.
+  means the name says nothing rather than that there is nothing there. That
+  last part has a UI half: on a German motorway every fast charger is called
+  "Tesla Supercharger Geiselwind" or "IONITY Holzkirchen Süd" — network plus
+  place — so the reading comes back empty for the WHOLE list however far down
+  the ranking the search goes, and Geiselwind is an Autohof with a kitchen.
+  A panel that promises to mention food and then shows no chips has made the
+  absence claim by omission, so `AlternativeStops` says the names said nothing
+  and points at Maps. Widening `_FOOD_MARKERS` does not fix that corridor and
+  never will; the fix would be amenity data we do not have. Short markers live
+  in `_FOOD_WORDS` and match as WORDS, because "Spar" is inside "Sparkasse",
+  "Hofer" inside "Strohofer" and "Moto" inside "Motorway" — a food chip over a
+  savings bank is not a weak guess, it is a wrong one.
   **The stop the plan is already heading for is never offered as an
   alternative to itself** — the baseline pass is recomputed from where the car
   is NOW and must therefore use the same first-leg floor the plan was made

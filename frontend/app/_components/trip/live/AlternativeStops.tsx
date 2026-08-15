@@ -60,6 +60,17 @@ export default function AlternativeStops({
   onClose: () => void
 }) {
   const [taking, setTaking] = useState<string | null>(null)
+  // Whether the food question got an answer at all. On a German motorway the
+  // fast chargers are called "Tesla Supercharger Geiselwind" and "IONITY
+  // Holzkirchen Süd" — network plus place — so the reading comes back empty for
+  // the whole list however hard the server looks. Saying nothing there leaves a
+  // panel that promises to mention food and never does, which reads as "nowhere
+  // to eat at any of these": the exact absence claim the hint is not allowed to
+  // make. So the silence is stated, and stated as a fact about the NAMES.
+  const nothingSaidAboutFood =
+    data.alternatives.length > 0 &&
+    !data.alternatives.some((a) => a.food_hint) &&
+    !data.current?.food_hint
 
   return (
     <div className="mt-3 rounded-2xl border border-ink-200 bg-white p-3 sm:p-4">
@@ -140,6 +151,18 @@ export default function AlternativeStops({
             </li>
           ))}
         </ul>
+      )}
+
+      {nothingSaidAboutFood && (
+        <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-ink-50 px-2.5 py-2 text-[11px] leading-relaxed text-ink-500">
+          <UtensilsCrossed className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            None of these names say anything about food — most are just a
+            network and a place. That&apos;s the names, not the places:{" "}
+            <b className="font-semibold text-ink-600">Look</b> shows what is
+            actually there.
+          </span>
+        </p>
       )}
 
       {/* The caveats, one tap away instead of five lines above the list.
