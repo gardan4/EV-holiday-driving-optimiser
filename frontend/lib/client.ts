@@ -437,10 +437,35 @@ export interface Alternative {
   min_arrival_soc?: number | null
 }
 
+/** The nearest charger the battery cannot get to — the wall at the end of the
+ *  swipe axis, and deliberately NOT an `Alternative`: there is no plan behind
+ *  it, no cost in minutes and nothing to send to `replanRun`. It is here
+ *  because the options list simply stops at the last reachable charger and
+ *  says nothing about why, which leaves "how much further could I push?"
+ *  answerable only by finding out. */
+export interface Unreachable {
+  charger_id: string
+  name: string
+  operator: string | null
+  n_points?: number
+  power_kw: number
+  lat: number
+  lon: number
+  offset_m: number
+  /** How far short of it the car runs dry, driving past everything else at
+   *  the speed in force. */
+  shortfall_m: number
+  /** How much more battery that would take than there is, in points of SoC. */
+  deficit_pct: number
+}
+
 export interface Alternatives {
   speed_kph: number
   current: Alternative | null
   alternatives: Alternative[]
+  /** Null when the whole corridor ahead is reachable, or when the question was
+   *  about a stop further down the plan rather than the leg being driven. */
+  unreachable?: Unreachable | null
 }
 
 export interface StartRunResult {

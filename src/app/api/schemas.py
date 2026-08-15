@@ -284,7 +284,12 @@ class ReplanRequest(BaseModel):
     # charger further on. Applies to the FIRST leg only — see
     # `SimParams.first_leg_reserve_soc`. Persisted on the run, or the next
     # re-plan would refuse the stop the driver deliberately chose.
-    min_arrival_soc: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    # It works in BOTH directions, which is the whole of the swipe axis on the
+    # drive screen: under `reserve_soc` it accepts risk to reach a charger
+    # further on, and ABOVE it forces a stop short of the optimal one — the
+    # only way to ask for "somewhere earlier", since exclusions alone cannot
+    # stop the DP simply driving past a nearer charger it does not need.
+    min_arrival_soc: Optional[float] = Field(default=None, ge=0.0, le=80.0)
     # The speed the driver intends to hold from here, instead of whatever the
     # sweep finds fastest. Kept on the run, because the standing "Re-plan"
     # button would otherwise quietly overrule a decision they made ten minutes
@@ -381,12 +386,48 @@ class AlternativesRequest(BaseModel):
     reject_charger_id: Optional[str] = Field(default=None, max_length=64)
 
 
+class UnreachableOut(BaseModel):
+    """The nearest charger the car CANNOT get to — the wall at the end of the
+    axis.
+
+    Deliberately not an `AlternativeOut`: there is no plan behind it, no
+    arrival percentage, no cost in minutes, and nothing to send to `replan`.
+    It is on the wire because "how much further could I push?" has an answer
+    the driver can otherwise only find by running out — the options list stops
+    at the last charger a plan can reach and says nothing about why it stops
+    there. A separate field so it cannot be mistaken for something takeable.
+
+    Priced from the battery NOW, at the speed in force, through the same
+    `RouteProfile` the simulator uses — so it is the model's own arithmetic
+    rather than a second opinion about the same road.
+    """
+
+    charger_id: str
+    name: str
+    operator: Optional[str] = None
+    power_kw: float
+    n_points: int = 1
+    lat: float
+    lon: float
+    #: On the whole route's axis, like every other stop the frontend draws.
+    offset_m: float
+    #: How far short of it the car runs dry — the honest version of "you can't
+    #: get there", and the number a driver can actually weigh.
+    shortfall_m: float
+    #: How much more battery it would take than there is, in points of SoC.
+    deficit_pct: float
+
+
 class AlternativesOut(BaseModel):
     speed_kph: float
     #: The stop currently planned, as the thing the alternatives are priced
     #: against. Null when the plan has no stops left to swap.
     current: Optional[AlternativeOut] = None
     alternatives: list[AlternativeOut] = []
+    #: The first charger past everything a plan can reach. Null when the whole
+    #: corridor ahead is reachable, or when the question is about a stop
+    #: further down the plan rather than the leg being driven.
+    unreachable: Optional[UnreachableOut] = None
 
 
 class AtChargerOut(BaseModel):

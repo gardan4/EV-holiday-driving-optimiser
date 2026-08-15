@@ -51,6 +51,7 @@ from app.api.schemas import (
     StartRunOut,
     StartRunRequest,
     TimelinePoint,
+    UnreachableOut,
 )
 from app.api.trips import MAX_SWEEP_POINTS, _result_out, sim_params_for
 from app.core.config import settings
@@ -270,6 +271,24 @@ ARRIVE_MATCH_M = 1_500.0
 # planned on fumes — see `SimParams.first_leg_reserve_soc`.
 STRETCH_FLOOR_SOC = 4.0
 
+# The other end of the same axis: floors ABOVE the reserve, each forcing the
+# leg being driven to end higher and therefore SHORTER. Stretch options answer
+# "can I push on past it?"; these answer the question the drive screen had no
+# way to ask at all — "is there somewhere BEFORE it?", which is what a driver
+# wants when the weather turned, when the next stretch is a pass, or simply
+# when the battery is the thing they are nervous about.
+#
+# Exclusions cannot produce them. Turning the planned stop down leaves the DP
+# free to drive PAST every nearer charger it does not need — and it will,
+# because stopping later is quicker — so a raised first-leg floor is the only
+# handle on "stop sooner". It is the same parameter the stretch pass moves, in
+# the same direction of travel, which is why one axis can carry both.
+#
+# Three of them, ascending, because each floor yields exactly one stop and a
+# ladder is what makes the safe side a spectrum rather than a switch. Bounded
+# like everything else here: each is another DP over the remaining route.
+SAFE_FLOORS = (25.0, 40.0, 55.0)
+
 
 def _excluded(st: dict) -> list[str]:
     """Chargers this drive has turned down.
@@ -411,6 +430,77 @@ def _soc_needed_next(
     prof = RouteProfile(sl.segments, min(speed, veh.top_speed_kph), veh, params)
     kwh = prof.kwh_at(target - from_offset_m)
     return round(min(100.0, kwh / max(veh.usable_kwh, 1e-6) * 100.0 + reserve), 1)
+
+
+def _dry_distance_m(prof: RouteProfile, kwh: float) -> float:
+    """How far down the profile `kwh` runs out.
+
+    A scan and not `_lerp`: cumulative energy is NOT monotone — a long descent
+    gives some of it back — so the bisection `RouteProfile` uses for offset →
+    energy is not safe in the inverse direction. First crossing wins, which is
+    the one that matters: the car stops the first time the number reaches zero,
+    whatever the road does afterwards.
+    """
+    for i in range(1, len(prof.kwh)):
+        if prof.kwh[i] >= kwh:
+            lo_k, hi_k = prof.kwh[i - 1], prof.kwh[i]
+            lo_d, hi_d = prof.offsets[i - 1], prof.offsets[i]
+            if hi_k <= lo_k:
+                return lo_d
+            return lo_d + (kwh - lo_k) / (hi_k - lo_k) * (hi_d - lo_d)
+    return prof.offsets[-1]
+
+
+def _unreachable_ahead(
+    snapshot: dict,
+    offset_m: float,
+    soc: float,
+    speed: float,
+    veh: VehicleParams,
+    params: SimParams,
+) -> UnreachableOut | None:
+    """The nearest charger on the corridor the battery cannot get to.
+
+    The wall at the end of the swipe axis. Every option beside it is a plan;
+    this one deliberately is not, and that is its job — the list of stretch
+    options simply stops at the last charger a plan can reach and says nothing
+    about WHY it stops there, so "how much further could I push?" is a question
+    a driver can otherwise only answer by finding out.
+
+    Priced from the battery now, at the speed in force, through the same
+    `RouteProfile` the simulator plans with — so the wall is the model's own
+    arithmetic rather than a second opinion about the same road. Charging is
+    not in it, which is exactly the claim: this is what happens if you drive
+    past everything.
+    """
+    sl = slice_route(live.snapshot_segments(snapshot), [], offset_m)
+    if not sl.segments:
+        return None
+    prof = RouteProfile(sl.segments, speed, veh, params, sl.index_offset)
+    avail_kwh = max(soc, 0.0) / 100.0 * veh.usable_kwh
+    for c in sorted(live.snapshot_chargers(snapshot), key=lambda c: c.offset_m):
+        d = c.offset_m - offset_m
+        if d <= 0.0:
+            continue
+        need = prof.kwh_at(d)
+        if need <= avail_kwh:
+            continue
+        dry_m = _dry_distance_m(prof, avail_kwh)
+        return UnreachableOut(
+            charger_id=c.charger_id,
+            name=c.name,
+            operator=c.operator,
+            power_kw=c.power_kw,
+            n_points=c.n_points,
+            lat=round(c.lat, 5),
+            lon=round(c.lon, 5),
+            offset_m=round(c.offset_m),
+            shortfall_m=round(max(d - dry_m, 0.0)),
+            deficit_pct=round(
+                (need - avail_kwh) / max(veh.usable_kwh, 1e-6) * 100.0, 1
+            ),
+        )
+    return None
 
 
 def _planned_next_stop_id(run: TripRun, st: dict) -> str | None:
@@ -881,6 +971,15 @@ async def ping(
             "need_soc_next": _soc_needed_next(
                 run, trip, veh, params, float(new_st["offset_m"])
             ),
+            # …and the moment the accepted floor stops applying. It is the
+            # floor for the LEG BEING DRIVEN, and that leg has just ended, so
+            # carrying it on binds the next one to a decision made about a
+            # different stretch of road — a driver who pushed past the reserve
+            # once would keep planning on 4%, and one who asked for somewhere
+            # earlier would be handed short hop after short hop for the rest of
+            # the journey. `arrive/undo` restores the whole prior state, so a
+            # mis-tapped arrival puts the floor back with everything else.
+            "first_leg_floor_soc": None,
         }
     elif not new_st.get("at_charger_id"):
         new_st = {**new_st, "need_soc_next": None}
@@ -1026,6 +1125,8 @@ async def arrive(
         "need_soc_next": _soc_needed_next(
             run, trip, veh, params, float(new_st["offset_m"])
         ),
+        # The leg that floor was accepted for is over — see the ping path.
+        **({"first_leg_floor_soc": None} if node else {}),
         # Kept so the tap can be taken back. This is the one write in the whole
         # drive that is a CLAIM rather than a measurement — a person pressing a
         # button, next to a button they meant to press — and it is also the one
@@ -1537,7 +1638,23 @@ async def alternatives(
             return None
         return best
 
-    def _as_alt(best, stop, *, below_reserve: bool) -> AlternativeOut:
+    def _as_alt(
+        best,
+        stop,
+        *,
+        below_reserve: bool,
+        exclude: list[str] | None = None,
+        floor: float | None = None,
+    ) -> AlternativeOut:
+        """One candidate, and what taking it would mean.
+
+        `exclude`/`floor` are how a pass says what actually reproduces its
+        plan. The ordinary ranking is made by successive exclusion, so its
+        rows carry the ids ranked above them; a floor pass is made by moving
+        `first_leg_reserve_soc`, so its rows carry that number instead — and
+        sending the wrong one back is a re-plan that quietly picks a different
+        charger than the one on the card.
+        """
         return AlternativeOut(
             charger_id=stop.charger_id,
             name=stop.name,
@@ -1557,9 +1674,13 @@ async def alternatives(
                 if baseline_min is None
                 else round((best.total_min or 0.0) - baseline_min, 1)
             ),
-            exclude_charger_ids=list(turned_down),
+            exclude_charger_ids=list(turned_down if exclude is None else exclude),
             below_reserve=below_reserve,
-            min_arrival_soc=STRETCH_FLOOR_SOC if below_reserve else None,
+            min_arrival_soc=(
+                floor
+                if floor is not None
+                else (STRETCH_FLOOR_SOC if below_reserve else None)
+            ),
         )
 
     # 1. The ones a plan can already reach, ranked by successive exclusion.
@@ -1629,6 +1750,51 @@ async def alternatives(
         if stop.arrive_soc < params.reserve_soc:
             found.append(_as_alt(best, stop, below_reserve=True))
 
+    # 2b. The mirror image: chargers SHORT of the planned stop.
+    #
+    #     The list so far can only ever offer a stop as late as the optimum or
+    #     later — successive exclusion pushes the DP onwards, and the stretch
+    #     pass pushes it further still — so a driver who wants to stop EARLIER
+    #     had nothing to tap. That is the more common request of the two: it is
+    #     what you ask when the weather turned, when the next stretch is a
+    #     mountain pass, or when arriving somewhere on 9% is a number you do
+    #     not want to look at with children in the car.
+    #
+    #     One DP per floor, and the floor is what travels back with the choice:
+    #     an exclusion list cannot express "stop sooner", because the DP is
+    #     free to drive past every charger it does not need — and stopping
+    #     later is quicker, so it does. `exclude=[]` is therefore right and not
+    #     an omission; the run's standing rejections still apply at re-plan.
+    #
+    #     Next stop only, for the same reason the stretch pass is: the floor is
+    #     a first-leg idea, and "somewhere before it" is meaningless about a
+    #     stop four hours away.
+    if current is not None:
+        offered = {a.charger_id for a in found} | {current.charger_id}
+        for floor in SAFE_FLOORS if swapping_next else ():
+            # No earlier stop is to be had on a battery already under the floor
+            # being asked for — the DP would simply refuse, and so would every
+            # higher floor after it.
+            if floor > soc_now - 1.0:
+                break
+            best = await _next_best(
+                already, replace(params, first_leg_reserve_soc=floor)
+            )
+            if best is None or not best.stops:
+                continue
+            stop = best.stops[0]
+            if stop.charger_id in offered:
+                continue
+            # Only if it really is earlier. A floor that changes nothing gives
+            # back the optimum's own stop under another name, and a row that
+            # promises "sooner" and lands later is worse than no row.
+            if target_offset is not None and stop.offset_m >= target_offset:
+                continue
+            offered.add(stop.charger_id)
+            found.append(
+                _as_alt(best, stop, below_reserve=False, exclude=[], floor=floor)
+            )
+
     # 3. Somewhere to eat. The ranking above is by minutes, and the quickest
     #    few are regularly a lay-by, a car park and another lay-by — so the
     #    question "where can I actually eat" can go unanswered by a list that
@@ -1675,8 +1841,17 @@ async def alternatives(
         if alt.charger_id in near:
             alt.nearby = near[alt.charger_id]
 
+    # 5. And where pushing on stops being a choice. Only about the leg being
+    #    driven — like the stretch options, and for the same reason — and only
+    #    when there is something to push past in the first place.
+    wall = (
+        _unreachable_ahead(snapshot, st["offset_m"], soc_now, speed, veh, params)
+        if swapping_next
+        else None
+    )
+
     return AlternativesOut(
-        speed_kph=speed, current=current, alternatives=found
+        speed_kph=speed, current=current, alternatives=found, unreachable=wall
     )
 
 

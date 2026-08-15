@@ -19,6 +19,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.api import runs as runs_mod
 from app.api.runs import _sim_params
 from app.api.schemas import PlanRequest
 from app.api.trips import sim_params_for
@@ -139,6 +140,15 @@ async def start_run(client, trip: dict, **overrides) -> dict:
     resp = await client.post(f"/api/trips/{trip['id']}/runs", json=body)
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+async def _state(db_session) -> dict:
+    """The run's own state, for the handful of properties that are about what
+    the drive REMEMBERS rather than about what it answers."""
+    await db_session.commit()
+    run = (await db_session.execute(select(TripRun))).scalars().first()
+    await db_session.refresh(run)
+    return run.state
 
 
 class TestStartingADrive:
@@ -1514,6 +1524,160 @@ class TestTurningDownAStop:
             # Pushing past the reserve is a first-leg idea; it cannot be
             # offered about a stop four hours away.
             assert a["below_reserve"] is False
+
+    async def test_the_list_spans_both_sides_of_the_planned_stop(self, client):
+        """The whole point of the axis: somewhere earlier as well as somewhere
+        further.
+
+        Every pass that existed before this one could only push the stop
+        ONWARDS — successive exclusion because the DP takes the quickest
+        remaining plan, and the stretch pass by design — so "is there somewhere
+        before it?" had no answer at all, which is the more common of the two
+        questions on a wet evening with the battery lower than you like.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        here = out["current"]["offset_m"]
+        earlier = [a for a in out["alternatives"] if a["offset_m"] < here]
+        further = [a for a in out["alternatives"] if a["offset_m"] > here]
+        assert earlier, "expected somewhere to stop before the planned one"
+        assert further, "expected somewhere to push on to"
+        # Earlier really is safer: you arrive on more, and it is the arrival
+        # percentage the driver is weighing, not the ordering we happened to
+        # send.
+        for a in earlier:
+            assert a["arrive_soc"] > out["current"]["arrive_soc"]
+        for a in further:
+            assert a["arrive_soc"] < out["current"]["arrive_soc"]
+
+    async def test_an_earlier_option_is_reproduced_by_the_floor_it_carries(
+        self, client, monkeypatch
+    ):
+        """A raised first-leg floor is the ONLY thing that can ask for "stop
+        sooner", so it has to travel back with the choice.
+
+        Exclusions cannot express it: turn a charger down and the DP is free to
+        drive past every nearer one it does not need, and it will, because
+        stopping later is quicker. So the row carries the floor it was computed
+        under, and taking it has to land on the charger the card named — not
+        merely on some plan the server also likes.
+
+        The ordinary ranking is turned off here so the earlier rows can only
+        have come from the floor pass; on this corridor it finds a few of them
+        by itself, which would let this test pass without the thing it is
+        about ever running.
+        """
+        monkeypatch.setattr(runs_mod, "MAX_ALTERNATIVES", 0)
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        here = out["current"]["offset_m"]
+        earlier = [a for a in out["alternatives"] if a["offset_m"] < here]
+        assert earlier, "expected the floor pass to find somewhere earlier"
+        for a in earlier:
+            # Above the reserve, which is what makes it the safe side.
+            assert a["min_arrival_soc"] > 10.0
+            assert a["arrive_soc"] >= a["min_arrival_soc"]
+            assert a["below_reserve"] is False
+            # The floor does the work, so there is nothing to exclude — a list
+            # of ids here would be a second, contradictory instruction.
+            assert a["exclude_charger_ids"] == []
+
+        chosen = earlier[0]
+        plan = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/replan",
+                json={
+                    "exclude_charger_ids": chosen["exclude_charger_ids"],
+                    "min_arrival_soc": chosen["min_arrival_soc"],
+                },
+            )
+        ).json()
+        assert plan["remaining"]["stops"][0]["charger_id"] == chosen["charger_id"]
+
+    async def test_the_floor_stops_applying_once_that_leg_is_over(
+        self, client, db_session
+    ):
+        """It is the floor for the leg being DRIVEN, and no other.
+
+        Persisted, or the next re-plan refuses the stop just chosen — and then
+        cleared on arrival, or it binds every later leg to a decision made
+        about a different stretch of road: one accepted risk becomes a journey
+        planned on 4%, one cautious choice becomes short hop after short hop.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+        stretch = next(a for a in out["alternatives"] if a["below_reserve"])
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={
+                "exclude_charger_ids": stretch["exclude_charger_ids"],
+                "min_arrival_soc": stretch["min_arrival_soc"],
+            },
+        )
+        assert (await _state(db_session))["first_leg_floor_soc"] == 4.0
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/arrive",
+            json={"charger_id": stretch["charger_id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        assert (await _state(db_session))["first_leg_floor_soc"] is None
+
+    async def test_it_names_the_first_charger_the_battery_cannot_reach(
+        self, client
+    ):
+        """The wall at the end of the axis.
+
+        The options stop at the last charger a plan can reach and say nothing
+        about why they stop there, so "how much further could I push?" is a
+        question a driver can otherwise only answer by finding out. It is not
+        an alternative and is not offered as one — no plan, no cost in minutes,
+        nothing to send to `replan` — which is why it travels in its own field.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        wall = out["unreachable"]
+        assert wall is not None, "expected a charger beyond reach on a 933 km route"
+        # Past everything that IS on offer, including the stretch options —
+        # otherwise it is not the wall, it is a row that contradicts the list
+        # above it.
+        for a in [out["current"], *out["alternatives"]]:
+            assert wall["charger_id"] != a["charger_id"]
+            assert wall["offset_m"] > a["offset_m"]
+        # And it says by how much, because "you can't get there" is not
+        # something a driver can weigh and "you'd stop 34 km short" is.
+        assert wall["shortfall_m"] > 0
+        assert wall["deficit_pct"] > 0
+
+    async def test_the_wall_is_not_offered_about_a_stop_further_down_the_plan(
+        self, client
+    ):
+        """Pushing past the reserve is a first-leg idea and so is running out
+        of battery on the way there. Asked about a stop four hours away, the
+        car is not on that leg and its battery then is not the battery now."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        plan = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+        later = plan["remaining"]["stops"][2]
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/alternatives",
+                json={"reject_charger_id": later["charger_id"]},
+            )
+        ).json()
+        assert out["unreachable"] is None
 
     async def test_a_watcher_cannot_ask_for_alternatives(self, client):
         """It is a write-token route like every other run endpoint: the trip id

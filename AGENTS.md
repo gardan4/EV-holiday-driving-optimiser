@@ -433,6 +433,57 @@ the pipeline is green before infra exists. Infra deploy is manual
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".
+  **And the same handle, moved the other way, is the only thing that can ask
+  for somewhere EARLIER** (`SAFE_FLOORS`). Every pass above pushes the stop
+  onwards — successive exclusion because the DP takes the quickest remaining
+  plan, the stretch pass by design — so "is there somewhere before it?" had no
+  answer at all, which is the more common of the two questions on a wet evening
+  with the battery lower than you like. Exclusions cannot express it: turn the
+  planned stop down and the DP is free to drive PAST every nearer charger it
+  does not need, and it will, because stopping later is quicker. So a floor
+  ABOVE the reserve forces the leg being driven to end higher and therefore
+  shorter, one DP per floor, ascending, because each floor yields exactly one
+  stop and a ladder is what makes the safe side a spectrum rather than a
+  switch. Those rows carry the floor and an EMPTY exclusion list — the floor is
+  what reproduces the plan, and a list of ids beside it would be a second,
+  contradictory instruction. `tests/test_live_api.py` turns the ordinary
+  ranking off before asserting any of it, because on a short corridor that pass
+  finds a few earlier stops by itself and the test would pass without the
+  mechanism it is about ever running.
+  **A floor stops applying when the leg it was accepted for ends** — cleared at
+  the arrival transition in the ping path and in `arrive`, restored by
+  `arrive/undo` with the rest of the state. Persisting it is what stops the
+  next re-plan refusing the stop just chosen; clearing it is what stops one
+  accepted risk becoming a journey planned on 4%, and one cautious choice
+  becoming short hop after short hop for the rest of the day.
+  **The far end of that axis is a WALL, not an option** (`_unreachable_ahead`,
+  `UnreachableOut`). The list stops at the last charger a plan can reach and
+  says nothing about why it stops there, so a driver reading it cannot tell a
+  thin corridor from a flat battery, and "how much further could I push?" is
+  answerable only by finding out. So the nearest charger the battery CANNOT
+  reach comes down in its own field, with the distance it runs dry short of it
+  — because "you can't get there" is not something anybody can weigh and "you'd
+  stop 34 km short" is. Its own field and not a row in `alternatives`, because
+  it has no plan behind it: no cost in minutes, no arrival percentage, nothing
+  to send to `replan`, and no button on the card. Priced through the same
+  `RouteProfile` the simulator plans with, so the wall cannot become a second
+  opinion about the same road, and inverted by a SCAN rather than the class's
+  own bisection — cumulative energy is not monotone, a long descent gives some
+  of it back, and the first crossing is the one the car actually stops at.
+  **The panel is a swipe RAIL, and the order is the road**
+  (`AlternativeStops.tsx`). Cards are laid out by position on the route, so the
+  gesture is the decision: right is earlier — arrive on more, pay a few minutes
+  — and left is further, arriving lower, ending at the wall. A vertical list
+  has an order too, and it is one the reader has to decode from five arrival
+  percentages while driving. Native scroll-snap does the moving, so a thumb, a
+  trackpad and the arrow keys are the same mechanism; the settled card is read
+  back off `scrollLeft` rather than held as state the buttons also write, or
+  the three disagree. Centring is `scrollTo` on the track and never
+  `scrollIntoView`, which scrolls the PAGE — under a full-bleed 3D scene that
+  means the drive screen jumping every time the rail settles. It opens on the
+  plan in force, because that is what every other card is priced against, and
+  the axis is LABELLED at both ends: a colour is not a label, and here it is
+  the difference between "safer" and "the planner refuses this".
 - **Arriving anywhere is noticed, not just at the four stops the plan chose**
   (`live.nearest_charger`). The ping path matched `nearest_planned_stop` — the
   plan's own stops and nothing else — so a driver who stopped at any of the
