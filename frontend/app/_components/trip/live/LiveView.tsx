@@ -17,7 +17,7 @@
  *   live ETAs that disagree make the reader distrust both.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, PlugZap } from "lucide-react"
 import { toast } from "sonner"
@@ -76,6 +76,16 @@ export default function LiveView({
     [result, revised, distM]
   )
   const nextStop = useMemo(() => heroStop(ahead[0] ?? null, distM), [ahead, distM])
+
+  // Correcting the battery from the HUD. The scene is full-bleed, so on a phone
+  // the check itself is below the fold — asking for it has to bring it into
+  // view, or the tap looks like it did nothing.
+  const batteryRef = useRef<HTMLDivElement>(null)
+  const [socPrompt, setSocPrompt] = useState(0)
+  const askForBattery = useCallback(() => {
+    setSocPrompt((n) => n + 1)
+    batteryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [])
 
   const heroLive: LiveHeroState | null = useMemo(() => {
     if (!state || !run) return null
@@ -141,6 +151,7 @@ export default function LiveView({
           hoverStop={null}
           onHoverStop={() => {}}
           live={heroLive}
+          onCorrectBattery={isDriver && !finished ? askForBattery : undefined}
         />
       )}
 
@@ -223,13 +234,16 @@ export default function LiveView({
         )}
 
         {!finished && (
-          <BatteryCheck
-            state={state}
-            isDriver={isDriver}
-            busy={live.busy}
-            stopName={nextStop?.name ?? null}
-            onSubmit={live.submitSoc}
-          />
+          <div ref={batteryRef} className="scroll-mt-4">
+            <BatteryCheck
+              state={state}
+              isDriver={isDriver}
+              busy={live.busy}
+              stopName={nextStop?.name ?? null}
+              onSubmit={live.submitSoc}
+              openSignal={socPrompt}
+            />
+          </div>
         )}
 
         {/* --- diverged? offer to re-plan --------------------------------- */}

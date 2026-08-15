@@ -60,6 +60,10 @@ interface JourneyHeroProps {
    * navigate, correct). No verb appears in both.
    */
   live?: LiveHeroState | null
+  /** Present only for the phone that is driving: the HUD's battery readout
+   *  becomes the way to correct it. Undefined for watchers, who have nothing
+   *  to correct it with. */
+  onCorrectBattery?: () => void
 }
 
 export interface LiveHeroState {
@@ -98,6 +102,7 @@ export default function JourneyHero({
   onHoverStop,
   verdict = null,
   live = null,
+  onCorrectBattery,
 }: JourneyHeroProps) {
   const scroller = useRef<HTMLDivElement>(null)
   const [night, setNight] = useState(true)
@@ -585,6 +590,7 @@ export default function JourneyHero({
             onLookAhead={startBrowsing}
             onBackToNow={() => setBrowsing(false)}
             clockIso={clockIso}
+            onCorrectBattery={onCorrectBattery}
           />
         )}
 

@@ -12,9 +12,21 @@
  * calibrates the model just as usefully as correcting it, and it costs one tap
  * — without it, the only way to tell the app it was right is to retype the
  * number it is already showing, which nobody will ever do.
+ *
+ * Asking is not the same as being available, and this used to be only the ask:
+ * the card rendered when the car reached a charger or when the estimate had
+ * drifted far enough to be worth querying, and the rest of the time it did not
+ * exist. So a driver who simply wanted to correct the number — a passenger
+ * reading the dash out on the motorway, a coffee stop that is not a charger,
+ * the minutes right after setting off when the estimate is still confident —
+ * had nothing to press, on the one screen whose accuracy depends on them
+ * pressing it. It is now always there for the driver, as a single quiet line
+ * that opens the full control. The prompting behaviour is unchanged; what
+ * changed is that dismissing a prompt, or never getting one, no longer takes
+ * the feature away.
  */
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { BatteryMedium, Check, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveState } from "@/lib/client"
@@ -29,12 +41,16 @@ export default function BatteryCheck({
   busy,
   stopName,
   onSubmit,
+  openSignal = 0,
 }: {
   state: LiveState
   isDriver: boolean
   busy: boolean
   stopName: string | null
   onSubmit: (soc: number) => Promise<void>
+  /** Bumped when the driver asks for this from somewhere else on the screen —
+   *  the battery readout in the HUD, which is where they are already looking. */
+  openSignal?: number
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(Math.round(state.soc))
@@ -51,9 +67,52 @@ export default function BatteryCheck({
     }
   }, [atCharger, state.at_charger_id, asked, state.soc])
 
+  // An open request from elsewhere on the screen. Guarded against the signal's
+  // own value rather than only its identity, so the effect can depend on
+  // `state.soc` — which changes on every ping — without re-opening the panel
+  // under a driver who has just closed it.
+  const lastOpen = useRef(openSignal)
+  useEffect(() => {
+    if (openSignal === lastOpen.current) return
+    lastOpen.current = openSignal
+    setDraft(Math.round(state.soc))
+    setEditing(true)
+  }, [openSignal, state.soc])
+
   const nudging = !state.soc_is_measured && state.soc_uncertainty_pct >= NUDGE_BAND
-  const shouldShow = isDriver && (editing || atCharger || nudging)
-  if (!shouldShow) return null
+  // Only the driver can submit a reading, so only the driver is offered one.
+  if (!isDriver) return null
+
+  function openEditor() {
+    setDraft(Math.round(state.soc))
+    setEditing(true)
+  }
+
+  // Not being asked right now. The control still has to be reachable — one
+  // line, no prompt, no nagging.
+  if (!editing && !atCharger && !nudging) {
+    return (
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-2">
+        <p className="flex min-w-0 items-center gap-1.5 text-xs text-ink-500">
+          <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
+          <span className="truncate">
+            Battery <strong className="text-ink-700">{Math.round(state.soc)}%</strong>
+            {state.soc_is_measured && state.anchor_age_min < 1
+              ? ", confirmed just now"
+              : state.soc_is_measured
+                ? `, confirmed ${fmtDuration(state.anchor_age_min)} ago`
+                : ", estimated from distance driven"}
+          </span>
+        </p>
+        <button
+          onClick={openEditor}
+          className="shrink-0 rounded-xl border border-ink-300 px-3 py-2 text-sm font-semibold text-ink-700"
+        >
+          Correct it
+        </button>
+      </div>
+    )
+  }
 
   async function send(value: number) {
     try {

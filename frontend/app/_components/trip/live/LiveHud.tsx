@@ -20,7 +20,14 @@
  * of the car.
  */
 
-import { BatteryMedium, ChevronsRight, Clock, Navigation, Undo2 } from "lucide-react"
+import {
+  BatteryMedium,
+  ChevronsRight,
+  Clock,
+  Navigation,
+  Pencil,
+  Undo2,
+} from "lucide-react"
 import { LiveHeroState } from "../JourneyHero"
 import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
 
@@ -31,6 +38,7 @@ export default function LiveHud({
   onLookAhead,
   onBackToNow,
   clockIso,
+  onCorrectBattery,
 }: {
   live: LiveHeroState
   browsing: boolean
@@ -38,6 +46,10 @@ export default function LiveHud({
   onLookAhead: () => void
   onBackToNow: () => void
   clockIso: string
+  /** Driver only. The battery readout is where a driver looks when they want
+   *  to fix the battery, so it is what they get to press — the check itself
+   *  lives below a full-bleed scene, which on a phone means below the fold. */
+  onCorrectBattery?: () => void
 }) {
   const late = live.aheadBehindMin > 1
   const early = live.aheadBehindMin < -1
@@ -103,6 +115,8 @@ export default function LiveHud({
           }
           tone={live.socVsPlan < -5 ? "warn" : live.socVsPlan > 5 ? "good" : "plain"}
           dim={dimmed}
+          onPress={onCorrectBattery}
+          pressLabel="Correct the battery reading"
         />
 
         {/* The next stop takes whatever room is left — its name is the one
@@ -170,7 +184,12 @@ export default function LiveHud({
 }
 
 /** Value over a tiny label — the same shape the preview HUD uses, so the two
- *  modes read as one design rather than two. */
+ *  modes read as one design rather than two.
+ *
+ *  `onPress` turns one into a control without changing what it looks like:
+ *  same numbers, same place, plus a pencil on the label row. A readout that
+ *  becomes a button when there is something to do with it beats a button
+ *  parked somewhere else, on a bar that is already full at this width. */
 function Readout({
   icon,
   label,
@@ -178,6 +197,8 @@ function Readout({
   sub,
   tone,
   dim,
+  onPress,
+  pressLabel,
 }: {
   icon: React.ReactNode
   label: string
@@ -185,6 +206,8 @@ function Readout({
   sub: string
   tone: "plain" | "warn" | "good"
   dim?: boolean
+  onPress?: () => void
+  pressLabel?: string
 }) {
   const toneCls =
     tone === "warn"
@@ -192,16 +215,37 @@ function Readout({
       : tone === "good"
         ? "text-brand-300"
         : "text-white/45"
-  return (
-    <div className={`shrink-0 ${dim ? "opacity-60" : ""}`}>
+
+  const body = (
+    <>
       <div className="font-mono text-sm font-bold tabular-nums leading-tight text-white">
         {value}
       </div>
       <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-white/40">
         {icon}
         {label}
+        {onPress && <Pencil className="h-2.5 w-2.5" />}
       </div>
       <div className={`text-[10px] leading-tight ${toneCls}`}>{sub}</div>
-    </div>
+    </>
+  )
+
+  if (!onPress) {
+    return <div className={`shrink-0 ${dim ? "opacity-60" : ""}`}>{body}</div>
+  }
+
+  return (
+    <button
+      onClick={onPress}
+      aria-label={pressLabel}
+      title={pressLabel}
+      // Negative margin so the tap target grows without moving the number:
+      // this sits in a row measured to the pixel against the next stop's name.
+      className={`-mx-1.5 -my-1 shrink-0 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/10 active:bg-white/15 ${
+        dim ? "opacity-60" : ""
+      }`}
+    >
+      {body}
+    </button>
   )
 }
