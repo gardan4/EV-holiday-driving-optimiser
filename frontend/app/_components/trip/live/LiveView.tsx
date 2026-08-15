@@ -570,7 +570,15 @@ export default function LiveView({
           </div>
         )}
 
-        {revised && !finished && (
+        {/* Driver only, like every other control on this screen. A watcher has
+            no run id, so the stepper's "Hold 135" reached `requestReplan`,
+            found no token and returned null — a button that silently does
+            nothing, offered to a passenger who has every reason to think they
+            just changed the driver's plan. Nothing is hidden by this: the
+            speed in force is on the revised panel as "Now hold", for everyone,
+            because `optimum_speed` is the plan's speed whether it was chosen
+            or computed. */}
+        {revised && !finished && isDriver && (
           <HoldSpeed
             plan={revised}
             startedAtIso={run.started_at}

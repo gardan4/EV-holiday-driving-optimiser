@@ -1029,6 +1029,16 @@ docker compose -f docker-compose.local-db.yml up -d
 - **`frontend/app/privacy/page.tsx` is a promise, not prose.** Every claim on it
   has to be true of the code — "deleted after 90 days" was false for as long as
   nothing called the purge. Change the page and the behaviour together.
+- **Every control on the drive screen needs an `isDriver` gate, and nothing
+  fails when it is missing.** The server is safe on its own — a watcher holds
+  the trip id, writes need the run id, and `TestCapabilities` pins that — so an
+  ungated control does not leak anything or break: the click reaches
+  `requestReplan`, finds no token, returns null, and the passenger who just
+  pressed "Hold 135" believes they changed the driver's plan. That silence is
+  why `HoldSpeed` shipped visible to watchers while every sibling was gated.
+  There is no frontend test runner to catch it, so the rule is the guard: if it
+  calls a `live.*` write, gate it at the call site (or handle `!isDriver`
+  inside, as `BatteryCheck` does when the read-only version is worth showing).
 - **A new page route needs a line in `events.KNOWN_PATHS`.** It is an allowlist,
   so an unlisted route is counted as `/other` — it under-reports, which is the
   safe direction, and is why it is an allowlist rather than a blocklist. Adding
