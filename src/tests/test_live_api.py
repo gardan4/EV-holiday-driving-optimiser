@@ -642,6 +642,73 @@ class TestReplanning:
         assert live["plan"]["plan_version"] == 1
 
 
+class TestSayingYouAreThere:
+    """A phone that is locked reports nothing, and a phone whose car is
+    charging is locked. Without a way to say so, the drive sits believing you
+    are still short of the stop you are plugged into."""
+
+    async def test_it_moves_the_car_to_the_stop_and_marks_it(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(s for s in speed["stops"] if s["offset_m"] > before["offset_m"])
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/arrive",
+            json={"charger_id": stop["charger_id"]},
+        )
+        assert resp.status_code == 200, resp.text
+        st = resp.json()
+        assert st["at_charger_id"] == stop["charger_id"]
+        assert st["offset_m"] == pytest.approx(stop["offset_m"], abs=1500)
+        assert st["stale"] is False
+
+    async def test_the_kilometres_it_skips_are_billed(self, client):
+        """Moving the car forward without pricing the drag would hand back a
+        battery that never spent the energy to get there — a worse lie than the
+        stale position it replaces."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(s for s in speed["stops"] if s["offset_m"] > before["offset_m"] + 20_000)
+
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()
+        assert after["soc"] < before["soc"] - 1.0
+
+    async def test_a_charger_that_is_not_on_this_route_is_refused(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/arrive", json={"charger_id": "nope"}
+        )
+        assert resp.status_code == 404
+
+    async def test_a_watcher_cannot_move_the_car(self, client):
+        trip = await make_trip(client)
+        await start_run(client, trip)
+        resp = await client.post(
+            f"/api/trips/{trip['id']}/arrive", json={"charger_id": "chg-3"}
+        )
+        assert resp.status_code == 404
+
+
 class TestHoldingASpeed:
     """The re-plan swept a band and took its optimum, which decides for the
     driver. Six hours in, "I'm going to sit at 120" is a fact about the road

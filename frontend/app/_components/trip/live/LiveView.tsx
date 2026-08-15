@@ -224,6 +224,18 @@ export default function LiveView({
     }
   }
 
+  /** "I'm standing at this one." Moves the drive to the stop and marks it, so
+   *  the screen stops being about a stretch of road already driven. */
+  async function markArrived(stop: Stop) {
+    try {
+      await live.markArrived(stop.charger_id)
+      setFocusId(stop.charger_id)
+      toast.success(`Charging at ${stop.name}.`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not move the drive")
+    }
+  }
+
   async function doReplan() {
     try {
       const plan = await live.requestReplan()
@@ -332,6 +344,11 @@ export default function LiveView({
             onFindAlternatives={
               isDriver && focused
                 ? () => void loadAlternatives(focused.charger_id)
+                : undefined
+            }
+            onArrive={
+              isDriver && focused
+                ? () => void markArrived(focused)
                 : undefined
             }
           />

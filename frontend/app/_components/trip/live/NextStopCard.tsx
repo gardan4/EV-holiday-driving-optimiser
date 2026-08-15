@@ -78,6 +78,7 @@ export default function NextStopCard({
   index = 0,
   total = 1,
   onStep,
+  onArrive,
 }: {
   /** The stop this card is about: the one under the car when plugged in,
    *  otherwise the next one ahead. Null when there are none left. */
@@ -105,6 +106,10 @@ export default function NextStopCard({
   index?: number
   total?: number
   onStep?: (delta: 1 | -1) => void
+  /** Driver only: "I'm standing at this one". The drive cannot see it — a
+   *  locked phone reports no position, which is what a phone does while its
+   *  car charges. */
+  onArrive?: () => void
 }) {
   if (!stop) {
     return (
@@ -278,6 +283,19 @@ export default function NextStopCard({
             </button>
           )}
         </div>
+      )}
+
+      {/* Quiet, and only for the driver. The phone stops reporting the moment
+          it locks, so arriving somewhere is the one thing the drive cannot
+          notice on its own — and until it is told, every number above is about
+          a stretch of road already driven. */}
+      {!here && onArrive && (
+        <button
+          onClick={onArrive}
+          className="mt-2 w-full rounded-xl py-2 text-xs font-semibold text-ink-500 underline underline-offset-2 hover:text-brand-700"
+        >
+          I&apos;m plugged in here now
+        </button>
       )}
     </div>
   )

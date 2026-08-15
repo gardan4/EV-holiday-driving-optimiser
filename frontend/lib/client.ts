@@ -539,6 +539,21 @@ export async function getAlternatives(
   )
 }
 
+/** "I'm standing at this one now." A locked phone reports no position, which
+ *  is the state a phone is in while its car charges — so the drive has to be
+ *  tellable by hand. The server bills the kilometres it skips. */
+export async function arriveAt(
+  runId: string,
+  chargerId: string
+): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/arrive`, {
+      method: "POST",
+      body: JSON.stringify({ charger_id: chargerId }),
+    })
+  )
+}
+
 export async function finishRun(runId: string): Promise<LiveState> {
   return unwrap<LiveState>(
     await apiFetch(`/api/runs/${runId}/finish`, { method: "POST" })

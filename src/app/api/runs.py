@@ -32,6 +32,7 @@ from app.api.schemas import (
     AlternativeOut,
     AlternativesOut,
     AlternativesRequest,
+    ArriveRequest,
     BenchmarkOut,
     LiveOut,
     LiveStateOut,
@@ -322,6 +323,21 @@ def _resolve_hold_speed(run: TripRun, body: ReplanRequest) -> float | None:
         return float(v) if v is not None else None
     run.state = {**run.state, "hold_speed_kph": body.hold_speed_kph}
     return body.hold_speed_kph
+
+
+def _plan_stop_offset(run: TripRun, trip: Trip, charger_id: str) -> float | None:
+    """Where the plan in force puts this stop, on the route's own axis."""
+    plan = run.plan or None
+    if plan:
+        base = float(plan.get("offset_base_m") or 0.0)
+        for s in (plan.get("remaining") or {}).get("stops") or []:
+            if s["charger_id"] == charger_id:
+                return float(s["offset_m"]) + base
+    speed = _planned_result(trip, run.planned_speed_kph) or {}
+    for s in speed.get("stops", []):
+        if s["charger_id"] == charger_id:
+            return float(s["offset_m"])
+    return None
 
 
 def _planned_next_stop_id(run: TripRun, st: dict) -> str | None:
@@ -618,6 +634,97 @@ async def ping(
                 soc=live.current_soc(new_st, vehicle.usable_kwh),
             )
         )
+    await db.commit()
+    return _state_out(run, trip, vehicle.usable_kwh)
+
+
+@router.post("/runs/{run_id}/arrive", response_model=LiveStateOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_PING, key_func=run_key)
+async def arrive(
+    request: Request,
+    run_id: str,
+    body: ArriveRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LiveStateOut:
+    """The driver says which stop they are standing at.
+
+    Position comes from GPS, and GPS comes from a page that is being looked
+    at: a locked phone reports nothing, which is precisely the state a phone
+    is in while its car charges. So the drive would sit believing you are 69 km
+    short of the charger you are plugged into, showing a plan for a stretch of
+    road you have already driven — reported from a charger, mid-charge, with
+    "no update for 15 minutes" above it.
+
+    The missing kilometres are BILLED, not skipped. Moving the offset forward
+    without pricing the drag would hand back a battery estimate that never
+    spent the energy to get here, which is a worse lie than the stale position
+    was: `live.advance` prices the jump exactly as it prices a ping, and the
+    time since the last report is charged as driving, because that is what it
+    was. The charger is then marked by hand — `advance` only recognises a stop
+    the car creeps up on, and this one arrived in a single leap.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    snapshot = run.route_snapshot
+    node = next(
+        (
+            c
+            for c in live.snapshot_chargers(snapshot)
+            if c.charger_id == body.charger_id
+        ),
+        None,
+    )
+    if node is None:
+        raise HTTPException(status_code=404, detail="Not a charger on this route.")
+
+    # The PLAN's offset for this stop, not the snapshot node's: the plan is
+    # what the screen is drawn from, and the two axes differ by a few hundred
+    # metres over a long route. Landing the car anywhere but where the list
+    # says the stop is would leave it "0 km away" and still not there.
+    offset_m = _plan_stop_offset(run, trip, body.charger_id)
+    if offset_m is None:
+        offset_m = node.offset_m
+
+    now = datetime.utcnow()
+    at_min = max((now - run.started_at).total_seconds() / 60.0, run.state["at_min"])
+    gap_s = max(0.0, (at_min - run.state["at_min"]) * 60.0)
+
+    plan_req = PlanRequest.model_validate(trip.request)
+    params = _sim_params(plan_req, run.state.get("run_factor", 1.0))
+    veh = VehicleParams.from_vehicle(vehicle)
+
+    new_st = live.advance(
+        run.state,
+        segments=live.snapshot_segments(snapshot),
+        veh=veh,
+        p=params,
+        offset_m=max(float(offset_m), run.state["offset_m"]),
+        lat=node.lat,
+        lon=node.lon,
+        at_min=at_min,
+        off_route_m=0.0,
+        # The gap was spent getting here. Capped like a ping's own window, so a
+        # phone that was off for six hours cannot bill six hours of drag.
+        moving_s=min(gap_s, 3600.0),
+        stationary_s=0.0,
+    )
+    run.state = {
+        **new_st,
+        "at_charger_id": body.charger_id,
+        "stale": False,
+    }
+    run.last_seen_at = now
+    db.add(
+        TripEvent(
+            run_id=run.id, at=now, kind="arrive", offset_m=float(offset_m),
+            lat=node.lat, lon=node.lon,
+            soc=live.current_soc(run.state, vehicle.usable_kwh),
+            payload={"charger_id": body.charger_id, "name": node.name},
+        )
+    )
     await db.commit()
     return _state_out(run, trip, vehicle.usable_kwh)
 

@@ -389,6 +389,20 @@ the pipeline is green before infra exists. Infra deploy is manual
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".
+- **A locked phone reports nothing, so arriving has to be tellable by hand**
+  (`POST /runs/{id}/arrive`). Position comes from GPS, GPS comes from a page
+  being looked at, and a phone whose car is charging is in a pocket — so the
+  drive sat believing the driver was 69 km short of the charger they were
+  plugged into, showing a plan for road already driven under a "no update for
+  15 minutes" banner. The button says which stop. Two properties matter. The
+  skipped kilometres are BILLED through `live.advance`, not jumped: moving the
+  offset forward without pricing the drag returns a battery that never spent
+  the energy to get there, which is a worse lie than the stale position. And
+  the charger is marked BY HAND afterwards, because `advance` only recognises a
+  stop the car creeps up on (`dx < AT_CHARGER_M`) and this one arrives in a
+  single leap. The offset comes from the PLAN's stop, not the snapshot node —
+  the two axes differ by a few hundred metres over a long route, and landing
+  anywhere else leaves the car "0 km away" and still not there.
 - **The driver picks the speed they are going to hold, mid-drive**
   (`runs.replan`, `HoldSpeed.tsx`). The re-plan swept a band and took its
   optimum, which decides something the person in the car is better placed to

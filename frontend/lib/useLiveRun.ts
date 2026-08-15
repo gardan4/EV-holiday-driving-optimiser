@@ -18,6 +18,7 @@ import {
   LiveRun,
   LiveState,
   RevisedPlan,
+  arriveAt,
   finishRun,
   getAlternatives,
   getLiveRun,
@@ -107,6 +108,8 @@ export interface LiveHandle {
   /** Other chargers for a stop. Read-only — taking one is a re-plan.
    *  `rejectChargerId` names which stop; omit it for the next one. */
   findAlternatives: (rejectChargerId?: string) => Promise<Alternatives | null>
+  /** Tell the drive you are standing at this charger. */
+  markArrived: (chargerId: string) => Promise<LiveState | null>
   end: () => Promise<void>
 }
 
@@ -243,9 +246,20 @@ export function useLiveRun(
       }
     }
     const h = setInterval(send, PING_EVERY_MS)
+    // …and the moment the page is looked at again. A phone that was locked
+    // has been reporting nothing, so the first thing the driver sees on
+    // unlocking is a position from before the gap — and the interval would
+    // make them watch it for another 25 seconds. `watchPosition` resumes on
+    // its own, so by the time this fires there is usually a fresh fix; when
+    // there is not, `send` bails on `a.have` and the interval covers it.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void send()
+    }
+    document.addEventListener("visibilitychange", onVisible)
     return () => {
       alive = false
       clearInterval(h)
+      document.removeEventListener("visibilitychange", onVisible)
     }
   }, [broadcasting, runId])
 
@@ -332,6 +346,24 @@ export function useLiveRun(
     [runId]
   )
 
+  const markArrived = useCallback(
+    async (chargerId: string) => {
+      if (!runId) return null
+      setBusy(true)
+      try {
+        const st = await arriveAt(runId, chargerId)
+        setState(st)
+        // The car has moved; the locally snapped offset is from before the
+        // jump and would drag the scene back until the next fix.
+        setLocalOffsetM(null)
+        return st
+      } finally {
+        setBusy(false)
+      }
+    },
+    [runId]
+  )
+
   const end = useCallback(async () => {
     if (!runId) return
     setBusy(true)
@@ -370,6 +402,7 @@ export function useLiveRun(
     submitSoc,
     requestReplan,
     findAlternatives,
+    markArrived,
     end,
   }
 }

@@ -323,6 +323,19 @@ class AlternativeOut(BaseModel):
     min_arrival_soc: Optional[float] = None
 
 
+class ArriveRequest(BaseModel):
+    """"I am standing at this one now."
+
+    A phone that is locked, or in a pocket, or simply on a browser tab that
+    lost focus, stops reporting — which is exactly what a phone does while its
+    car is charging. The drive then believes you are still short of the stop
+    you are plugged into, and every number on the screen is about a journey
+    you have already made. This is the driver saying so.
+    """
+
+    charger_id: str = Field(max_length=64)
+
+
 class AlternativesRequest(BaseModel):
     """Which stop the driver wants to replace.
 
