@@ -101,7 +101,8 @@ export interface LiveHandle {
    *  driven, to reach a charger further on. */
   requestReplan: (
     exclude?: string[],
-    minArrivalSoc?: number | null
+    minArrivalSoc?: number | null,
+    holdSpeedKph?: number | null
   ) => Promise<RevisedPlan | null>
   /** Other chargers for the next stop. Read-only — taking one is a re-plan. */
   findAlternatives: () => Promise<Alternatives | null>
@@ -296,11 +297,18 @@ export function useLiveRun(
   )
 
   const requestReplan = useCallback(
-    async (exclude: string[] = [], minArrivalSoc: number | null = null) => {
+    async (
+      exclude: string[] = [],
+      minArrivalSoc: number | null = null,
+      // `undefined` is "leave my speed alone" and `null` is "you pick" — the
+      // same distinction the server draws, carried the whole way rather than
+      // collapsed into a default here.
+      holdSpeedKph: number | null | undefined = undefined
+    ) => {
       if (!runId) return null
       setBusy(true)
       try {
-        const plan = await replanRun(runId, exclude, minArrivalSoc)
+        const plan = await replanRun(runId, exclude, minArrivalSoc, holdSpeedKph)
         setRun((r) => (r ? { ...r, plan } : r))
         return plan
       } finally {

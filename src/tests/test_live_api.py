@@ -642,6 +642,84 @@ class TestReplanning:
         assert live["plan"]["plan_version"] == 1
 
 
+class TestHoldingASpeed:
+    """The re-plan swept a band and took its optimum, which decides for the
+    driver. Six hours in, "I'm going to sit at 120" is a fact about the road
+    and the passengers, and the plan's job is to tell them what it costs — not
+    to overrule it."""
+
+    async def test_a_held_speed_is_the_plan(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        free = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+
+        hold = free["optimum_speed"] - 10.0
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan", json={"hold_speed_kph": hold}
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["held_speed_kph"] == pytest.approx(hold)
+        # `optimum_speed` is what every reader treats as "the speed to hold",
+        # so it is the plan's own speed — held or not.
+        assert out["optimum_speed"] == pytest.approx(hold)
+        # Slower than the optimum costs time, and the driver is told how much
+        # BEFORE they are asked to live with it.
+        assert out["hold_costs_min"] > 0
+        assert out["benchmark"]["live_total_min"] > free["benchmark"]["live_total_min"]
+
+    async def test_it_survives_the_next_plain_re_plan(self, client):
+        """The standing "Re-plan" button says nothing about speed, so it must
+        not silently overrule a decision made ten minutes ago."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        first = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+        hold = first["optimum_speed"] - 10.0
+
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan", json={"hold_speed_kph": hold}
+        )
+        again = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+        assert again["held_speed_kph"] == pytest.approx(hold)
+        assert again["optimum_speed"] == pytest.approx(hold)
+
+    async def test_an_explicit_null_hands_the_choice_back(self, client):
+        """Absent means "leave it alone" and null means "you pick" — a
+        distinction the field alone cannot carry, hence `model_fields_set`."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        free = (await client.post(f"/api/runs/{run['run_id']}/replan", json={})).json()
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={"hold_speed_kph": free["optimum_speed"] - 10.0},
+        )
+
+        back = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/replan", json={"hold_speed_kph": None}
+            )
+        ).json()
+        assert back["held_speed_kph"] is None
+        assert back["hold_costs_min"] == 0.0
+        assert back["optimum_speed"] == pytest.approx(free["optimum_speed"])
+
+    async def test_a_speed_the_car_cannot_do_is_clamped_not_refused(self, client):
+        """"Hold 220" in a car that stops at 160 is a request for everything it
+        has, not an error to hand back at the wheel."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan", json={"hold_speed_kph": 220.0}
+        )
+        assert resp.status_code == 200, resp.text
+        top = trip["result"]["vehicle"]["top_speed_kph"]
+        assert resp.json()["held_speed_kph"] == pytest.approx(top)
+
+
 class TestTurningDownAStop:
     """The planner optimises minutes; a stop can be bad for reasons minutes
     cannot see — nowhere to eat, nowhere to sit, not at nine in the evening.

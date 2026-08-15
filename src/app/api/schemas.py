@@ -245,6 +245,13 @@ class ReplanRequest(BaseModel):
     # `SimParams.first_leg_reserve_soc`. Persisted on the run, or the next
     # re-plan would refuse the stop the driver deliberately chose.
     min_arrival_soc: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    # The speed the driver intends to hold from here, instead of whatever the
+    # sweep finds fastest. Kept on the run, because the standing "Re-plan"
+    # button would otherwise quietly overrule a decision they made ten minutes
+    # ago. OMIT the field to keep the current intention; send `null` to hand
+    # the choice back to the optimiser — the two are distinguished by
+    # `model_fields_set`, so "unchanged" and "clear it" cannot collide.
+    hold_speed_kph: Optional[float] = Field(default=None, ge=60.0, le=220.0)
 
 
 class AlternativeOut(BaseModel):
@@ -325,6 +332,14 @@ class BenchmarkOut(BaseModel):
 
 class ReplanOut(BaseModel):
     plan_version: int
+    # The speed the driver asked to hold, when they asked. Null means the plan
+    # below is simply the fastest one — `optimum_speed` is the speed of the
+    # plan in force either way, so every existing reader keeps working.
+    held_speed_kph: Optional[float] = None
+    # What holding it costs against the best speed in the sweep. The number a
+    # driver actually wants before committing: "80 is calmer, and it lands you
+    # 26 minutes later." Zero when the held speed IS the optimum.
+    hold_costs_min: float = 0.0
     # The tail's offsets and arrival times are all relative to the cut, so the
     # frontend needs both of these to draw it on the original's axes.
     offset_base_m: float

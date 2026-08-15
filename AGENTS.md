@@ -365,6 +365,23 @@ the pipeline is green before infra exists. Infra deploy is manual
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".
+- **The driver picks the speed they are going to hold, mid-drive**
+  (`runs.replan`, `HoldSpeed.tsx`). The re-plan swept a band and took its
+  optimum, which decides something the person in the car is better placed to
+  decide: six hours in, "I'm going to sit at 120" is a fact about the road, the
+  weather and who is asleep in the back, and the plan's job is to price it, not
+  to overrule it. Three things make it work. **It is kept on the run**
+  (`run.state["hold_speed_kph"]`), because the standing "Re-plan" button says
+  nothing about speed and would otherwise quietly revert a decision made ten
+  minutes ago — the same defect as the exclusions, and the same fix. **Absent,
+  a number and an explicit null are three different requests** — "leave my
+  speed alone", "hold 135", "you pick" — separated by `model_fields_set`, or
+  every ordinary re-plan would read as a request to clear the choice. And
+  **`optimum_speed` stays the speed of the plan in force**, held or not, so
+  every existing reader keeps working; `held_speed_kph` is how the UI tells the
+  difference and `hold_costs_min` is what it costs. The stepper previews from
+  the sweep already in the browser (`ReplanOut.speeds`), so only committing
+  costs a request — a phone with one bar must not lag per tap.
 - **The phone drives the plan the reader chose, not the optimum.** "Drive this"
   hands `/trip/[id]/drive?speed=` to the phone, appended only when the
   selection is not `optimum_speed` so ordinary links and the QR for an

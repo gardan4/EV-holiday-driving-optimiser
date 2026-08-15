@@ -298,6 +298,24 @@ def _set_first_leg_floor(run: TripRun, floor: float | None) -> float | None:
     return floor
 
 
+def _resolve_hold_speed(run: TripRun, body: ReplanRequest) -> float | None:
+    """The speed the driver intends to hold, and whether that intention changed.
+
+    Three distinct requests, and the field alone cannot tell them apart:
+    "re-plan, leave my speed alone" (the standing button, field absent),
+    "hold 135" (a number), and "go back to whatever is fastest" (an explicit
+    null). `model_fields_set` is what separates the last two — without it,
+    every ordinary re-plan would look like a request to clear the choice, and
+    the driver's decision would evaporate the next time they pressed a button
+    that says nothing about speed.
+    """
+    if "hold_speed_kph" not in body.model_fields_set:
+        v = run.state.get("hold_speed_kph")
+        return float(v) if v is not None else None
+    run.state = {**run.state, "hold_speed_kph": body.hold_speed_kph}
+    return body.hold_speed_kph
+
+
 def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
     chargers = [
         c for c in live.snapshot_chargers(snapshot) if c.charger_id not in exclude
@@ -699,9 +717,19 @@ async def replan(
     if not speeds:
         speeds = [min(centre, veh.top_speed_kph)]
 
+    # A held speed has to be IN the sweep, or the driver's own choice is the
+    # one speed the answer cannot be. Clamped to what the car can do rather
+    # than refused: "hold 200" in a car that stops at 160 is a request for
+    # everything it has.
+    hold = _resolve_hold_speed(run, body)
+    if hold is not None:
+        hold = min(max(hold, 60.0), veh.top_speed_kph)
+        if all(abs(s - hold) > 1e-6 for s in speeds):
+            speeds = sorted([*speeds, hold])
+
     results = await asyncio.to_thread(sweep_slice, sl, veh, speeds, params)
-    best = optimum(results)
-    if best is None:
+    fastest = optimum(results)
+    if fastest is None:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -709,6 +737,26 @@ async def replan(
                 "Charge at the nearest available point first."
             ),
         )
+
+    # The plan in force is the driver's speed when they have chosen one. It is
+    # reported as `optimum_speed` because that is what every reader treats as
+    # "the speed to hold"; `held_speed_kph` is how they can tell the difference
+    # and `hold_costs_min` is what it costs.
+    best = fastest
+    if hold is not None:
+        picked = next(
+            (r for r in results if r.feasible and abs(r.speed_kph - hold) < 1e-6),
+            None,
+        )
+        if picked is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"No plan reaches the destination holding {hold:.0f} km/h "
+                    "from here. Try a lower speed."
+                ),
+            )
+        best = picked
 
     original = _planned_result(trip, run.planned_speed_kph) or {}
     stops_ahead = [
@@ -724,6 +772,10 @@ async def replan(
 
     out = ReplanOut(
         plan_version=run.plan_version + 1,
+        held_speed_kph=hold,
+        hold_costs_min=round(
+            (best.total_min or 0.0) - (fastest.total_min or 0.0), 1
+        ),
         offset_base_m=round(st["offset_m"]),
         elapsed_min=round(st["at_min"], 1),
         remaining=_result_out(best),

@@ -30,6 +30,7 @@ import JourneyHero, { LiveHeroState } from "../JourneyHero"
 import MapsRouteButton from "../MapsRouteButton"
 import AlternativeStops from "./AlternativeStops"
 import BatteryCheck from "./BatteryCheck"
+import HoldSpeed from "./HoldSpeed"
 import NextStopCard from "./NextStopCard"
 
 export default function LiveView({
@@ -177,6 +178,26 @@ export default function LiveView({
       )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not swap the stop")
+    }
+  }
+
+  /** Hold a speed from here — or hand the choice back with null. The server
+   *  keeps it, so the standing "Re-plan" cannot overrule it later. */
+  async function holdSpeed(speedKph: number | null) {
+    try {
+      const plan = await live.requestReplan([], null, speedKph)
+      if (plan) {
+        toast.success(
+          speedKph == null
+            ? `Back to the fastest — hold ${plan.optimum_speed?.toFixed(0)} km/h.`
+            : `Holding ${speedKph} km/h, arriving ${clockAt(
+                run!.started_at,
+                plan.benchmark.live_total_min
+              )}.`
+        )
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not set the speed")
     }
   }
 
@@ -385,6 +406,15 @@ export default function LiveView({
               </button>
             )}
           </div>
+        )}
+
+        {revised && !finished && (
+          <HoldSpeed
+            plan={revised}
+            startedAtIso={run.started_at}
+            busy={live.busy}
+            onHold={(kph) => void holdSpeed(kph)}
+          />
         )}
 
         {revised && (

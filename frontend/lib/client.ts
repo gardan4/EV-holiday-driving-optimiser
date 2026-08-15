@@ -332,6 +332,11 @@ export interface Benchmark {
 
 export interface RevisedPlan {
   plan_version: number
+  /** The speed the driver asked to hold, if they asked. Null means the plan is
+   *  simply the fastest — `optimum_speed` is the plan's own speed either way. */
+  held_speed_kph?: number | null
+  /** What holding it costs against the best speed in the sweep. */
+  hold_costs_min?: number
   /** The tail's own offsets start at zero; add this to place them. */
   offset_base_m: number
   elapsed_min: number
@@ -491,15 +496,22 @@ export async function recordSoc(runId: string, soc: number): Promise<LiveState> 
 export async function replanRun(
   runId: string,
   excludeChargerIds: string[] = [],
-  minArrivalSoc: number | null = null
+  minArrivalSoc: number | null = null,
+  /** `undefined` leaves the held speed alone; `null` hands the choice back to
+   *  the optimiser; a number pins it. The key is OMITTED when undefined,
+   *  because the server tells "unchanged" from "clear it" by whether the field
+   *  was sent at all. */
+  holdSpeedKph: number | null | undefined = undefined
 ): Promise<RevisedPlan> {
+  const body: Record<string, unknown> = {
+    exclude_charger_ids: excludeChargerIds,
+    min_arrival_soc: minArrivalSoc,
+  }
+  if (holdSpeedKph !== undefined) body.hold_speed_kph = holdSpeedKph
   return unwrap<RevisedPlan>(
     await apiFetch(`/api/runs/${runId}/replan`, {
       method: "POST",
-      body: JSON.stringify({
-        exclude_charger_ids: excludeChargerIds,
-        min_arrival_soc: minArrivalSoc,
-      }),
+      body: JSON.stringify(body),
     })
   )
 }
