@@ -304,12 +304,57 @@ jobs:
           az webapp restart \
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --name ${{ env.API_APP_NAME }} \
-            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container." 
+            || echo "::warning title=Restart skipped::az webapp restart errored; the image swap already restarted the container."
+
+      # `container set` returns as soon as ARM accepts the swap, not when the
+      # app is serving — so "deployed" was a claim about a request, not about
+      # the API. That gap is load-bearing for the frontend job, whose image
+      # build prerenders `/ev` from `GET /api/vehicles`: it waited for this job
+      # and then built against a container still coming up, three fetches timed
+      # out, and the web image failed while the API deploy stood green.
+      #
+      # Bounded and non-fatal. If the API really is down, that is the API job's
+      # own failure to report through the health probe Azure already runs; this
+      # step exists to make the NEXT job wait, not to become a second alarm.
+      - name: Wait for the API to answer
+        if: steps.az.outputs.configured == 'true'
+        run: |
+          # The public host, not the azurewebsites one: it is what the web
+          # build's `NEXT_PUBLIC_API_URL` points at, so it is the path that has
+          # to be warm — App Service being up behind an unhealthy proxy is not
+          # the thing being waited for.
+          URL="${{ env.API_URL }}/health"
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "$URL" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "API healthy after $((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::warning title=API slow to start::/health did not answer 200 within 150s."
 
   # --- Frontend: test + build (+ deploy when Azure is configured) ------------
   frontend:
-    needs: [changes]
-    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    # After the backend, because the web IMAGE BUILD reads the live API: `/ev`
+    # is server-rendered from `GET /api/vehicles` at build time, and that is
+    # the point of those pages. Run in parallel and a commit touching both
+    # halves races its own deploy — the API container restarts while
+    # `next build` is prerendering the catalog, three fetches time out, and
+    # the image fails to build. The API deploys, the web app silently does
+    # not, and the two tiers drift apart on green-looking main.
+    #
+    # `always()` because the dependency is an ORDERING, not a requirement:
+    # `needs` alone would skip the frontend entirely on the frontend-only
+    # commits where `backend` never runs, which is most of them. A backend
+    # that ran and FAILED still blocks — there is no sense shipping a UI
+    # against an API that could not be built.
+    needs: [changes, backend]
+    if: >-
+      always() && !cancelled() &&
+      needs.backend.result != 'failure' &&
+      (needs.changes.outputs.frontend == 'true' ||
+       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read

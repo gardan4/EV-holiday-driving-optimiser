@@ -765,6 +765,19 @@ docker compose -f docker-compose.local-db.yml up -d
 - **A nested helper that does `lines += [...]` rebinds `lines` as a local.**
   Use `.append()` inside closures that write to an enclosing list, or the whole
   function dies with `UnboundLocalError` on the first call.
+- **The web image build reads the LIVE API, so it must not build while the API
+  is deploying.** `/ev` is server-rendered from `GET /api/vehicles` at build
+  time — the whole point of those pages — which makes `next build` a client of
+  production. The frontend and backend jobs used to run in parallel, so a
+  commit touching both raced its own deploy: the API container restarted
+  mid-prerender, three fetches timed out, and the web image failed to build
+  while the API deploy stood green. Green main, two tiers drifted apart, and
+  nothing in the run said so. `frontend` now `needs: [changes, backend]` under
+  `always()` — an ORDERING, not a requirement, or frontend-only commits (most
+  of them) would skip themselves when `backend` never runs — and the backend
+  job waits for `/health` to answer before finishing, because `az webapp
+  config container set` returns when ARM accepts the swap and not when the app
+  is serving.
 - **Two people adding a migration on the same day get two alembic heads.**
   `uv run alembic heads` must print exactly one line; if it prints two, renumber
   the later file and point its `down_revision` at the other. `db_bootstrap`
