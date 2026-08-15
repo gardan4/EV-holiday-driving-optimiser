@@ -361,6 +361,12 @@ export interface Alternative {
   delta_min: number
   /** Send these to `replanRun` to make this one the next stop. */
   exclude_charger_ids: string[]
+  /** Reaching this one means arriving under the planner's reserve. `arrive_soc`
+   *  is the number that matters when it is true. */
+  below_reserve?: boolean
+  /** The first-leg floor it was computed under. Must go back with the re-plan,
+   *  or the full reserve applies again and refuses this very stop. */
+  min_arrival_soc?: number | null
 }
 
 export interface Alternatives {
@@ -484,12 +490,16 @@ export async function recordSoc(runId: string, soc: number): Promise<LiveState> 
  *  rejection survives every later re-plan rather than lasting one request. */
 export async function replanRun(
   runId: string,
-  excludeChargerIds: string[] = []
+  excludeChargerIds: string[] = [],
+  minArrivalSoc: number | null = null
 ): Promise<RevisedPlan> {
   return unwrap<RevisedPlan>(
     await apiFetch(`/api/runs/${runId}/replan`, {
       method: "POST",
-      body: JSON.stringify({ exclude_charger_ids: excludeChargerIds }),
+      body: JSON.stringify({
+        exclude_charger_ids: excludeChargerIds,
+        min_arrival_soc: minArrivalSoc,
+      }),
     })
   )
 }

@@ -350,6 +350,21 @@ the pipeline is green before infra exists. Infra deploy is manual
   button would hand back the stop the driver walked away from. That state is a
   plain `JSON` column, so it is ASSIGNED and never mutated in place; the test
   that re-plans twice is really a test of that assignment.
+  The list also reaches PAST the reserve. `reserve_soc` is right for a plan and
+  wrong for a menu: it hides every charger further on that you could reach by
+  arriving under it, which is the exact thing a driver asks about ("can I not
+  just push on to the services?"). A second pass runs the same DP with
+  `SimParams.first_leg_reserve_soc` lowered to `STRETCH_FLOOR_SOC`, so those
+  appear, marked, with the arrival percentage as the headline. Three things
+  make it safe. The floor applies to the LEG BEING DRIVEN and nowhere else, so
+  one accepted risk cannot become a journey planned on fumes — the test asserts
+  every later stop still arrives on the full reserve. It is a floor and not
+  zero, because a plan arriving on vapour is a breakdown with extra steps. And
+  it travels with the choice (`min_arrival_soc`) and is PERSISTED, or the next
+  re-plan applies the full reserve and refuses the stop just chosen. A stretch
+  option can be FASTER than the optimum — going further before stopping is what
+  the lower floor buys — so the UI renders a negative delta rather than
+  flattening it to "same".
 - **The phone drives the plan the reader chose, not the optimum.** "Drive this"
   hands `/trip/[id]/drive?speed=` to the phone, appended only when the
   selection is not `optimum_speed` so ordinary links and the QR for an

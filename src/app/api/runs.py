@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import logging
 import uuid
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -235,6 +236,19 @@ def _benchmark_timeline(run: TripRun, trip: Trip) -> list[tuple[float, float, fl
 # more than anybody reads at the wheel.
 MAX_ALTERNATIVES = 3
 
+# …and how many to offer from BEYOND the reserve. Chargers further on that the
+# planner refuses only because you would arrive under `reserve_soc` are
+# invisible today, and they are exactly the ones a driver asks about: "can I
+# not just push on to the services?" That is a judgement about a road they can
+# see, and the model has no business hiding the option — only naming the risk.
+MAX_STRETCH = 2
+
+# The floor those are computed against. Not zero: a plan that arrives on
+# vapour is not an option, it is a breakdown with extra steps. Applied to the
+# leg being driven and no other, so one accepted risk cannot become a journey
+# planned on fumes — see `SimParams.first_leg_reserve_soc`.
+STRETCH_FLOOR_SOC = 4.0
+
 
 def _excluded(st: dict) -> list[str]:
     """Chargers this drive has turned down.
@@ -258,6 +272,30 @@ def _merge_exclusions(run: TripRun, incoming: list[str]) -> set[str]:
     merged = set(_excluded(run.state)) | {str(c) for c in incoming}
     run.state = {**run.state, "excluded_charger_ids": sorted(merged)}
     return merged
+
+
+def _first_leg_floor(st: dict) -> float | None:
+    """The reserve the driver accepted for the leg they are on, if any.
+
+    Kept beside the exclusions and for the same reason: a decision that lasts
+    one request is not a decision. Having chosen to push past the reserve to
+    reach a particular charger, the next press of "Re-plan" would otherwise
+    apply the full reserve again and refuse the stop they just picked.
+    """
+    v = st.get("first_leg_floor_soc")
+    return float(v) if v is not None else None
+
+
+def _set_first_leg_floor(run: TripRun, floor: float | None) -> float | None:
+    """Record it, or leave the standing one alone when the caller says nothing.
+
+    Assigned, never mutated: `run.state` is a plain `JSON` column (see
+    `models/__init__.py`).
+    """
+    if floor is None:
+        return _first_leg_floor(run.state)
+    run.state = {**run.state, "first_leg_floor_soc": floor}
+    return floor
 
 
 def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
@@ -623,6 +661,7 @@ async def replan(
     # a rejection — the standing "Re-plan" button would hand back the stop they
     # walked away from.
     excluded = _merge_exclusions(run, body.exclude_charger_ids)
+    floor = _set_first_leg_floor(run, body.min_arrival_soc)
     sl = _remaining_slice(snapshot, st["offset_m"], excluded)
     if not sl.segments:
         raise HTTPException(status_code=409, detail="You're already there.")
@@ -636,6 +675,7 @@ async def replan(
             # because the plan did.
             "prior_drive_min": st["at_min"],
             "prior_rest_credit_min": st.get("rest_credit_min", 0.0),
+            "first_leg_reserve_soc": floor,
         }
     )
 
@@ -774,16 +814,18 @@ async def alternatives(
     current: AlternativeOut | None = None
     found: list[AlternativeOut] = []
 
-    for _ in range(MAX_ALTERNATIVES + 1):
-        sl = _remaining_slice(snapshot, st["offset_m"], already | set(turned_down))
+    async def _next_best(exclude: set[str], p: SimParams):
+        sl = _remaining_slice(snapshot, st["offset_m"], exclude)
         if not sl.segments:
-            break
-        results = await asyncio.to_thread(sweep_slice, sl, veh, [speed], params)
+            return None
+        results = await asyncio.to_thread(sweep_slice, sl, veh, [speed], p)
         best = optimum(results)
         if best is None or not best.stops:
-            break
-        stop = best.stops[0]
-        alt = AlternativeOut(
+            return None
+        return best
+
+    def _as_alt(best, stop, *, below_reserve: bool) -> AlternativeOut:
+        return AlternativeOut(
             charger_id=stop.charger_id,
             name=stop.name,
             operator=stop.operator,
@@ -802,13 +844,43 @@ async def alternatives(
                 else round((best.total_min or 0.0) - baseline_min, 1)
             ),
             exclude_charger_ids=list(turned_down),
+            below_reserve=below_reserve,
+            min_arrival_soc=STRETCH_FLOOR_SOC if below_reserve else None,
         )
+
+    # 1. The ones a plan can already reach, ranked by successive exclusion.
+    for _ in range(MAX_ALTERNATIVES + 1):
+        best = await _next_best(already | set(turned_down), params)
+        if best is None:
+            break
+        stop = best.stops[0]
+        alt = _as_alt(best, stop, below_reserve=False)
         if baseline_min is None:
             baseline_min = best.total_min or 0.0
             current = alt
         else:
             found.append(alt)
         turned_down.append(stop.charger_id)
+
+    # 2. The ones only a lower floor can reach. Same machinery, one parameter
+    #    moved, so a stretch option is a real plan and not a suggestion — the
+    #    rest of the journey after it is still planned on the full reserve.
+    stretch_params = replace(params, first_leg_reserve_soc=STRETCH_FLOOR_SOC)
+    for _ in range(MAX_STRETCH):
+        best = await _next_best(already | set(turned_down), stretch_params)
+        if best is None:
+            break
+        stop = best.stops[0]
+        # Built BEFORE this one joins the turned-down list: `exclude_charger_ids`
+        # is what makes this stop the next one, so a row that carried its own
+        # id would tell `replan` to refuse the charger it is offering.
+        alt = _as_alt(best, stop, below_reserve=True)
+        turned_down.append(stop.charger_id)
+        # Only worth showing if the reserve is what was hiding it. Anything
+        # else here is an ordinary alternative the loop above ran out of room
+        # for, and dressing it up as a risk would be a lie.
+        if stop.arrive_soc < params.reserve_soc:
+            found.append(alt)
 
     return AlternativesOut(
         speed_kph=speed, current=current, alternatives=found

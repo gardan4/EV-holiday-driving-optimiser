@@ -240,6 +240,11 @@ class ReplanRequest(BaseModel):
     # run and kept there, or the next re-plan would hand back the stop they
     # just rejected. Bounded because it is caller-supplied and persisted.
     exclude_charger_ids: list[str] = Field(default_factory=list, max_length=40)
+    # Accept arriving under the reserve on the leg being driven, to reach a
+    # charger further on. Applies to the FIRST leg only — see
+    # `SimParams.first_leg_reserve_soc`. Persisted on the run, or the next
+    # re-plan would refuse the stop the driver deliberately chose.
+    min_arrival_soc: Optional[float] = Field(default=None, ge=0.0, le=20.0)
 
 
 class AlternativeOut(BaseModel):
@@ -268,6 +273,14 @@ class AlternativeOut(BaseModel):
     # computed the alternative by turning these down, so the client does not
     # have to reason about the ranking to act on it.
     exclude_charger_ids: list[str] = []
+    # True when getting here means arriving under the planner's reserve. The
+    # arrival percentage is on this row; the UI has to show it, because this
+    # is the one option the model would refuse on its own.
+    below_reserve: bool = False
+    # The first-leg floor this option was computed under. Send it back with
+    # `replan` — without it the re-plan applies the full reserve again and
+    # refuses the very stop that was just chosen.
+    min_arrival_soc: Optional[float] = None
 
 
 class AlternativesOut(BaseModel):

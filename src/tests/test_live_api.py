@@ -666,9 +666,14 @@ class TestTurningDownAStop:
         assert out["current"]["charger_id"] not in ids
         assert len(ids) == len(out["alternatives"])
         for a in out["alternatives"]:
-            # Priced against the whole remaining journey, and the current stop
-            # is the optimum, so nothing can be quicker than it.
-            assert a["delta_min"] >= 0
+            # Priced against the whole remaining journey. Under the same
+            # reserve the current stop IS the optimum, so nothing can be
+            # quicker — but a stretch option is computed under a lower floor
+            # for the leg being driven, and going further before stopping is
+            # exactly how it can come back faster. That is the trade being
+            # offered, not a bug in the ranking.
+            if not a["below_reserve"]:
+                assert a["delta_min"] >= 0
             # What to send to `replan` to take this one: everything ranked
             # above it, including the stop being replaced.
             assert out["current"]["charger_id"] in a["exclude_charger_ids"]
@@ -722,6 +727,69 @@ class TestTurningDownAStop:
         after = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
         assert after["current"]["charger_id"] != rejected
         assert all(a["charger_id"] != rejected for a in after["alternatives"])
+
+    async def test_it_offers_chargers_further_on_that_the_reserve_hid(
+        self, client
+    ):
+        """"Can I not just push on to the services?"
+
+        The DP refuses any leg that lands under `reserve_soc`, which is right
+        for a plan and wrong for a menu: it also hides every charger further
+        along that a driver could reach by arriving low. Those are offered,
+        marked, and priced — and they can come back FASTER than the optimum,
+        because going further before stopping is what a lower floor buys.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        stretch = [a for a in out["alternatives"] if a["below_reserve"]]
+        assert stretch, "expected at least one charger beyond the reserve"
+        for a in stretch:
+            # The reserve is what was hiding it — otherwise it is an ordinary
+            # alternative dressed up as a risk.
+            assert a["arrive_soc"] < 10.0
+            # …and not a breakdown with extra steps.
+            assert a["arrive_soc"] >= 4.0 - 1e-6
+            # Further along the route than the stop it replaces.
+            assert a["offset_m"] > out["current"]["offset_m"]
+            # The floor it was computed under has to travel with it, or the
+            # re-plan that takes it applies the full reserve and refuses.
+            assert a["min_arrival_soc"] == 4.0
+
+    async def test_taking_a_stretch_option_is_planned_under_its_own_floor(
+        self, client
+    ):
+        """The floor is accepted for the leg being driven and persists, so the
+        next re-plan does not refuse the stop the driver just chose."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+        stretch = next(a for a in out["alternatives"] if a["below_reserve"])
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={
+                "exclude_charger_ids": stretch["exclude_charger_ids"],
+                "min_arrival_soc": stretch["min_arrival_soc"],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        stops = resp.json()["remaining"]["stops"]
+        assert stops[0]["charger_id"] == stretch["charger_id"]
+        assert stops[0]["arrive_soc"] < 10.0
+        # Only the FIRST leg is relaxed: everything after it keeps the full
+        # reserve, so one accepted risk cannot become a journey on fumes.
+        assert all(s["arrive_soc"] >= 10.0 - 1e-6 for s in stops[1:])
+
+        # And it sticks — a plain re-plan afterwards still reaches it.
+        again = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert again.status_code == 200, again.text
+        assert again.json()["remaining"]["stops"][0]["charger_id"] == (
+            stretch["charger_id"]
+        )
 
     async def test_the_bay_count_reaches_the_driver(self, client):
         """Capacity is the one thing about a site that separates a hub from a

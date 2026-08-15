@@ -96,8 +96,13 @@ export interface LiveHandle {
   /** Returns the state the reading produced, so the caller can react to what
    *  the correction revealed rather than to what it was before. */
   submitSoc: (soc: number) => Promise<LiveState | null>
-  /** `exclude` are chargers the driver has turned down; the server keeps them. */
-  requestReplan: (exclude?: string[]) => Promise<RevisedPlan | null>
+  /** `exclude` are chargers the driver has turned down; the server keeps them.
+   *  `minArrivalSoc` accepts arriving under the reserve on the leg being
+   *  driven, to reach a charger further on. */
+  requestReplan: (
+    exclude?: string[],
+    minArrivalSoc?: number | null
+  ) => Promise<RevisedPlan | null>
   /** Other chargers for the next stop. Read-only — taking one is a re-plan. */
   findAlternatives: () => Promise<Alternatives | null>
   end: () => Promise<void>
@@ -291,11 +296,11 @@ export function useLiveRun(
   )
 
   const requestReplan = useCallback(
-    async (exclude: string[] = []) => {
+    async (exclude: string[] = [], minArrivalSoc: number | null = null) => {
       if (!runId) return null
       setBusy(true)
       try {
-        const plan = await replanRun(runId, exclude)
+        const plan = await replanRun(runId, exclude, minArrivalSoc)
         setRun((r) => (r ? { ...r, plan } : r))
         return plan
       } finally {

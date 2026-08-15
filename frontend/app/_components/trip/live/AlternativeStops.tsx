@@ -28,9 +28,14 @@
  */
 
 import { useState } from "react"
-import { BatteryCharging, Check, Loader2, MapPin, X } from "lucide-react"
+import { AlertTriangle, BatteryCharging, Check, Loader2, MapPin, X } from "lucide-react"
 import { Alternative, Alternatives } from "@/lib/client"
 import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+
+/** The planner's own floor, for the sentence that explains why an option is
+ *  amber. `simulator.SimParams.reserve_soc`, which is not configurable — if it
+ *  ever becomes so, this has to come down the wire with the alternatives. */
+const RESERVE_PCT = 10
 
 export default function AlternativeStops({
   data,
@@ -91,6 +96,13 @@ export default function AlternativeStops({
               className="rounded-xl border border-ink-100 p-2.5"
             >
               <Row alt={alt} />
+              {alt.below_reserve && (
+                <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-900">
+                  Past the {RESERVE_PCT}% the planner keeps in reserve, so it
+                  will never choose this on its own. Everything after this stop
+                  is still planned on the full reserve.
+                </p>
+              )}
               <div className="mt-2 flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -98,14 +110,16 @@ export default function AlternativeStops({
                     onTake(alt)
                   }}
                   disabled={busy}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+                    alt.below_reserve ? "bg-amber-700" : "bg-brand-600"
+                  }`}
                 >
                   {busy && taking === alt.charger_id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Check className="h-4 w-4" />
                   )}
-                  Stop here instead
+                  {alt.below_reserve ? "Push on to here" : "Stop here instead"}
                 </button>
                 <a
                   href={mapsLink(alt.lat, alt.lon)}
@@ -125,9 +139,15 @@ export default function AlternativeStops({
   )
 }
 
-/** One charger: what it is, and what taking it costs. */
+/** One charger: what it is, and what taking it costs.
+ *
+ *  The cost can be NEGATIVE. A stretch option is planned under a lower floor
+ *  for the leg being driven, and going further before stopping is exactly what
+ *  that buys — so "4 min sooner, arriving on 6%" is a real row, and rendering
+ *  it as "same" would hide half of the trade. */
 function Row({ alt }: { alt: Alternative }) {
   const later = alt.delta_min >= 0.5
+  const sooner = alt.delta_min <= -0.5
   return (
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">
@@ -140,8 +160,16 @@ function Row({ alt }: { alt: Alternative }) {
           {fmtBays(alt.n_points) && <span> · {fmtBays(alt.n_points)}</span>} · in{" "}
           {fmtKm(alt.dist_from_here_m)}
         </div>
-        <div className="mt-0.5 flex items-center gap-1 text-xs text-ink-500">
-          <BatteryCharging className="h-3 w-3 shrink-0 text-brand-600" />
+        <div
+          className={`mt-0.5 flex items-center gap-1 text-xs ${
+            alt.below_reserve ? "font-semibold text-amber-800" : "text-ink-500"
+          }`}
+        >
+          {alt.below_reserve ? (
+            <AlertTriangle className="h-3 w-3 shrink-0" />
+          ) : (
+            <BatteryCharging className="h-3 w-3 shrink-0 text-brand-600" />
+          )}
           arrive {Math.round(alt.arrive_soc)}% · charge to{" "}
           {Math.round(alt.depart_soc)}% · {Math.round(alt.charge_min)} min
         </div>
@@ -152,7 +180,11 @@ function Row({ alt }: { alt: Alternative }) {
         }`}
         title="Change to your arrival time"
       >
-        {later ? `+${fmtDuration(alt.delta_min)}` : "same"}
+        {later
+          ? `+${fmtDuration(alt.delta_min)}`
+          : sooner
+            ? `−${fmtDuration(Math.abs(alt.delta_min))}`
+            : "same"}
       </span>
     </div>
   )

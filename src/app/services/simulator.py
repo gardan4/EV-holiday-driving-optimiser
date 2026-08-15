@@ -174,6 +174,19 @@ class SimParams:
     depart_soc: float = 100.0
     target_soc: float = 10.0     # minimum SoC on arrival at the destination
     reserve_soc: float = 10.0    # never plan to dip below this between stops
+    # A floor for the FIRST leg only — the one you are driving right now.
+    #
+    # `reserve_soc` is a safety margin the planner is right to insist on, and
+    # wrong to insist on silently: it also hides every charger you could reach
+    # by arriving under it. A driver looking at a plug in a lay-by can decide
+    # to push on to the services 40 km further and arrive on 6%; that is a
+    # judgement about a road they can see, and the model has no business
+    # refusing to show it. So this relaxes the constraint for the leg being
+    # driven and NOWHERE ELSE — every later leg keeps the full reserve, so one
+    # accepted risk cannot quietly become a plan that runs the whole journey
+    # on fumes. None means "same as `reserve_soc`", which is every ordinary
+    # plan.
+    first_leg_reserve_soc: float | None = None
     stop_overhead_min: float = 5.0
     charge_cap_soc: float = 100.0  # ceiling for charge targets (DP may stop lower)
     consumption_factor: float = 1.0  # conditions multiplier on Wh/km
@@ -693,8 +706,12 @@ def simulate(
         [None] * N_BUCKETS for _ in range(n_nodes)
     ]
 
-    def reserve_for(j: int) -> float:
-        return p.target_soc if j == dest else p.reserve_soc
+    def reserve_for(i: int, j: int) -> float:
+        if j == dest:
+            return p.target_soc
+        if i == 0 and p.first_leg_reserve_soc is not None:
+            return p.first_leg_reserve_soc
+        return p.reserve_soc
 
     depart_bucket = min(int(p.depart_soc / SOC_BUCKET), N_BUCKETS - 1)
     best[0][depart_bucket] = 0.0
@@ -728,7 +745,7 @@ def simulate(
 
         for j in range(i + 1, n_nodes):
             need = (node_kwh[j] - node_kwh[i]) / veh.usable_kwh * 100.0
-            min_depart = need + reserve_for(j)
+            min_depart = need + reserve_for(i, j)
             if min_depart > p.charge_cap_soc + 1e-9:
                 break  # farther nodes need even more — unreachable from i
             drive = node_min[j] - node_min[i]

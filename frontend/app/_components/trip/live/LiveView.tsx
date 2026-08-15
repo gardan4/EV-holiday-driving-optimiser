@@ -163,9 +163,18 @@ export default function LiveView({
    *  come back on the next re-plan. */
   async function takeAlternative(alt: Alternative) {
     try {
-      await live.requestReplan(alt.exclude_charger_ids)
+      // The floor travels with the choice: without it the re-plan applies the
+      // full reserve again and refuses the stop just picked.
+      await live.requestReplan(
+        alt.exclude_charger_ids,
+        alt.min_arrival_soc ?? null
+      )
       setAlts(null)
-      toast.success(`Stopping at ${alt.name} instead.`)
+      toast.success(
+        alt.below_reserve
+          ? `Pushing on to ${alt.name} — arriving on about ${Math.round(alt.arrive_soc)}%.`
+          : `Stopping at ${alt.name} instead.`
+      )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not swap the stop")
     }
