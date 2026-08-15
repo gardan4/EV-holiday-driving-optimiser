@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     RATE_LIMIT_RUN_START: str = "6/hour"         # per IP: starting a drive is rare
     RATE_LIMIT_LIVE_PING: str = "12/minute"      # per run: ~25 s cadence + retries
     RATE_LIMIT_LIVE_REPLAN: str = "6/minute"     # per run: a real CPU sweep
+    # Looking at alternatives is BROWSING, not deciding, so it does not share
+    # the re-plan budget. Every stop in the plan has a swap button and reading
+    # the list for each is the feature working as intended — a six-stop plan
+    # looked over once would spend a re-plan allowance entirely, and the driver
+    # would be refused for using the panel exactly as designed. Still keyed per
+    # run and still tighter than the ping, because the answer is a handful of
+    # DP passes rather than a lerp.
+    RATE_LIMIT_LIVE_ALTERNATIVES: str = "20/minute"  # per run: read-only "what if"
     RATE_LIMIT_LIVE_READ: str = "120/minute"     # per IP: watchers poll
     # Shared rate-limit backend. Empty = in-process memory (per-instance, resets
     # on restart). Set to a redis://… URI in production so the limit is global

@@ -25,7 +25,13 @@
  * road ahead and it is written in the road ahead's units.
  */
 
-import { BatteryCharging, Flag, Replace, UtensilsCrossed } from "lucide-react"
+import {
+  BatteryCharging,
+  Flag,
+  Loader2,
+  Replace,
+  UtensilsCrossed,
+} from "lucide-react"
 import { Stop } from "@/lib/client"
 import { fmtBays, fmtKm } from "@/lib/format"
 
@@ -38,6 +44,7 @@ export default function PlanAhead({
   destLabel,
   destArrivalClock,
   onSwap,
+  swappingId = null,
 }: {
   /** The stop under the car, if any, then everything still ahead. */
   stops: Stop[]
@@ -53,6 +60,12 @@ export default function PlanAhead({
   destArrivalClock: string
   /** Driver only: replace this stop with something else. */
   onSwap?: (chargerId: string) => void
+  /** The stop whose alternatives are being fetched, if any. The lookup takes
+   *  seconds, and a row that gave no sign of having heard the tap got tapped
+   *  again — one question, several requests, and eventually a refusal. Every
+   *  swap is held while one is in flight, because they all go to the same
+   *  per-run budget. */
+  swappingId?: string | null
 }) {
   return (
     <div className="mt-3 rounded-2xl border border-ink-100 bg-white p-3 sm:p-4">
@@ -116,10 +129,18 @@ export default function PlanAhead({
             {onSwap && (
               <button
                 onClick={() => onSwap(s.charger_id)}
+                disabled={swappingId !== null}
+                aria-busy={swappingId === s.charger_id}
                 aria-label={`Swap ${s.name} for somewhere else`}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-brand-700"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-brand-700 disabled:hover:bg-transparent disabled:hover:text-ink-400"
               >
-                <Replace className="h-4 w-4" />
+                {swappingId === s.charger_id ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-brand-600" />
+                ) : (
+                  <Replace
+                    className={`h-4 w-4 ${swappingId !== null ? "opacity-40" : ""}`}
+                  />
+                )}
               </button>
             )}
           </li>

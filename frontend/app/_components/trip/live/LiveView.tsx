@@ -127,6 +127,12 @@ export default function LiveView({
   // here rather than fetched on render: it is several DP runs on the server,
   // so it happens when somebody wants it and not on every poll.
   const [alts, setAlts] = useState<Alternatives | null>(null)
+  // Which stop is being looked up, so the button that was pressed can say so.
+  // The ref is the guard and the state is the pixels: two taps inside one
+  // render both read the same stale state, and it is precisely the second tap
+  // this exists to swallow.
+  const altsPending = useRef<string | null>(null)
+  const [pendingAltFor, setPendingAltFor] = useState<string | null>(null)
   const askForBattery = useCallback(() => {
     setSocPrompt((n) => n + 1)
     batteryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -168,8 +174,18 @@ export default function LiveView({
   }
 
   /** Look for another charger for the next stop. Read-only — the plan does not
-   *  move until the driver picks one. */
+   *  move until the driver picks one.
+   *
+   *  One at a time. The answer is a handful of DP passes on the server and the
+   *  panel shows nothing until it lands, so a button that stayed idle-looking
+   *  got pressed again — and again — until the per-run limit refused one and
+   *  the drive screen reported a bare status code. The button now spins; this
+   *  is the other half, because a stop swapped from the plan list and one from
+   *  the card are the same request. */
   async function loadAlternatives(rejectChargerId?: string) {
+    if (altsPending.current !== null) return
+    altsPending.current = rejectChargerId ?? ""
+    setPendingAltFor(altsPending.current)
     try {
       const found = await live.findAlternatives(rejectChargerId)
       if (found) setAlts(found)
@@ -180,6 +196,9 @@ export default function LiveView({
       toast.error(
         err instanceof Error ? err.message : "Could not look for alternatives"
       )
+    } finally {
+      altsPending.current = null
+      setPendingAltFor(null)
     }
   }
 
@@ -373,6 +392,7 @@ export default function LiveView({
                 ? () => void loadAlternatives(focused.charger_id)
                 : undefined
             }
+            findingAlternatives={pendingAltFor !== null}
             onArrive={
               isDriver && focused
                 ? () => void markArrived(focused)
@@ -396,6 +416,7 @@ export default function LiveView({
             onSwap={
               isDriver ? (id) => void loadAlternatives(id) : undefined
             }
+            swappingId={pendingAltFor}
           />
         )}
 

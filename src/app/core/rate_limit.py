@@ -1,8 +1,13 @@
 """Rate limiting configuration using slowapi."""
 
+import math
+import time
+
 from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from app.core.config import settings
 
@@ -68,3 +73,53 @@ def run_key(request: Request) -> str:
     """
     run_id = request.path_params.get("run_id")
     return f"run:{run_id}" if run_id else _client_ip(request)
+
+
+def _seconds_until_reset(request: Request, exc: RateLimitExceeded) -> int:
+    """How long until the caller may try again, from the limiter's own window.
+
+    `request.state.view_rate_limit` is the `(item, keys)` pair slowapi already
+    evaluated, so this asks the store when THIS bucket resets rather than
+    quoting the window length — the difference between "in 4 seconds" and a
+    flat "in a minute" every time. Falls back to the window length, which is
+    the honest upper bound, if the store cannot answer.
+    """
+    window = int(exc.limit.limit.get_expiry()) if exc.limit else 60
+    try:
+        item, keys = request.state.view_rate_limit
+        reset_at, _remaining = limiter.limiter.get_window_stats(item, *keys)
+        return max(1, min(window, math.ceil(reset_at - time.time())))
+    except Exception:
+        return max(1, window)
+
+
+def _human_wait(seconds: int) -> str:
+    """Rounded UP, always: a wait quoted short is one the caller spends being
+    refused a second time."""
+    if seconds < 60:
+        return "1 second" if seconds == 1 else f"{seconds} seconds"
+    minutes = math.ceil(seconds / 60)
+    return "a minute" if minutes == 1 else f"{minutes} minutes"
+
+
+def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    """A 429 the app can actually show somebody.
+
+    slowapi's stock handler answers `{"error": "Rate limit exceeded: 6 per 1
+    minute"}`. Nothing in this app reads `error` — every client funnels a
+    failure through `getErrorMessage(data.detail, …)` — so a rate-limited
+    driver got the generic fallback, "Request failed (429)", which is a status
+    code shown to somebody at the wheel. The key is `detail`, like every other
+    error this API raises, and the text says the one thing the reader needs,
+    which is when to try again.
+
+    `Retry-After` goes on the response too: it costs nothing, and it is what a
+    client would need to back off automatically rather than by taste.
+    """
+    wait = _seconds_until_reset(request, exc)
+    response = JSONResponse(
+        {"detail": f"That's a lot at once — try again in {_human_wait(wait)}."},
+        status_code=429,
+    )
+    response.headers["Retry-After"] = str(wait)
+    return response

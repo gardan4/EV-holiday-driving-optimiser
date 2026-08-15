@@ -28,6 +28,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Flag,
+  Loader2,
   Navigation,
   Search,
 } from "lucide-react"
@@ -74,6 +75,7 @@ export default function NextStopCard({
   socVsPlan,
   revised,
   onFindAlternatives,
+  findingAlternatives = false,
   liveSoc = null,
   index = 0,
   total = 1,
@@ -98,6 +100,10 @@ export default function NextStopCard({
    *  once the car is standing at the charger — at that point the question is
    *  settled by the cable. */
   onFindAlternatives?: () => void
+  /** A lookup is in flight. It takes seconds — several DP passes on the
+   *  server — and a button that looks idle while it runs gets pressed again,
+   *  which spends the per-run budget on the same question. */
+  findingAlternatives?: boolean
   /** The battery now. Only used while plugged in, to answer the one question
    *  standing at a charger asks: how much longer. Null when unknown. */
   liveSoc?: number | null
@@ -276,10 +282,16 @@ export default function NextStopCard({
           {onFindAlternatives && (
             <button
               onClick={onFindAlternatives}
-              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-200 text-sm font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+              disabled={findingAlternatives}
+              aria-busy={findingAlternatives}
+              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-200 text-sm font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700 disabled:opacity-60 disabled:hover:border-ink-200 disabled:hover:text-ink-700"
             >
-              <Search className="h-4 w-4" />
-              Somewhere else
+              {findingAlternatives ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+              {findingAlternatives ? "Looking…" : "Somewhere else"}
             </button>
           )}
         </div>

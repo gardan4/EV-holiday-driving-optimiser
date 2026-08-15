@@ -1052,7 +1052,7 @@ async def replan(
 
 
 @router.post("/runs/{run_id}/alternatives", response_model=AlternativesOut)
-@limiter.limit(settings.RATE_LIMIT_LIVE_REPLAN, key_func=run_key)
+@limiter.limit(settings.RATE_LIMIT_LIVE_ALTERNATIVES, key_func=run_key)
 async def alternatives(
     request: Request,
     run_id: str,

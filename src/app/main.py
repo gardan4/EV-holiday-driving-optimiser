@@ -19,14 +19,13 @@ import logging
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 
 from app.core.database import AsyncSessionLocal, init_db
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, rate_limit_handler
 
 logger = logging.getLogger(__name__)
 
@@ -307,7 +306,7 @@ def create_app() -> FastAPI:
 
     # Rate limiting
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 
     # Security headers, then request-id (must be added before CORS).
     app.add_middleware(SecurityHeadersMiddleware)

@@ -936,6 +936,22 @@ docker compose -f docker-compose.local-db.yml up -d
   and the left-most hop are only honoured behind `TRUSTED_PROXY_HEADERS`, which
   is only true once something that overwrites those headers is genuinely in
   front. Getting this wrong voids every IP limit and the ORS/OCM quota with it.
+- **A 429 has to say `detail`, and a limit has to fit the gesture it meters.**
+  slowapi's stock handler answers `{"error": …}` and nothing in this app reads
+  `error` — every client funnels a failure through
+  `getErrorMessage(data.detail, …)` — so a refused request fell through to the
+  generic fallback and the drive screen showed "Request failed (429)" to
+  somebody at the wheel. `rate_limit.rate_limit_handler` sends `detail` plus a
+  `Retry-After` computed from the bucket's real reset, not from the window
+  length. The limit itself was the other half: `/runs/{id}/alternatives`
+  borrowed `RATE_LIMIT_LIVE_REPLAN`, a budget sized for committing a decision
+  and spent by BROWSING one — every stop in the plan has a swap button and
+  reading the list for each is the feature working, so a six-stop plan looked
+  over once exhausted it. And the third half is the button: the lookup is
+  several DP passes, the panel shows nothing until it lands, so a control with
+  no pending state got pressed again and again. Any control that fires a
+  request needs a disabled state and a spinner, or the rate limit is measuring
+  the UI's silence rather than the driver's intent.
 - **Nothing on the site is kept indefinitely any more, and the legal paperwork
   lives in `docs/`.** Trips used to be kept forever so share links would keep
   working, which is a fine goal and was not a retention period: `Trip.request`
