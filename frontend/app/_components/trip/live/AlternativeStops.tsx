@@ -33,6 +33,8 @@ import {
   AlertTriangle,
   BatteryCharging,
   Check,
+  ChevronDown,
+  Info,
   Loader2,
   MapPin,
   UtensilsCrossed,
@@ -66,12 +68,8 @@ export default function AlternativeStops({
           <h2 className="font-display text-base font-semibold text-ink-900">
             Somewhere else to charge
           </h2>
-          <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
-            Priced against arriving, at {Math.round(data.speed_kph)} km/h. Bays
-            are how many the site lists, <b className="font-semibold">not</b>{" "}
-            how many are free — nobody publishes live availability to us. Food
-            hints are read off the site&apos;s <em>name</em>, not from any
-            amenity data, so check one in Maps before counting on dinner.
+          <p className="mt-0.5 text-xs text-ink-500">
+            Cost is to your arrival, at {Math.round(data.speed_kph)} km/h.
           </p>
         </div>
         <button
@@ -106,10 +104,9 @@ export default function AlternativeStops({
             >
               <Row alt={alt} />
               {alt.below_reserve && (
-                <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] leading-relaxed text-amber-900">
-                  Past the {RESERVE_PCT}% the planner keeps in reserve, so it
-                  will never choose this on its own. Everything after this stop
-                  is still planned on the full reserve.
+                <p className="mt-1 text-[11px] font-medium text-amber-800">
+                  Under the {RESERVE_PCT}% reserve — the planner won&apos;t
+                  choose this on its own.
                 </p>
               )}
               <div className="mt-2 flex items-center gap-2">
@@ -144,6 +141,38 @@ export default function AlternativeStops({
           ))}
         </ul>
       )}
+
+      {/* The caveats, one tap away instead of five lines above the list.
+          Every claim still has to be here — bays are not free stalls, a food
+          hint is a reading of a name — but a wall of grey text at the top of a
+          panel opened while driving is text nobody reads, which is a worse
+          outcome for the same words. The planner form learned this already:
+          helper text lives in the tip, not under the field. */}
+      <details className="disclosure group mt-2">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium text-ink-400 marker:content-['']">
+          <Info className="h-3 w-3" />
+          What these numbers mean
+          <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="mt-1.5 space-y-1.5 text-[11px] leading-relaxed text-ink-500">
+          <p>
+            <b className="font-semibold text-ink-600">Bays</b> are how many the
+            site lists, not how many are free — nobody publishes live
+            availability to us.
+          </p>
+          <p>
+            <b className="font-semibold text-ink-600">Food</b> is read off the
+            site&apos;s name, not from amenity data. Check it in Maps before
+            counting on dinner; a charger with no hint may still sit next to a
+            café we never hear about.
+          </p>
+          <p>
+            <b className="font-semibold text-ink-600">Under the reserve</b>{" "}
+            means arriving below the {RESERVE_PCT}% the planner keeps in hand.
+            Every stop after it is still planned on the full reserve.
+          </p>
+        </div>
+      </details>
     </div>
   )
 }

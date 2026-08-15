@@ -238,20 +238,16 @@ export default function LiveView({
           car: tighter gutters and a tighter rhythm than the results page, so
           more than one card is on screen at a time. */}
       <div className="mx-auto max-w-4xl px-3 sm:px-4">
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 sm:mt-6">
-          <div>
-            <h1 className="font-display text-xl font-semibold text-ink-900">
-              {finished ? "That's the drive done" : "On the road"}
-            </h1>
-            <p className="text-sm text-ink-500">
-              {trip.request.origin.label.split(",")[0]} →{" "}
-              {trip.request.dest.label.split(",")[0]} ·{" "}
-              {fmtKm(distM)} of {fmtKm(trip.result.total_dist_m)}
-              {isDriver ? " · you're driving" : " · you're watching"}
-            </p>
-          </div>
+        {/* Title and actions share ONE row, with the long subtitle underneath.
+            Two full-size buttons of their own used to take a whole band of a
+            phone screen before the plan started — and neither is what the
+            driver came to this page to read. */}
+        <div className="mt-4 flex items-center justify-between gap-3 sm:mt-6">
+          <h1 className="min-w-0 truncate font-display text-xl font-semibold text-ink-900">
+            {finished ? "That's the drive done" : "On the road"}
+          </h1>
           {!finished && isDriver && (
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-1.5">
               {/* Standing, not conditional. `needs_replan` fires on a shortfall
                   or a delay big enough to alarm about, which is a fine moment
                   to INTERRUPT somebody and a poor definition of when they are
@@ -264,25 +260,34 @@ export default function LiveView({
               <button
                 onClick={() => void doReplan()}
                 disabled={live.busy}
-                className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-2 text-sm font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-ink-200 px-2.5 text-xs font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
               >
                 {live.busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className="h-3.5 w-3.5" />
                 )}
                 Re-plan
               </button>
+              {/* Quieter than Re-plan on purpose: it is pressed once, at the
+                  end, and it ENDS the drive. Same row, less weight. */}
               <button
                 onClick={() => void live.end().catch(() => toast.error("Could not finish"))}
                 disabled={live.busy}
-                className="inline-flex items-center gap-2 rounded-xl border border-ink-200 px-3 py-2 text-sm font-semibold text-ink-700 hover:border-ink-300 disabled:opacity-50"
+                aria-label="Arrived — finish this drive"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-medium text-ink-500 hover:bg-ink-100 disabled:opacity-50"
               >
-                <Flag className="h-4 w-4" /> Arrived
+                <Flag className="h-3.5 w-3.5" /> Arrived
               </button>
             </div>
           )}
         </div>
+        <p className="mt-0.5 text-sm text-ink-500">
+          {trip.request.origin.label.split(",")[0]} →{" "}
+          {trip.request.dest.label.split(",")[0]} · {fmtKm(distM)} of{" "}
+          {fmtKm(trip.result.total_dist_m)}
+          {isDriver ? " · you're driving" : " · you're watching"}
+        </p>
 
         {/* What happens next, before anything about the drive as a whole. The
             HUD can only carry the charger's name and its distance; the two

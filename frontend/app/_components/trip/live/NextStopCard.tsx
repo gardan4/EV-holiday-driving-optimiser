@@ -87,7 +87,10 @@ export default function NextStopCard({
   const drifting = Math.abs(socVsPlan) >= DRIFT_BAND
 
   return (
-    <div className="mt-4 rounded-2xl border border-brand-200 bg-white p-4">
+    <div className="mt-3 rounded-2xl border border-brand-200 bg-white p-3 sm:p-4">
+      {/* The name gets the whole width. It used to share the row with the
+          Navigate button, which on a phone left "Tesla Supercharger Werth…" —
+          a truncation that hides the one word telling you WHICH Wertheim. */}
       <div className="flex items-start gap-3">
         <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
           <BatteryCharging className="h-4 w-4" />
@@ -98,7 +101,7 @@ export default function NextStopCard({
             {here ? "Charging here" : "Next stop"}
             {revised && " · revised plan"}
           </p>
-          <h2 className="mt-0.5 truncate font-display text-base font-semibold text-ink-900">
+          <h2 className="mt-0.5 font-display text-base font-semibold leading-tight text-ink-900">
             {stop.name}
           </h2>
           <p className="mt-0.5 text-xs text-ink-500">
@@ -108,18 +111,6 @@ export default function NextStopCard({
             {!here && <> · {fmtKm(toGo)} to go</>}
           </p>
         </div>
-
-        {!here && (
-          <a
-            href={mapsLink(stop.lat, stop.lon)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-ink-200 px-3 text-xs font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-          >
-            <Navigation className="h-3.5 w-3.5" />
-            Navigate
-          </a>
-        )}
       </div>
 
       {/* The answer to "how much do I need to charge", as one line of numbers
@@ -156,31 +147,45 @@ export default function NextStopCard({
           </span>
         </div>
 
-        {/* The stop is a decision, not just a number. Right under the figures
-            that make it look settled, because "how long am I here" and "do I
-            want to be here" are the same thought. */}
-        {!here && onFindAlternatives && (
-          <button
-            onClick={onFindAlternatives}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
-          >
-            <Search className="h-3.5 w-3.5" />
-            Somewhere else?
-          </button>
-        )}
-
-        <p className="mt-2 text-xs leading-relaxed text-ink-500">
-          The plan {here ? "had" : "has"} you arriving on{" "}
-          {Math.round(stop.arrive_soc)}% and taking on about {Math.round(kwh)}{" "}
-          kWh.
+        {/* The bar above already says 9% → 65%; repeating it in prose spent
+            two lines of a phone screen on a number just read. What is left is
+            the part the bar cannot show: the energy, and whether reality has
+            drifted far enough that these figures will not hold. */}
+        <p className="mt-1.5 text-[11px] leading-relaxed text-ink-500">
+          ≈{Math.round(kwh)} kWh into the battery
           {drifting &&
-            ` Your battery is currently ${Math.abs(Math.round(socVsPlan))}% ${
+            ` · you're ${Math.abs(Math.round(socVsPlan))}% ${
               socVsPlan > 0 ? "above" : "below"
-            } that plan, so expect to ${
-              socVsPlan > 0 ? "need less" : "need more"
-            } than this.`}
+            } plan, so expect to need ${socVsPlan > 0 ? "less" : "more"}`}
         </p>
       </div>
+
+      {/* Two peers, one row, thumb-sized. "Take me there" and "not here" are
+          the same decision seen from either side, so they sit together under
+          the figures that prompt it rather than one in the header and one
+          buried in the middle of the panel. */}
+      {!here && (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <a
+            href={mapsLink(stop.lat, stop.lon)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-200 text-sm font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+          >
+            <Navigation className="h-4 w-4" />
+            Navigate
+          </a>
+          {onFindAlternatives && (
+            <button
+              onClick={onFindAlternatives}
+              className="inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-ink-200 text-sm font-semibold text-ink-700 transition-colors hover:border-brand-300 hover:text-brand-700"
+            >
+              <Search className="h-4 w-4" />
+              Somewhere else
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
