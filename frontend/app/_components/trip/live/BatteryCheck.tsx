@@ -92,16 +92,19 @@ export default function BatteryCheck({
   // line, no prompt, no nagging.
   if (!editing && !atCharger && !nudging) {
     return (
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink-200 bg-white px-3 py-2">
+      // One row, and it stays one row: on a phone a wrapping label used to
+      // push the button onto its own line and cost twice the height for the
+      // quietest thing on the page.
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-2xl border border-ink-200 bg-white py-1.5 pl-3 pr-1.5">
         <p className="flex min-w-0 items-center gap-1.5 text-xs text-ink-500">
           <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
           <span className="truncate">
             Battery <strong className="text-ink-700">{Math.round(state.soc)}%</strong>
             {state.soc_is_measured && state.anchor_age_min < 1
-              ? ", confirmed just now"
+              ? " · just confirmed"
               : state.soc_is_measured
-                ? `, confirmed ${fmtDuration(state.anchor_age_min)} ago`
-                : ", estimated from distance driven"}
+                ? ` · confirmed ${fmtDuration(state.anchor_age_min)} ago`
+                : " · estimated"}
           </span>
         </p>
         <button

@@ -578,6 +578,57 @@ class TestReplanning:
         assert st["needs_replan"] is True
         assert any("battery" in r for r in st["replan_reasons"])
 
+    async def test_the_drive_is_then_measured_against_the_revised_plan(
+        self, client
+    ):
+        """A re-plan replaces the plan of record, and "the plan" has to mean
+        the new one afterwards.
+
+        Measured against the original forever, the shortfall that triggered the
+        re-plan stays on screen after it: the original expected charging the
+        revision has re-arranged, so `soc_vs_plan` cannot recover and the amber
+        "reality has drifted" panel offers to re-plan a journey that was just
+        re-planned. The revision starts from the battery the car actually has,
+        so immediately after one the drive is by construction on plan.
+        """
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (
+            await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": 20.0})
+        ).json()
+        assert before["needs_replan"] is True
+        assert before["soc_vs_plan"] < -8
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert resp.status_code == 200, resp.text
+
+        after = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert after["soc"] == pytest.approx(before["soc"], abs=0.1)
+        # Same battery, different yardstick: the revision was computed FROM
+        # this battery, so the shortfall against the dead plan is gone.
+        assert after["soc_vs_plan"] == pytest.approx(0.0, abs=1.0)
+        assert not any("battery" in r for r in after["replan_reasons"])
+
+    async def test_a_refused_replan_leaves_the_original_yardstick(self, client):
+        """A re-plan that cannot reach the destination changes nothing, and the
+        drive must keep being measured against the plan it is still on —
+        otherwise the failed attempt would clear the very warning that is the
+        reason to look for a charger."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (
+            await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": 12.0})
+        ).json()
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert resp.status_code == 422
+
+        after = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert after["soc_vs_plan"] == pytest.approx(before["soc_vs_plan"], abs=0.1)
+        assert after["needs_replan"] is True
+
     async def test_a_replan_is_recorded_on_the_run(self, client):
         trip = await make_trip(client)
         run = await start_run(client, trip)

@@ -22,7 +22,7 @@ import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveRun, Stop, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration, fmtHm, fmtKm } from "@/lib/format"
 import { remainingRouteLegs } from "@/lib/maps"
 import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
@@ -170,8 +170,11 @@ export default function LiveView({
         />
       )}
 
-      <div className="mx-auto max-w-4xl px-4">
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+      {/* Phone first, and the whole page is read at arm's length in a moving
+          car: tighter gutters and a tighter rhythm than the results page, so
+          more than one card is on screen at a time. */}
+      <div className="mx-auto max-w-4xl px-3 sm:px-4">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 sm:mt-6">
           <div>
             <h1 className="font-display text-xl font-semibold text-ink-900">
               {finished ? "That's the drive done" : "On the road"}
@@ -215,29 +218,33 @@ export default function LiveView({
             thing at 120 km/h; this is the one to take at a stop, and it starts
             from where the phone is rather than from this morning's origin. */}
         {!finished && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink-100 bg-white p-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-ink-900">
-                The rest of the way, in Google Maps
-              </p>
-              <p className="mt-0.5 text-xs text-ink-500">
-                {ahead.length === 0
-                  ? `Straight to ${trip.request.dest.label.split(",")[0]}, no stops left`
-                  : `${ahead.length} ${ahead.length === 1 ? "stop" : "stops"} left, then ${trip.request.dest.label.split(",")[0]}`}{" "}
-                · from where you are now
-              </p>
+          <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-ink-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+            {/* No heading: the button says what it does, and a phone screen
+                cannot afford a line that only introduces the next one. */}
+            <p className="min-w-0 text-xs text-ink-500">
+              {ahead.length === 0
+                ? `Straight to ${trip.request.dest.label.split(",")[0]}, no stops left`
+                : `${ahead.length} ${ahead.length === 1 ? "stop" : "stops"} left, then ${trip.request.dest.label.split(",")[0]}`}{" "}
+              · from where you are now
+            </p>
+            {/* Full width on a phone — a primary action operated in a car —
+                and back to its own size once there is a row to sit in. */}
+            <div className="w-full sm:w-auto">
+              <MapsRouteButton
+                legs={remainingRouteLegs(trip, ahead)}
+                label="Navigate the rest"
+                tone="solid"
+                full
+              />
             </div>
-            <MapsRouteButton
-              legs={remainingRouteLegs(trip, ahead)}
-              label="Navigate the rest"
-              tone="solid"
-            />
           </div>
         )}
 
         {isDriver && !finished && (
-          <p className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
-            <span>This phone is sharing its location to follow the drive.</span>
+          <p className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
+            <span className="min-w-0 truncate">
+              Sharing this phone&apos;s location
+            </span>
             <button
               onClick={live.toggleSharing}
               className="shrink-0 font-semibold text-brand-700 underline underline-offset-2"
@@ -302,7 +309,11 @@ export default function LiveView({
         )}
 
         {revised && (
-          <RevisedPanel plan={revised} startedAtIso={run.started_at} />
+          <RevisedPanel
+            plan={revised}
+            startedAtIso={run.started_at}
+            distM={distM}
+          />
         )}
 
         {finished && (
@@ -362,81 +373,110 @@ function heroStop(next: Stop | null, distM: number): LiveHeroState["nextStop"] {
   }
 }
 
-/** The revised journey, always shown next to the promise it replaces. */
+/**
+ * The revised journey, always shown next to the promise it replaces.
+ *
+ * Everything here is measured FROM THE CAR, not from this morning's origin.
+ * The stops used to be labelled with their distance along the whole route —
+ * "227 km" while sitting at the 175 km mark — which is a fact about the trip
+ * and no help at all to somebody deciding whether to stop now. A re-plan is a
+ * plan for the road ahead, so it is written in the road ahead's units.
+ *
+ * The three headline numbers stay three across at every width. Stacked on a
+ * phone they were a 270-pixel column of one number each, which pushed the list
+ * of stops — the part you re-planned to see — off the bottom of the screen.
+ */
 function RevisedPanel({
   plan,
   startedAtIso,
+  distM,
 }: {
   plan: NonNullable<LiveRun["plan"]>
   startedAtIso: string
+  /** How far the car has come, so every distance can be relative to it. */
+  distM: number
 }) {
   const b = plan.benchmark
   const worse = b.delta_min > 1
   return (
-    <div className="mt-4 rounded-2xl border border-ink-100 bg-white p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+    <div className="mt-3 rounded-2xl border border-ink-100 bg-white p-3 sm:p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <h2 className="font-display text-base font-semibold text-ink-900">
-          Revised plan for the rest of the way
+          Revised plan from here
         </h2>
         <span className="text-xs text-ink-400">
           re-planned {fmtKm(plan.offset_base_m)} in · version {plan.plan_version}
         </span>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        <div>
-          <div className="text-xs uppercase tracking-wider text-ink-400">Now hold</div>
-          <div className="font-display text-2xl font-semibold text-brand-700">
-            {plan.optimum_speed?.toFixed(0)} <span className="text-base">km/h</span>
-          </div>
-          <div className="text-xs text-ink-400">
-            was {b.original_speed_kph.toFixed(0)} km/h
-          </div>
-        </div>
-        <div>
-          <div className="text-xs uppercase tracking-wider text-ink-400">Still to go</div>
-          <div className="font-display text-2xl font-semibold text-ink-900">
-            {fmtDuration(plan.remaining.total_min ?? 0)}
-          </div>
-          <div className="text-xs text-ink-400">
-            {b.live_stops_remaining} stops (plan said {b.original_stops_remaining})
-          </div>
-        </div>
-        <div>
-          <div className="text-xs uppercase tracking-wider text-ink-400">Arriving</div>
-          <div
-            className={`font-display text-2xl font-semibold ${
-              worse ? "text-amber-700" : "text-brand-700"
-            }`}
-          >
-            {clockAt(startedAtIso, b.live_total_min)}
-          </div>
-          <div className="text-xs text-ink-400">
-            {Math.abs(b.delta_min) < 1 ? (
-              "as promised"
-            ) : (
-              <>
-                <span className="line-through">
-                  {clockAt(startedAtIso, b.original_total_min)}
-                </span>{" "}
-                promised
-              </>
-            )}
-          </div>
-        </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
+        <Stat
+          label="Now hold"
+          value={`${plan.optimum_speed?.toFixed(0)} km/h`}
+          sub={`was ${b.original_speed_kph.toFixed(0)}`}
+          tone="brand"
+        />
+        <Stat
+          label="Still to go"
+          // "8h08", not "8 h 08 min": three columns on a 360px phone, and the
+          // label above it already says what the number is.
+          value={fmtHm(plan.remaining.total_min ?? 0)}
+          sub={`${b.live_stops_remaining} stops, was ${b.original_stops_remaining}`}
+        />
+        <Stat
+          label="Arriving"
+          value={clockAt(startedAtIso, b.live_total_min)}
+          sub={
+            Math.abs(b.delta_min) < 1
+              ? "as promised"
+              : `${clockAt(startedAtIso, b.original_total_min)} promised`
+          }
+          tone={worse ? "warn" : "brand"}
+        />
       </div>
 
-      <ol className="mt-4 space-y-1.5 text-sm">
+      <ol className="mt-3 space-y-1.5 text-sm">
         {plan.remaining.stops.map((s) => (
-          <li key={s.charger_id} className="flex items-baseline justify-between gap-3">
+          <li key={s.charger_id} className="flex items-baseline justify-between gap-2">
             <span className="min-w-0 flex-1 truncate text-ink-700">{s.name}</span>
-            <span className="shrink-0 font-mono text-xs text-ink-400">
-              {fmtKm(s.offset_m + plan.offset_base_m)} · arrive {s.arrive_soc.toFixed(0)}% ·{" "}
-              {s.charge_min.toFixed(0)} min
+            <span className="shrink-0 font-mono text-[11px] text-ink-400">
+              in {fmtKm(Math.max(s.offset_m + plan.offset_base_m - distM, 0))} ·{" "}
+              {s.arrive_soc.toFixed(0)}% · {s.charge_min.toFixed(0)} min
             </span>
           </li>
         ))}
       </ol>
+    </div>
+  )
+}
+
+/** One headline number. Sized to survive three-across on a 360px phone. */
+function Stat({
+  label,
+  value,
+  sub,
+  tone = "plain",
+}: {
+  label: string
+  value: string
+  sub: string
+  tone?: "plain" | "brand" | "warn"
+}) {
+  const toneCls =
+    tone === "brand"
+      ? "text-brand-700"
+      : tone === "warn"
+        ? "text-amber-700"
+        : "text-ink-900"
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[10px] uppercase tracking-wider text-ink-400">
+        {label}
+      </div>
+      <div className={`font-display text-lg font-semibold sm:text-2xl ${toneCls}`}>
+        {value}
+      </div>
+      <div className="text-[11px] leading-tight text-ink-400">{sub}</div>
     </div>
   )
 }

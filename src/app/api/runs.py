@@ -199,11 +199,39 @@ def _sim_params(req: PlanRequest, run_factor: float = 1.0) -> SimParams:
     return sim_params_for(req, run_factor=run_factor)
 
 
+def _benchmark_timeline(run: TripRun, trip: Trip) -> list[tuple[float, float, float]]:
+    """The plan the drive is measured against — the REVISED one once it exists.
+
+    Re-planning replaces the plan of record; everything that says "the plan"
+    afterwards has to mean the new one. This compared against the original
+    forever, and the cost was not subtle. The original expected charging stops
+    the re-plan had removed, so `soc_vs_plan` stayed pinned at the shortfall
+    that triggered the re-plan in the first place — one drive sat on "battery
+    24% below what the plan expected by now" with a fresh plan on screen it was
+    perfectly on track for. `needs_replan` reads the same number, so the amber
+    "reality has drifted" panel could never clear, and the button inside it
+    offered to re-plan a journey that had just been re-planned.
+
+    The revision's timeline is relative to where and when it was made, so it is
+    placed back on the drive's own axes before anything is read off it.
+    """
+    plan = run.plan or None
+    if plan:
+        tl = (plan.get("remaining") or {}).get("timeline") or []
+        if tl:
+            base_x = float(plan.get("offset_base_m") or 0.0)
+            base_t = float(plan.get("elapsed_min") or 0.0)
+            return [
+                (t["t_min"] + base_t, t["dist_m"] + base_x, t["soc"]) for t in tl
+            ]
+    speed = _planned_result(trip, run.planned_speed_kph)
+    return _timeline_tuples(speed) if speed else []
+
+
 def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
     st = run.state
     soc = live.current_soc(st, usable_kwh)
-    speed = _planned_result(trip, run.planned_speed_kph)
-    timeline = _timeline_tuples(speed) if speed else []
+    timeline = _benchmark_timeline(run, trip)
 
     delta = live.schedule_delta_min(timeline, st["offset_m"], st["at_min"])
     planned_soc = live.plan_soc_at(timeline, st["offset_m"]) if timeline else soc
