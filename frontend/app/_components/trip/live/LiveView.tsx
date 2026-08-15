@@ -29,6 +29,7 @@ import { useLiveRun } from "@/lib/useLiveRun"
 import JourneyHero, { LiveHeroState } from "../JourneyHero"
 import MapsRouteButton from "../MapsRouteButton"
 import BatteryCheck from "./BatteryCheck"
+import NextStopCard from "./NextStopCard"
 
 export default function LiveView({
   trip,
@@ -68,12 +69,26 @@ export default function LiveView({
     ? revised.benchmark.live_total_min
     : plannedTotal + (state?.ahead_behind_min ?? 0)
 
-  // Everything still in front of the car, on whichever plan is in force. Both
-  // the HUD's next stop and the Maps hand-off read this one list, so the
-  // charger the screen names is the first one the navigation gets sent.
+  // The stops of whichever plan is in force, placed on the route. Everything
+  // that names a charger reads this one list — the HUD, the Maps hand-off, the
+  // next-stop card — so a re-plan moves all of them together or none.
+  const planStops = useMemo(
+    () => placedStops(result?.stops ?? [], revised),
+    [result, revised]
+  )
   const ahead = useMemo(
-    () => stopsAhead(result?.stops ?? [], revised, distM),
-    [result, revised, distM]
+    () => planStops.filter((s) => s.offset_m > distM + STOP_PASSED_M),
+    [planStops, distM]
+  )
+  // Standing at a charger, the stop that matters is the one under the car, not
+  // the one after it — `ahead` has already dropped this one.
+  const atChargerId = state?.at_charger_id ?? null
+  const atStop = useMemo(
+    () =>
+      atChargerId
+        ? (planStops.find((s) => s.charger_id === atChargerId) ?? null)
+        : null,
+    [planStops, atChargerId]
   )
   const nextStop = useMemo(() => heroStop(ahead[0] ?? null, distM), [ahead, distM])
 
@@ -178,6 +193,22 @@ export default function LiveView({
             </button>
           )}
         </div>
+
+        {/* What happens next, before anything about the drive as a whole. The
+            HUD can only carry the charger's name and its distance; the two
+            numbers a driver plans a stop around — how long, and what they
+            leave on — were only ever on the results page. */}
+        {!finished && (
+          <NextStopCard
+            stop={atStop ?? ahead[0] ?? null}
+            here={atStop != null}
+            distM={distM}
+            destLabel={trip.request.dest.label.split(",")[0]}
+            vehicle={trip.result.vehicle}
+            socVsPlan={state.soc_vs_plan}
+            revised={revised != null}
+          />
+        )}
 
         {/* The plan, in the navigation the car is actually following. The HUD's
             "Navigate" is the next charger and nothing else, which is the right
@@ -300,25 +331,24 @@ function socLabel(soc: number, measured: boolean, band: number): string {
 }
 
 /**
- * The charging stops still ahead of the car, on whichever plan is in force.
+ * The charging stops of whichever plan is in force, placed on the route.
  *
  * A re-plan replaces the list outright — its stops are offset from where the
- * re-plan happened, so they are placed back on the route before anything
- * compares them with how far the car has come.
+ * re-plan happened, so they are put back on the route here, once, rather than
+ * by each caller that compares one with how far the car has come.
  */
-function stopsAhead(
-  originalStops: Stop[],
-  revised: LiveRun["plan"],
-  distM: number
-): Stop[] {
-  const stops = revised
-    ? revised.remaining.stops.map((s) => ({
-        ...s,
-        offset_m: s.offset_m + revised.offset_base_m,
-      }))
-    : originalStops
-  return stops.filter((s) => s.offset_m > distM + 200)
+function placedStops(originalStops: Stop[], revised: LiveRun["plan"]): Stop[] {
+  if (!revised) return originalStops
+  return revised.remaining.stops.map((s) => ({
+    ...s,
+    offset_m: s.offset_m + revised.offset_base_m,
+  }))
 }
+
+/** A stop within this distance behind the car counts as passed. GPS noise at
+ *  a services is comfortably inside it, so arriving doesn't flip the next
+ *  stop back and forth. */
+const STOP_PASSED_M = 200
 
 /** The next stop as the HUD wants it: a distance from here, not an offset. */
 function heroStop(next: Stop | null, distM: number): LiveHeroState["nextStop"] {
