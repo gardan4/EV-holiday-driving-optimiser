@@ -15,6 +15,7 @@ from app.services.live import (
     RUN_FACTOR_MIN,
     advance,
     apply_reading,
+    charging_soc,
     current_soc,
     needs_replan,
     new_state,
@@ -115,6 +116,11 @@ class TestInference:
         assert current_soc(back, 58.0) < 80.0
 
 
+def _soc(st, at_min=None):
+    """What the screen shows: the charge projection when there is one."""
+    return charging_soc(st, BORN_58, PARAMS, at_min if at_min is not None else st["at_min"])
+
+
 class TestChargingInference:
     def test_parked_at_a_charger_the_battery_climbs(self):
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
@@ -122,16 +128,56 @@ class TestChargingInference:
             st, offset_m=100_000.0, at_min=80.0, moving_s=0.0, stationary_s=1200.0,
             stop_power_kw=150.0, at_charger_id="chg-3",
         )
-        assert current_soc(st, 58.0) > 15.0
+        assert _soc(st, 100.0) > 15.0
         assert st["at_charger_id"] == "chg-3"
 
     def test_longer_plugged_in_means_more_charge(self):
         base = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        short = _ping(base, offset_m=100_000.0, at_min=70.0, moving_s=0.0,
-                      stationary_s=600.0, stop_power_kw=150.0, at_charger_id="c")
-        long_ = _ping(base, offset_m=100_000.0, at_min=90.0, moving_s=0.0,
-                      stationary_s=1800.0, stop_power_kw=150.0, at_charger_id="c")
-        assert current_soc(long_, 58.0) > current_soc(short, 58.0)
+        st = _ping(base, offset_m=100_000.0, at_min=70.0, moving_s=0.0,
+                   stationary_s=600.0, stop_power_kw=150.0, at_charger_id="c")
+        assert _soc(st, 100.0) > _soc(st, 80.0)
+
+    def test_the_charge_keeps_climbing_with_no_pings_at_all(self):
+        """The whole reason it is projected from the clock.
+
+        A phone whose car is charging is in a pocket. Integrating the charge
+        per ping froze the estimate the moment the screen locked, so the number
+        on screen and the countdown under it were both stuck at the value they
+        had on arrival — for the entire stop, which is exactly the window they
+        exist for.
+        """
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
+                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        # Not one further ping — just time passing.
+        assert _soc(st, 61.0) == pytest.approx(15.0, abs=0.5)
+        assert _soc(st, 81.0) > _soc(st, 71.0) > _soc(st, 61.0)
+
+    def test_driving_away_banks_the_charge_that_happened(self):
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
+                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        at_plug = _soc(st, 91.0)
+        gone = _ping(st, offset_m=110_000.0, at_min=96.0, moving_s=300.0)
+        assert gone.get("charge_anchor_soc") is None
+        assert gone["at_charger_id"] is None
+        # Charged, then drove 10 km: below what it left on, well above arrival.
+        assert 15.0 < current_soc(gone, 58.0) < at_plug
+
+    def test_a_phone_that_wakes_on_the_motorway_is_not_billed_as_charging(self):
+        """The minutes a ping spent MOVING cannot have been minutes plugged in.
+
+        Banking the whole gap would credit a car that left half an hour ago
+        with half an hour of charging it did on the autobahn.
+        """
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
+                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        # Same wake-up time, same distance; one reports it drove the whole gap.
+        drove = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=2400.0)
+        dawdled = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=1200.0,
+                        stationary_s=1200.0)
+        assert current_soc(drove, 58.0) < current_soc(dawdled, 58.0)
 
     def test_the_heater_is_not_billed_to_the_pack_while_plugged_in(self):
         """At a DC charger the cabin runs off the charger, not the battery —
@@ -143,7 +189,41 @@ class TestChargingInference:
                         at_charger_id="c", p=cold)
         idle = _ping(st, offset_m=100_000.0, at_min=80.0, moving_s=0.0,
                      stationary_s=1200.0, p=cold)
-        assert current_soc(plugged, 58.0) > current_soc(idle, 58.0)
+        assert charging_soc(plugged, BORN_58, cold, 80.0) > current_soc(idle, 58.0)
+
+
+class TestLeavingACharger:
+    def _plugged(self):
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        return _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
+                     stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+
+    def test_a_reading_at_the_plug_restarts_the_projection_from_it(self):
+        st = self._plugged()
+        st = {**st, "at_min": 81.0}
+        st = apply_reading(st, 62.0, 58.0, veh=BORN_58, p=PARAMS)
+        assert st["charge_anchor_soc"] == 62.0
+        assert _soc(st, 81.0) == pytest.approx(62.0, abs=0.1)
+        # …and keeps counting up from there.
+        assert _soc(st, 91.0) > 62.0
+
+    def test_leaving_ends_the_projection_and_takes_the_car_off_the_charger(self):
+        st = self._plugged()
+        st = {**st, "at_min": 81.0}
+        st = apply_reading(st, 62.0, 58.0, veh=BORN_58, p=PARAMS, leaving=True)
+        assert st.get("charge_anchor_soc") is None
+        assert st["at_charger_id"] is None
+        assert current_soc(st, 58.0) == 62.0
+        # Time passing no longer adds anything: the cable is out.
+        assert _soc(st, 141.0) == 62.0
+
+    def test_the_typed_figure_wins_over_the_projection(self):
+        """The driver read the dashboard; the app was guessing."""
+        st = self._plugged()
+        st = {**st, "at_min": 111.0}
+        assert _soc(st) > 70.0  # the projection had it much higher
+        st = apply_reading(st, 55.0, 58.0, veh=BORN_58, p=PARAMS, leaving=True)
+        assert current_soc(st, 58.0) == 55.0
 
 
 class TestCalibration:

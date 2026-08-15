@@ -98,7 +98,10 @@ export interface LiveHandle {
   toggleSharing: () => void
   /** Returns the state the reading produced, so the caller can react to what
    *  the correction revealed rather than to what it was before. */
-  submitSoc: (soc: number) => Promise<LiveState | null>
+  /** `leaving` says the figure is what the car is pulling out on: it ends the
+   *  charge projection rather than restarting it, and takes the car off the
+   *  charger. */
+  submitSoc: (soc: number, leaving?: boolean) => Promise<LiveState | null>
   /** `exclude` are chargers the driver has turned down; the server keeps them.
    *  `minArrivalSoc` accepts arriving under the reserve on the leg being
    *  driven, to reach a charger further on. */
@@ -321,7 +324,7 @@ export function useLiveRun(
   }, [broadcasting])
 
   const submitSoc = useCallback(
-    async (soc: number) => {
+    async (soc: number, leaving = false) => {
       if (!runId) return null
       setBusy(true)
       try {
@@ -329,7 +332,7 @@ export function useLiveRun(
         // the foreground — the driver is typing into it — so a fix usually
         // arrives even after a long quiet spell at a charger.
         const here = await currentPosition().catch(() => null)
-        const st = await recordSoc(runId, soc, here)
+        const st = await recordSoc(runId, soc, here, leaving)
         setState(st)
         setLocalOffsetM(null)
         return st

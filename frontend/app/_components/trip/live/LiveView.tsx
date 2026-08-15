@@ -314,6 +314,43 @@ export default function LiveView({
     }
   }
 
+  /** "It's actually this much", typed at the plug. Re-anchors the projection
+   *  on the driver's figure and leaves the cable in. No re-plan offer: nothing
+   *  about the journey has changed yet, and a toast with a button in it while
+   *  somebody is mid-charge is noise. */
+  async function doCorrect(soc: number) {
+    try {
+      await live.submitSoc(soc)
+      toast.success(`Noted — ${Math.round(soc)}%. Counting up from there.`)
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't save that reading"
+      )
+    }
+  }
+
+  /** "I'm leaving on this much." Ends the stop, anchors the battery on the
+   *  driver's own figure, and offers the re-plan — because the number they
+   *  actually left on is exactly what the rest of the drive should be computed
+   *  from, and it is never the number the projection guessed. */
+  async function doLeave(soc: number) {
+    try {
+      const next = await live.submitSoc(soc, true)
+      const worthReplanning =
+        next != null && (next.needs_replan || Math.abs(next.soc_vs_plan) >= 5)
+      toast.success(`On the road again on ${Math.round(soc)}%.`, {
+        duration: worthReplanning ? 12_000 : 4_000,
+        action: worthReplanning
+          ? { label: "Re-plan", onClick: () => void doReplan() }
+          : undefined,
+      })
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't save that reading"
+      )
+    }
+  }
+
   return (
     <div className="pb-16">
       {result && (
@@ -387,10 +424,13 @@ export default function LiveView({
           {isDriver ? " · you're driving" : " · you're watching"}
         </p>
 
-        {/* Where the car actually IS, when that is a charger the plan never
-            chose. Above the next stop, because a driver standing at a plug is
-            not asking about a charger 69 km up the road. */}
-        {!finished && state.at_charger && !state.at_charger.planned && (
+        {/* Where the car actually IS. Above the next stop, because a driver
+            standing at a plug is not asking about a charger 69 km up the road
+            — and for EVERY charger, planned or not: at a planned stop the card
+            below is already counting down to the one after it, so restricting
+            this to unplanned chargers left the screen silent about the site
+            the car was plugged into. */}
+        {!finished && state.at_charger && (
           <ChargingHere
             charger={state.at_charger}
             soc={state.soc}
@@ -399,9 +439,12 @@ export default function LiveView({
               state.soc_is_measured,
               state.soc_uncertainty_pct
             )}
-            needSoc={state.need_soc_next ?? null}
-            vehicle={trip.result.vehicle}
+            session={state.charging ?? null}
             nextName={ahead[0]?.name ?? null}
+            isDriver={isDriver}
+            busy={live.busy}
+            onCorrect={(soc) => void doCorrect(soc)}
+            onLeave={(soc) => void doLeave(soc)}
           />
         )}
 

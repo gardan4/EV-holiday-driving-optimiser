@@ -36,6 +36,7 @@ from app.api.schemas import (
     AtChargerOut,
     ArriveRequest,
     BenchmarkOut,
+    ChargingOut,
     LiveOut,
     LiveStateOut,
     PingRequest,
@@ -64,6 +65,7 @@ from app.services.simulator import (
     RouteProfile,
     SimParams,
     VehicleParams,
+    charge_minutes,
     optimum,
     slice_route,
     sweep_slice,
@@ -335,19 +337,30 @@ def _resolve_hold_speed(run: TripRun, body: ReplanRequest) -> float | None:
     return body.hold_speed_kph
 
 
-def _plan_stop_offset(run: TripRun, trip: Trip, charger_id: str) -> float | None:
-    """Where the plan in force puts this stop, on the route's own axis."""
+def _plan_stop(run: TripRun, trip: Trip, charger_id: str) -> tuple[dict, float] | None:
+    """This stop as the plan in force describes it, with its offset base.
+
+    The re-planned slice first, the original itinerary second: the screen is
+    drawn from whichever plan is current, and a stop's numbers have to come
+    from the same one.
+    """
     plan = run.plan or None
     if plan:
         base = float(plan.get("offset_base_m") or 0.0)
         for s in (plan.get("remaining") or {}).get("stops") or []:
             if s["charger_id"] == charger_id:
-                return float(s["offset_m"]) + base
+                return s, base
     speed = _planned_result(trip, run.planned_speed_kph) or {}
     for s in speed.get("stops", []):
         if s["charger_id"] == charger_id:
-            return float(s["offset_m"])
+            return s, 0.0
     return None
+
+
+def _plan_stop_offset(run: TripRun, trip: Trip, charger_id: str) -> float | None:
+    """Where the plan in force puts this stop, on the route's own axis."""
+    found = _plan_stop(run, trip, charger_id)
+    return None if found is None else float(found[0]["offset_m"]) + found[1]
 
 
 def _soc_needed_next(
@@ -359,11 +372,15 @@ def _soc_needed_next(
 ) -> float | None:
     """Battery needed to reach the next planned stop from here, reserve in.
 
-    The question a driver at an unplanned charger is actually asking — how
-    much do I have to put in before I can go — and the one the plan cannot
-    answer, because it never expected the car to be here. Priced through the
-    same profile the simulator uses, at the speed the plan is holding, so the
-    number agrees with everything else on the screen.
+    The question a driver at a charger is actually asking — how much do I have
+    to put in before I can go. Priced through the same profile the simulator
+    uses, at the speed the plan is holding, so the number agrees with
+    everything else on the screen.
+
+    Answered at PLANNED stops too, not only at chargers the plan never chose.
+    It is the floor there as well, and the useful half of the pair the stop
+    card shows: the plan's own `depart_soc` says what leaving on costs the rest
+    of the journey, and this says when you could leave at all.
     """
     target = None
     plan = run.plan or None
@@ -445,9 +462,145 @@ def _at_charger_out(run: TripRun, trip: Trip) -> AtChargerOut | None:
     )
 
 
-def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
+def _live_soc(run: TripRun, trip: Trip, vehicle: Vehicle) -> float:
+    """The battery now — projected forward while plugged in.
+
+    Charging is modelled from the clock rather than from pings (see
+    `live.charging_soc`), so this is the one place that has to know what time
+    it is: a phone in a pocket sends nothing, and the estimate has to be right
+    when the page is reopened rather than frozen at the moment it locked.
+    """
     st = run.state
-    soc = live.current_soc(st, usable_kwh)
+    if st.get("charge_anchor_soc") is None:
+        return live.current_soc(st, vehicle.usable_kwh)
+    return live.charging_soc(
+        st,
+        VehicleParams.from_vehicle(vehicle),
+        _sim_params(
+            PlanRequest.model_validate(trip.request), st.get("run_factor", 1.0)
+        ),
+        _now_min(run),
+    )
+
+
+def _now_min(run: TripRun) -> float:
+    """Minutes since departure, by the wall clock, never rewound.
+
+    The charge projection is a function of elapsed time, so the one number it
+    needs is the one a sleeping phone stops sending.
+    """
+    return max(
+        float(run.state["at_min"]),
+        (datetime.utcnow() - run.started_at).total_seconds() / 60.0,
+    )
+
+
+def _charging_out(
+    run: TripRun, trip: Trip, vehicle: Vehicle, soc_now: float
+) -> ChargingOut | None:
+    """The session at the plug: how long, how fast, and how much longer.
+
+    Assembled here rather than stored, because every number in it is a function
+    of the clock — see `ChargingOut`. The two targets come from different
+    places on purpose: the floor is `need_soc_next`, priced once on arrival
+    against the road ahead, and the target is what the PLAN chose to leave this
+    stop on, which exists only when the plan chose this stop at all.
+    """
+    st = run.state
+    if st.get("charge_anchor_soc") is None:
+        return None
+    veh = VehicleParams.from_vehicle(vehicle)
+    p = _sim_params(
+        PlanRequest.model_validate(trip.request), st.get("run_factor", 1.0)
+    )
+    kw = float(st.get("charge_kw") or 0.0)
+
+    target: float | None = None
+    cid = st.get("at_charger_id")
+    if cid:
+        found = _plan_stop(run, trip, str(cid))
+        if found is not None:
+            target = float(found[0]["depart_soc"])
+
+    def remaining(to: float | None) -> float | None:
+        if to is None or kw <= 0.0 or to <= soc_now:
+            return None
+        return round(charge_minutes(veh, soc_now, to, kw, p.charge_power_factor), 1)
+
+    floor = st.get("need_soc_next")
+    return ChargingOut(
+        since_min=round(
+            max(0.0, _now_min(run) - float(st.get("charge_anchor_min", 0.0))), 1
+        ),
+        power_kw=round(kw, 1),
+        start_soc=round(float(st["charge_anchor_soc"]), 1),
+        min_soc=None if floor is None else round(float(floor), 1),
+        target_soc=None if target is None else round(target, 1),
+        to_min_min=remaining(None if floor is None else float(floor)),
+        to_target_min=remaining(target),
+    )
+
+
+def _log_charge_edges(
+    db: AsyncSession,
+    run: TripRun,
+    before: dict,
+    after: dict,
+    now: datetime,
+    soc: float,
+) -> None:
+    """Write `charge_start` / `charge_end` on the edges of a plug-in.
+
+    `services/drives.charge_stops` has always paired these two kinds to report
+    how long real charge stops take — and nothing has ever written either of
+    them, so the panel answered with an empty list for every drive since it
+    shipped. The charge anchor IS that pair: it appears when the cable goes in
+    and is banked when it comes out, by whichever route (a ping down the road,
+    a correction, the driver saying what they are leaving on). Deriving the
+    events from the anchor rather than from each call site is what stops the
+    four of them drifting apart.
+
+    Never a reason to fail a write on the drive screen: these are a record of
+    the stop, not part of it.
+    """
+    def session(st: dict) -> str | None:
+        return (
+            str(st.get("at_charger_id"))
+            if st.get("charge_anchor_soc") is not None
+            else None
+        )
+
+    was, is_now = session(before), session(after)
+    if was == is_now:
+        return
+
+    def event(kind: str, charger_id: str | None) -> None:
+        db.add(
+            TripEvent(
+                run_id=run.id,
+                at=now,
+                kind=kind,
+                offset_m=float(after["offset_m"]),
+                lat=after["lat"],
+                lon=after["lon"],
+                soc=round(soc, 1),
+                payload={"charger_id": charger_id},
+            )
+        )
+
+    # Both can fire on one call: moving straight from one plug to another ends
+    # a stop and begins a stop, and a pair keyed on the anchor alone would see
+    # "still charging" and record neither.
+    if was is not None:
+        event("charge_end", was)
+    if is_now is not None:
+        event("charge_start", is_now)
+
+
+def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
+    st = run.state
+    usable_kwh = vehicle.usable_kwh
+    soc = _live_soc(run, trip, vehicle)
     timeline = _benchmark_timeline(run, trip)
 
     delta = live.schedule_delta_min(timeline, st["offset_m"], st["at_min"])
@@ -486,6 +639,7 @@ def _state_out(run: TripRun, trip: Trip, usable_kwh: float) -> LiveStateOut:
         # business but the server's, and a read of this run belongs to watchers
         # too.
         can_undo_arrive=bool(st.get("arrive_undo")),
+        charging=_charging_out(run, trip, vehicle, soc),
     )
 
 
@@ -654,7 +808,7 @@ async def start_run(
         run_id=str(run.id),
         run_ref=run_ref_for(run.id),
         trip_id=str(trip.id),
-        state=_state_out(run, trip, vehicle.usable_kwh if vehicle else 58.0),
+        state=_state_out(run, trip, vehicle),
     )
 
 
@@ -685,7 +839,7 @@ async def ping(
     at_min = (now - run.started_at).total_seconds() / 60.0
     if at_min < run.state["at_min"]:
         # A retry or a reordered request; replaying it would rewind the drive.
-        return _state_out(run, trip, vehicle.usable_kwh)
+        return _state_out(run, trip, vehicle)
 
     # A vague fix is worth recording but not worth moving the car for.
     if body.accuracy_m is not None and body.accuracy_m > live.MAX_ACCURACY_M:
@@ -732,9 +886,13 @@ async def ping(
         new_st = {**new_st, "need_soc_next": None}
 
     # Plain JSON columns don't track in-place edits — always reassign.
+    prev_st = run.state
     run.state = new_st
     run.last_seen_at = now
     run.n_pings = run.n_pings + 1
+    _log_charge_edges(
+        db, run, prev_st, new_st, now, _live_soc(run, trip, vehicle)
+    )
 
     last_crumb = run.state.get("last_crumb_min", -BREADCRUMB_MIN)
     if at_min - last_crumb >= BREADCRUMB_MIN:
@@ -743,11 +901,11 @@ async def ping(
             TripEvent(
                 run_id=run.id, at=now, kind="breadcrumb", offset_m=offset_m,
                 lat=body.lat, lon=body.lon,
-                soc=live.current_soc(new_st, vehicle.usable_kwh),
+                soc=_live_soc(run, trip, vehicle),
             )
         )
     await db.commit()
-    return _state_out(run, trip, vehicle.usable_kwh)
+    return _state_out(run, trip, vehicle)
 
 
 @router.post("/runs/{run_id}/arrive", response_model=ArriveOut)
@@ -829,6 +987,7 @@ async def arrive(
     params = _sim_params(plan_req, run.state.get("run_factor", 1.0))
     veh = VehicleParams.from_vehicle(vehicle)
 
+    prev_st = run.state
     new_st = live.advance(
         run.state,
         segments=live.snapshot_segments(snapshot),
@@ -844,10 +1003,26 @@ async def arrive(
         moving_s=min(gap_s, 3600.0),
         stationary_s=0.0,
     )
+    # The charge starts projecting from HERE, not from the next ping. A driver
+    # who taps "I'm plugged in" and puts the phone away sends nothing more, and
+    # waiting for a ping to anchor the projection would mean the whole stop —
+    # exactly the stop this button exists for — was modelled as not charging.
+    # The SITE's power, uncapped: `charge_forward` takes the car's own curve
+    # from the other side, exactly as the ping path does.
+    charge_kw = float(node.power_kw) if node and node.power_kw else None
     run.state = {
         **new_st,
         "at_charger_id": node.charger_id if node else None,
         "stale": False,
+        **(
+            {
+                "charge_anchor_soc": live.current_soc(new_st, vehicle.usable_kwh),
+                "charge_anchor_min": at_min,
+                "charge_kw": charge_kw,
+            }
+            if charge_kw
+            else {}
+        ),
         "need_soc_next": _soc_needed_next(
             run, trip, veh, params, float(new_st["offset_m"])
         ),
@@ -866,11 +1041,14 @@ async def arrive(
         },
     }
     run.last_seen_at = now
+    _log_charge_edges(
+        db, run, prev_st, run.state, now, _live_soc(run, trip, vehicle)
+    )
     db.add(
         TripEvent(
             run_id=run.id, at=now, kind="arrive", offset_m=float(offset_m),
             lat=run.state["lat"], lon=run.state["lon"],
-            soc=live.current_soc(run.state, vehicle.usable_kwh),
+            soc=_live_soc(run, trip, vehicle),
             payload={
                 "charger_id": node.charger_id if node else None,
                 "name": node.name if node else None,
@@ -879,7 +1057,7 @@ async def arrive(
     )
     await db.commit()
     return ArriveOut(
-        state=_state_out(run, trip, vehicle.usable_kwh),
+        state=_state_out(run, trip, vehicle),
         matched_name=node.name if node else None,
     )
 
@@ -928,12 +1106,12 @@ async def undo_arrive(
             run_id=run.id, at=now, kind="arrive_undo",
             offset_m=float(run.state["offset_m"]),
             lat=run.state["lat"], lon=run.state["lon"],
-            soc=live.current_soc(run.state, vehicle.usable_kwh),
+            soc=_live_soc(run, trip, vehicle),
             payload={},
         )
     )
     await db.commit()
-    return _state_out(run, trip, vehicle.usable_kwh)
+    return _state_out(run, trip, vehicle)
 
 
 @router.post("/runs/{run_id}/soc", response_model=LiveStateOut)
@@ -994,8 +1172,27 @@ async def record_soc(
                 ),
             )
 
-    before = live.current_soc(run.state, vehicle.usable_kwh)
-    new_st = live.apply_reading(run.state, body.soc, vehicle.usable_kwh)
+    before = _live_soc(run, trip, vehicle)
+    # The charge is projected from the clock, so the clock has to be current
+    # before the reading settles it — a phone that slept through the whole stop
+    # would otherwise bank the charge as of the last ping, which is the moment
+    # it was plugged in.
+    run.state = {**run.state, "at_min": _now_min(run)}
+    prev_st = run.state
+    new_st = live.apply_reading(
+        run.state,
+        body.soc,
+        vehicle.usable_kwh,
+        veh=VehicleParams.from_vehicle(vehicle),
+        p=_sim_params(
+            PlanRequest.model_validate(trip.request), run.state.get("run_factor", 1.0)
+        ),
+        leaving=body.leaving,
+    )
+    if body.leaving:
+        # Back on the road: the floor to reach the next stop was a question
+        # about standing still, and the answer to it has just been acted on.
+        new_st = {**new_st, "need_soc_next": None}
     run.state = new_st
     run.n_soc_readings = run.n_soc_readings + 1
     now = datetime.utcnow()
@@ -1009,11 +1206,13 @@ async def record_soc(
                 "estimated": round(before, 1),
                 "error_pct": new_st.get("last_error_pct"),
                 "run_factor": new_st.get("run_factor"),
+                "leaving": body.leaving,
             },
         )
     )
+    _log_charge_edges(db, run, prev_st, new_st, now, body.soc)
     await db.commit()
-    return _state_out(run, trip, vehicle.usable_kwh)
+    return _state_out(run, trip, vehicle)
 
 
 @router.post("/runs/{run_id}/replan", response_model=ReplanOut)
@@ -1060,6 +1259,7 @@ async def replan(
                 detail="You're off the planned route. Rejoin it before re-planning.",
             )
         now = datetime.utcnow()
+        prev_st = run.state
         run.state = live.resync(
             run.state,
             segments=live.snapshot_segments(snapshot),
@@ -1077,6 +1277,9 @@ async def replan(
             ),
         )
         run.last_seen_at = now
+        _log_charge_edges(
+            db, run, prev_st, run.state, now, _live_soc(run, trip, vehicle)
+        )
 
     st = run.state
     if st.get("stale"):
@@ -1085,7 +1288,7 @@ async def replan(
             detail="You're off the planned route. Rejoin it before re-planning.",
         )
 
-    soc_now = live.current_soc(st, vehicle.usable_kwh)
+    soc_now = _live_soc(run, trip, vehicle)
 
     # Chargers this driver has turned down stay turned down. Merged and kept
     # on the run, because a rejection that lasts until the next re-plan is not
@@ -1265,7 +1468,7 @@ async def alternatives(
     snapshot = run.route_snapshot
     plan_req = PlanRequest.model_validate(trip.request)
     veh = VehicleParams.from_vehicle(vehicle)
-    soc_now = live.current_soc(st, vehicle.usable_kwh)
+    soc_now = _live_soc(run, trip, vehicle)
     base = _sim_params(plan_req, st.get("run_factor", 1.0))
     params = SimParams(
         **{
@@ -1494,12 +1697,12 @@ async def finish(
                 run_id=run.id, at=now, kind="finish",
                 offset_m=run.state["offset_m"], lat=run.state["lat"],
                 lon=run.state["lon"],
-                soc=live.current_soc(run.state, vehicle.usable_kwh),
+                soc=_live_soc(run, trip, vehicle),
                 payload={"at_min": run.state["at_min"]},
             )
         )
         await db.commit()
-    return _state_out(run, trip, vehicle.usable_kwh)
+    return _state_out(run, trip, vehicle)
 
 
 # ---------------------------------------------------------------------------
@@ -1556,7 +1759,7 @@ async def get_live(
         started_at=run.started_at,
         finished_at=run.finished_at,
         planned_speed_kph=run.planned_speed_kph,
-        state=_state_out(run, trip, vehicle.usable_kwh),
+        state=_state_out(run, trip, vehicle),
         plan=ReplanOut.model_validate(run.plan) if run.plan else None,
         trail=trail,
         seconds_since_ping=max(

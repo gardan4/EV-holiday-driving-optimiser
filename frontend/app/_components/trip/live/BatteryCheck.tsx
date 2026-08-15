@@ -70,10 +70,17 @@ export default function BatteryCheck({
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(Math.round(state.soc))
-  const atCharger = state.at_charger_id != null
+  // Standing at a plug, the STOP CARD owns this question — it asks it once,
+  // with the two answers that mean different things there ("it's 40%" keeps
+  // charging, "leaving on 40%" ends the stop). This card used to prompt as
+  // well, so a charging driver got two steppers and two headings asking the
+  // same thing, which is how a stop turns into a form. It stays reachable as
+  // the quiet one-line row; it just stops competing.
+  const atCharger = state.at_charger_id != null && state.at_charger == null
   const [asked, setAsked] = useState<string | null>(null)
 
-  // Arriving at a charger is the moment to ask — and only once per stop, so a
+  // Arriving at a charger the stop card cannot describe — one we hold no
+  // snapshot row for — is still the moment to ask, and only once per stop, so a
   // driver who dismisses it isn't nagged for the whole time they're plugged in.
   useEffect(() => {
     if (atCharger && state.at_charger_id !== asked) {

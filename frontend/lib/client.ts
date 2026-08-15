@@ -315,6 +315,30 @@ export interface AtCharger {
   planned: boolean
 }
 
+/** The session at the plug, projected from the CLOCK rather than from pings.
+ *
+ *  A charging car's phone is in a pocket, so nothing here may depend on the
+ *  page being open: reopening after twenty minutes has to show twenty minutes
+ *  of charging, not the screen that was left behind.
+ *
+ *  Two targets on purpose. `min_soc` is the floor — enough to reach the next
+ *  stop with the reserve intact — and is what says "you could go now".
+ *  `target_soc` is what the plan chose to leave on, usually higher because
+ *  leaving later at a fast charger beats arriving somewhere slower. */
+export interface ChargingSession {
+  /** Minutes since the cable went in. */
+  since_min: number
+  power_kw: number
+  /** The battery when charging started, or when the driver last typed one in. */
+  start_soc: number
+  min_soc?: number | null
+  /** Null at a charger the plan never chose: it has a floor, not a target. */
+  target_soc?: number | null
+  /** Minutes from now to each, null once already past it. */
+  to_min_min?: number | null
+  to_target_min?: number | null
+}
+
 export interface LiveState {
   at_min: number
   offset_m: number
@@ -346,6 +370,8 @@ export interface LiveState {
    *  tap on the drive screen the model cannot undo on its own — the offset is
    *  clamped forward, so a wrong arrival survives every later fix. */
   can_undo_arrive?: boolean
+  /** The session at the plug, while there is one. */
+  charging?: ChargingSession | null
 }
 
 export interface Benchmark {
@@ -526,12 +552,22 @@ export async function pingRun(
 export async function recordSoc(
   runId: string,
   soc: number,
-  here?: { lat: number; lon: number } | null
+  here?: { lat: number; lon: number } | null,
+  /** "This is what I'm leaving on." Ends the charge projection instead of
+   *  restarting it from the figure, and takes the car off the charger. A
+   *  separate flag and not something read off the number, because "I'm on 62
+   *  now" and "I'm leaving on 62" are different sentences. */
+  leaving = false
 ): Promise<LiveState> {
   return unwrap<LiveState>(
     await apiFetch(`/api/runs/${runId}/soc`, {
       method: "POST",
-      body: JSON.stringify({ soc, lat: here?.lat ?? null, lon: here?.lon ?? null }),
+      body: JSON.stringify({
+        soc,
+        lat: here?.lat ?? null,
+        lon: here?.lon ?? null,
+        leaving,
+      }),
     })
   )
 }

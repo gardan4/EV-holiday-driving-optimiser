@@ -11,10 +11,12 @@ it" is that the run id never leaves the response that creates it.
 from __future__ import annotations
 
 from dataclasses import fields, replace
+from datetime import timedelta
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.runs import _sim_params
@@ -22,7 +24,7 @@ from app.api.schemas import PlanRequest
 from app.api.trips import sim_params_for
 from app.core.database import Base, get_db
 from app.main import app
-from app.models import Vehicle
+from app.models import TripEvent, TripRun, Vehicle
 from app.services.geo import RouteGeometry
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode, SimParams
@@ -1697,4 +1699,172 @@ class TestReview:
     async def test_no_live_drive_is_404(self, client):
         trip = await make_trip(client)
         resp = await client.get(f"/api/trips/{trip['id']}/live")
+        assert resp.status_code == 404
+
+
+async def _wind_clock_back(db_session, minutes: float) -> None:
+    """Move the run's departure back, which is the only way to make wall-clock
+    time pass inside a test. The charge is projected from `datetime.utcnow()`
+    minus `started_at` on purpose — that is what a sleeping phone cannot stop
+    — so there is nothing to fake but the start."""
+    run = (await db_session.execute(select(TripRun))).scalars().first()
+    run.started_at = run.started_at - timedelta(minutes=minutes)
+    await db_session.commit()
+
+
+class TestTheStopFromArrivalToDeparture:
+    """The three questions a driver has while standing at a plug: how much do
+    I need, how much do I have, and what do I actually have when I unplug.
+
+    The middle one used to be unanswerable. Charging was integrated per ping,
+    and a phone whose car is charging is in a pocket — so the estimate froze at
+    the value it had on arrival and the minutes-remaining under it never
+    counted down. Reopening the page after twenty minutes showed the screen
+    that had been left behind, which is worse than showing nothing.
+    """
+
+    async def _at_a_stop(self, client, trip, run):
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = next(
+            s for s in speed["stops"] if s["offset_m"] > before["offset_m"] + 20_000
+        )
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        return stop, st
+
+    async def test_arriving_starts_the_session_without_waiting_for_a_ping(
+        self, client
+    ):
+        """The tap is the last thing a driver does before pocketing the phone.
+        Anchoring the charge on the NEXT ping would model the whole stop — the
+        one this button exists for — as not charging at all."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        _stop, st = await self._at_a_stop(client, trip, run)
+        assert st["charging"] is not None
+        assert st["charging"]["power_kw"] > 0
+        assert st["charging"]["start_soc"] == pytest.approx(st["soc"], abs=0.2)
+
+    async def test_it_says_both_what_is_needed_and_what_the_plan_wanted(
+        self, client
+    ):
+        """Two targets, because they answer different questions. The floor says
+        "you could go now"; the plan's target is what leaving on costs you
+        later. Showing only the target sits a driver through minutes they did
+        not have to; showing only the floor quietly drops the optimisation."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        stop, st = await self._at_a_stop(client, trip, run)
+        ch = st["charging"]
+        assert ch["min_soc"] is not None
+        assert ch["target_soc"] == pytest.approx(stop["depart_soc"], abs=0.1)
+        # The plan leaves higher than the bare minimum to reach the next stop.
+        assert ch["target_soc"] >= ch["min_soc"]
+        assert ch["to_target_min"] is not None and ch["to_target_min"] > 0
+
+    async def test_the_estimate_climbs_on_the_clock_with_no_pings(
+        self, client, db_session
+    ):
+        """No ping, no fix, nothing from the phone — only time."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        _stop, st = await self._at_a_stop(client, trip, run)
+
+        await _wind_clock_back(db_session, 15)
+
+        later = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert later["soc"] > st["soc"] + 1.0
+        assert later["charging"]["since_min"] >= 14.0
+        # And the countdown really counts down — to nothing at all once the
+        # target is reached, which is the answer "you can go".
+        left = later["charging"]["to_target_min"]
+        assert left is None or left < st["charging"]["to_target_min"]
+
+    async def test_leaving_takes_the_typed_figure_and_ends_the_stop(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        _stop, st = await self._at_a_stop(client, trip, run)
+
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc",
+                json={"soc": 71.0, "leaving": True},
+            )
+        ).json()
+        assert out["soc"] == pytest.approx(71.0, abs=0.05)
+        assert out["charging"] is None
+        assert out["at_charger_id"] is None
+        assert out["at_charger"] is None
+        assert out["need_soc_next"] is None
+        assert out["soc_is_measured"] is True
+
+    async def test_a_reading_that_is_not_a_departure_keeps_charging(
+        self, client, db_session
+    ):
+        """"I'm on 40 now" and "I'm leaving on 40" are different sentences.
+        One asks the estimate to keep counting up from the corrected figure."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._at_a_stop(client, trip, run)
+
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc", json={"soc": 40.0}
+            )
+        ).json()
+        assert out["charging"] is not None
+        assert out["charging"]["start_soc"] == pytest.approx(40.0, abs=0.05)
+        assert out["at_charger_id"] is not None
+
+        await _wind_clock_back(db_session, 10)
+        later = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert later["soc"] > 40.0
+
+    async def test_the_stop_is_written_to_the_event_log_as_a_pair(
+        self, client, db_session
+    ):
+        """`services/drives.charge_stops` has always paired `charge_start` with
+        `charge_end` to report how long real stops take, and nothing ever wrote
+        either one — so the panel answered with an empty list for every drive
+        since it shipped. The anchor IS that pair."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._at_a_stop(client, trip, run)
+        await client.post(
+            f"/api/runs/{run['run_id']}/soc", json={"soc": 71.0, "leaving": True}
+        )
+
+        rows = list(
+            (
+                await db_session.execute(
+                    select(TripEvent.kind).order_by(TripEvent.at, TripEvent.id)
+                )
+            ).scalars()
+        )
+        assert "charge_start" in rows
+        assert "charge_end" in rows
+        assert rows.index("charge_start") < rows.index("charge_end")
+
+    async def test_a_watcher_sees_the_session_but_cannot_end_it(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._at_a_stop(client, trip, run)
+
+        watched = (await client.get(f"/api/trips/{trip['id']}/live")).json()
+        assert watched["state"]["charging"] is not None
+        assert run["run_id"] not in str(watched)
+
+        resp = await client.post(
+            f"/api/trips/{trip['id']}/soc", json={"soc": 71.0, "leaving": True}
+        )
         assert resp.status_code == 404

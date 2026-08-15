@@ -262,6 +262,12 @@ class SocReadingRequest(BaseModel):
     # point on the route — see `runs.record_soc`.
     lat: Optional[float] = Field(default=None, ge=-90.0, le=90.0)
     lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
+    # "This is what I'm leaving on." Ends the charge projection instead of
+    # restarting it from the figure, and takes the car off the charger. A flag
+    # rather than something inferred from the number, because "I'm on 62 now"
+    # and "I'm leaving on 62" are different sentences: one asks the estimate to
+    # keep counting up, the other says stop. See `live.apply_reading`.
+    leaving: bool = False
 
 
 class ReplanRequest(BaseModel):
@@ -405,6 +411,42 @@ class AtChargerOut(BaseModel):
     planned: bool = False
 
 
+class ChargingOut(BaseModel):
+    """The session at the plug, projected from the CLOCK.
+
+    A charging car's phone is in a pocket, so nothing about this can depend on
+    pings arriving — see `live.charging_soc`. Every field here is derived from
+    when the cable went in, what the site delivers and what time it is now, so
+    reopening the page after twenty minutes shows twenty minutes of charging
+    rather than the screen that was left behind.
+
+    Two targets, deliberately, because they answer different questions and a
+    driver at nine in the evening wants both. `min_soc` is the FLOOR — enough
+    to reach the next stop with the reserve intact — and is what says "you
+    could go now". `target_soc` is what the plan chose to leave on, which is
+    usually higher because leaving later at a fast charger beats arriving
+    somewhere slower. Showing only the plan's target makes a driver sit through
+    minutes they did not have to; showing only the floor quietly costs them the
+    optimisation. So both, with the minutes to each.
+    """
+
+    #: Minutes since the cable went in.
+    since_min: float
+    #: What the site delivers to this car, after the site cap.
+    power_kw: float
+    #: The battery when charging started, or when the driver last typed one in.
+    start_soc: float
+    #: Enough to reach the next stop with the reserve intact. Null at the last
+    #: stop's own destination target, or when it cannot be priced.
+    min_soc: Optional[float] = None
+    #: What the plan chose to leave this stop on. Null when the plan did not
+    #: choose this stop — an unplanned charger has no target, only a floor.
+    target_soc: Optional[float] = None
+    #: Minutes from NOW to each, null when already past it.
+    to_min_min: Optional[float] = None
+    to_target_min: Optional[float] = None
+
+
 class LiveStateOut(BaseModel):
     at_min: float                  # minutes since departure
     offset_m: float
@@ -439,6 +481,9 @@ class LiveStateOut(BaseModel):
     # forward, so a wrong arrival cannot be corrected by driving or by waiting
     # — so the screen has to be able to offer the way out.
     can_undo_arrive: bool = False
+    # The session at the plug, while there is one. Null the moment the driver
+    # says they are leaving, or the car moves off.
+    charging: Optional[ChargingOut] = None
 
 
 class BenchmarkOut(BaseModel):

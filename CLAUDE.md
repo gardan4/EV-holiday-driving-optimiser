@@ -492,6 +492,61 @@ the pipeline is green before infra exists. Infra deploy is manual
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
+- **A charging car's phone is in a pocket, so the charge runs on the CLOCK**
+  (`live.charging_soc`, `live.bank_charge`, `ChargingOut`). Charging used to be
+  integrated per ping, over the window each fix reported — which works only
+  while the phone is awake, and the phone is never awake for the one event this
+  models. `soc_gained` stopped growing the moment the screen locked, so the
+  battery froze at the value it had on arrival and the "12 min left" under it
+  never counted down; coming back twenty minutes later showed the screen that
+  had been left behind, which is worse than showing nothing because it looks
+  live. Elapsed time needs no telemetry: the SoC at plug-in, the site's power
+  and `datetime.utcnow()` are the whole model, and `advance` now ANCHORS the
+  charge instead of integrating it. Five things hold it up. **There is exactly
+  one thing modelling the charge** — while the anchor is live `current_soc`
+  deliberately does not include it, so a ping and the clock cannot disagree.
+  **Banking says when the cable came out, not when we found out**: a ping
+  arriving twenty minutes into the next leg subtracts its own moving minutes,
+  or a phone waking on the motorway banks half an hour of charging done at
+  130 km/h. **`arrive` anchors it itself**, because the tap is the last thing a
+  driver does before pocketing the phone and waiting for a ping would model the
+  entire stop as not charging. **A reading typed at the plug settles the
+  projection FIRST and restarts it from the figure** — `apply_reading`
+  calibrates by adding charging back to compare consumption with consumption,
+  and a live projection holds zero there, so the arrival reading would have
+  been scored against half a picture. And **it is labelled an estimate**,
+  because it assumes the cable is still in.
+- **A stop ends when the driver says what they are leaving on**
+  (`SocReadingRequest.leaving`). Absent it, the only way to end a charge was to
+  drive far enough for a ping to notice, so the app followed a car onto the
+  motorway still believing it was plugged in and still projecting it upwards.
+  It is a FLAG and not something read off the number: "I'm on 62 now" and "I'm
+  leaving on 62" are different sentences — one asks the estimate to keep
+  counting up from a corrected figure, the other says stop — and the drive
+  screen offers both on one stepper, because they are the same gesture ten
+  minutes apart and two steppers is how a stop turns into a form.
+- **The stop card describes the charger the car is AT, planned or not**
+  (`ChargingHere`). It used to render only for chargers the plan had not
+  chosen, on the reasoning that a planned stop was already described above it.
+  That was exactly backwards where it mattered: parked at a planned stop, the
+  card above is already counting down to the NEXT charger, so the screen
+  described a site 77 km up the road and said nothing about the one the car was
+  plugged into. Reported twice from the road, from two different chargers.
+  It shows **two targets and both of them** — `min_soc`, the floor that reaches
+  the next stop with the reserve intact ("you could go now"), and
+  `target_soc`, what the plan chose to leave on, which is usually higher
+  because leaving later at a fast charger beats arriving somewhere slower.
+  Only the target sits a driver through minutes they did not have to spend;
+  only the floor quietly throws away the optimisation the app exists for.
+- **`charge_start` / `charge_end` are written now** (`runs._log_charge_edges`).
+  `services/drives.charge_stops` has paired those two kinds since it shipped to
+  report how long real charge stops take, and nothing ever wrote either one —
+  so the panel answered with an empty list for every drive ever recorded. The
+  charge anchor IS that pair, so the events are derived from it rather than
+  from each of the four call sites that can start or end a stop, which is what
+  stops them drifting apart. Both fire on one call when a car moves straight
+  from one plug to another: a pair keyed on "is it charging" alone would see
+  "still charging" and record neither.
 - **A battery reading is about a PLACE, so it travels with one**
   (`runs.record_soc`). The figure a driver types off the dashboard is the only
   ground truth this app ever gets, and it was anchored to whatever position the

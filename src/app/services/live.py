@@ -113,6 +113,73 @@ def current_soc(state: dict, usable_kwh: float) -> float:
     return _clamp(state["anchor_soc"] - drop + state["soc_gained"], 0.0, 100.0)
 
 
+def charging_soc(
+    state: dict, veh: VehicleParams, p: SimParams, at_min: float
+) -> float:
+    """The battery while plugged in, projected from the CLOCK.
+
+    Charging used to be integrated per ping, over the window each fix
+    reported. That works only while the phone is awake — and a phone whose car
+    is charging is in a pocket, so `soc_gained` stopped growing the moment the
+    screen locked. The estimate froze at whatever it was on arrival, the
+    "12 min left" beneath it never counted down, and a driver who came back
+    twenty minutes later saw the same numbers they had left.
+
+    Elapsed time needs no telemetry. From the SoC at plug-in, the site's power
+    and the minutes since, the same curve the plan used gives an estimate that
+    is right when the page is reopened rather than merely old. Pings while
+    parked now carry position and nothing else, so there is exactly one thing
+    modelling the charge instead of two.
+
+    It assumes the cable is still in, which is why every caller shows it as an
+    estimate and why the driver is asked to confirm on the way out. Over-
+    projecting a car that finished ten minutes ago is a smaller error than
+    under-projecting one by twenty minutes of charging that did happen.
+    """
+    anchor = state.get("charge_anchor_soc")
+    if anchor is None:
+        return current_soc(state, veh.usable_kwh)
+    minutes = max(0.0, at_min - float(state.get("charge_anchor_min", at_min)))
+    kw = float(state.get("charge_kw") or 0.0)
+    if kw <= 0.0:
+        return float(anchor)
+    return charge_forward(veh, float(anchor), minutes, kw, p.charge_power_factor)
+
+
+def bank_charge(
+    state: dict, veh: VehicleParams, p: SimParams, until_min: float
+) -> dict:
+    """Turn the running charge projection into history and drop the anchor.
+
+    Called the moment the car stops being plugged in, by whichever route that
+    becomes known — a ping somewhere down the road, a correction, or the driver
+    saying what they left on. Everything downstream is then back on ordinary
+    anchor-plus-consumption arithmetic, with no second thing modelling the
+    battery.
+
+    `until_min` is when the cable came out, which is NOT the same as when we
+    found out: a phone that wakes twenty minutes into the next leg would
+    otherwise bank twenty minutes of charging that happened while the car was
+    on the motorway. Callers pass the last moment the car can be shown to have
+    been standing there.
+    """
+    out = dict(state)
+    anchor = out.pop("charge_anchor_soc", None)
+    anchor_min = out.pop("charge_anchor_min", None)
+    kw = out.pop("charge_kw", None)
+    if anchor is None:
+        return out
+    minutes = max(0.0, float(until_min) - float(anchor_min or until_min))
+    gained = (
+        charge_forward(veh, float(anchor), minutes, float(kw or 0.0), p.charge_power_factor)
+        - float(anchor)
+        if kw
+        else 0.0
+    )
+    out["soc_gained"] = out["soc_gained"] + max(0.0, gained)
+    return out
+
+
 def soc_uncertainty(state: dict) -> float:
     """How far off the estimate could plausibly be, in percentage points.
 
@@ -181,6 +248,12 @@ def resync(
     # Standing at a charger is a claim about a position that has just changed.
     # `advance` re-establishes it on the next ping if the car really is there.
     if abs(offset_m - prev) >= AT_CHARGER_M:
+        # The car is no longer where it was plugged in, so the projection stops
+        # here and becomes history. Banked to NOW rather than to a departure we
+        # cannot place: a correction says where the car is, never when it left,
+        # and dropping the charge outright would hand back a battery that never
+        # took the energy it plainly did.
+        out = bank_charge(out, veh, p, out["at_min"])
         out["at_charger_id"] = None
         # The undo would restore the state BEFORE an arrival, and that is no
         # longer the state this position follows on from.
@@ -237,19 +310,27 @@ def advance(
 
     parked = at_charger_id is not None and dx < AT_CHARGER_M
     if parked and stop_power_kw:
-        # Plugged in: integrate the same charge curve the plan used, so the
-        # battery the app shows and the battery the plan assumed can't drift.
-        minutes = (dt_move_h + dt_still_h) * 60.0
-        soc_before = current_soc(out, veh.usable_kwh)
-        soc_after = charge_forward(
-            veh, soc_before, minutes, stop_power_kw, p.charge_power_factor
-        )
-        out["soc_gained"] = out["soc_gained"] + max(0.0, soc_after - soc_before)
+        # Plugged in. The charge is not integrated here — see `charging_soc`:
+        # a ping-driven integral stops the moment the phone sleeps, which is
+        # the whole of the time this matters. What happens instead is that the
+        # first ping at a charger ANCHORS the charge, and the clock does the
+        # rest.
+        if out.get("charge_anchor_soc") is None:
+            out["charge_anchor_soc"] = current_soc(out, veh.usable_kwh)
+            out["charge_anchor_min"] = at_min
+            out["charge_kw"] = stop_power_kw
         out["at_charger_id"] = at_charger_id
         # No aux draw: at a DC charger the cabin is served by the charger, not
         # the pack, which is what drivers actually observe.
         out["soc_is_measured"] = False
         return out
+
+    if not parked and out.get("charge_anchor_soc") is not None:
+        # Driving away. Charging stopped when the car pulled out, and the
+        # minutes this ping spent MOVING are the ones it cannot have been
+        # plugged in for — a phone that only wakes up on the motorway would
+        # otherwise bank the whole gap as charge.
+        out = bank_charge(out, veh, p, at_min - dt_move_h * 60.0)
 
     out["at_charger_id"] = at_charger_id if parked else None
 
@@ -276,7 +357,15 @@ def advance(
     return out
 
 
-def apply_reading(state: dict, soc: float, usable_kwh: float) -> dict:
+def apply_reading(
+    state: dict,
+    soc: float,
+    usable_kwh: float,
+    *,
+    veh: VehicleParams | None = None,
+    p: SimParams | None = None,
+    leaving: bool = False,
+) -> dict:
     """Re-anchor on a figure the driver read off the dashboard, and use the
     error to calibrate.
 
@@ -284,7 +373,25 @@ def apply_reading(state: dict, soc: float, usable_kwh: float) -> dict:
     wind — none of which any plan-time parameter can know. After a couple of
     them the remaining-range prediction stops being a catalog figure and starts
     being a measurement.
+
+    A reading typed AT a charger has a running charge projection behind it, and
+    that projection has to be settled before the arithmetic here can mean
+    anything: `soc_gained` is what the calibration adds back to compare
+    consumption with consumption, and while the projection is live it holds
+    zero. So the charge is banked first (needs `veh`/`p`), the reading is
+    scored against a complete picture, and the projection then restarts from
+    the figure just typed rather than from what it had guessed by now.
+
+    `leaving` is the driver saying they are pulling out: the typed figure is
+    the last word on this stop, so the projection ends instead of restarting
+    and the car is no longer at a charger. It is a separate flag and not
+    inferred from the number, because "I'm on 62 now" and "I'm leaving on 62"
+    are different sentences — one asks the plan to keep counting up, the other
+    says stop.
     """
+    plugged_kw = state.get("charge_kw") if state.get("charge_anchor_soc") is not None else None
+    if veh is not None and p is not None and state.get("charge_anchor_soc") is not None:
+        state = bank_charge(state, veh, p, state["at_min"])
     out = dict(state)
     # Compare CONSUMPTION with consumption. Charging since the anchor has to be
     # added back, or a reading taken after a stop would score the energy the
@@ -307,6 +414,20 @@ def apply_reading(state: dict, soc: float, usable_kwh: float) -> dict:
         # the factor to the edge of its range on that evidence would bake the
         # gap in permanently. Re-anchor and carry on.
         out["last_error_pct"] = None
+
+    if leaving:
+        # The stop is over. Nothing is left projecting a charge, and the drive
+        # is back on the road — the next ping bills the drag from here.
+        for k in ("charge_anchor_soc", "charge_anchor_min", "charge_kw"):
+            out.pop(k, None)
+        out["at_charger_id"] = None
+        # An arrival you have already driven away from is not one to take back.
+        out.pop("arrive_undo", None)
+    elif plugged_kw:
+        # Still plugged in: the projection restarts from the figure just read.
+        out["charge_anchor_soc"] = soc
+        out["charge_anchor_min"] = state["at_min"]
+        out["charge_kw"] = plugged_kw
 
     out["anchor_soc"] = soc
     out["anchor_offset_m"] = state["offset_m"]
