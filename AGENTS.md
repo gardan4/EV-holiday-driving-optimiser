@@ -486,7 +486,26 @@ the pipeline is green before infra exists. Infra deploy is manual
   cannot drift again. The arrival percentages and the minute costs cannot be
   re-derived in the browser, so past `STALE_AFTER_M` the panel says how far
   back they come from and offers "Redo from here". A re-plan closes it
-  outright — those were options against a plan that no longer exists. **A
+  outright — those were options against a plan that no longer exists. **And it
+  opens INSIDE the plan row it was asked from** (`PlanAhead`'s `swapPanel`,
+  `AlternativeStops`'s `anchored`), naming that stop in its heading. Every row
+  in the plan carries the same swap button, and the answer was a card of its
+  own below the list titled "Somewhere else to charge" — a set of chargers
+  that all look like plausible next stops, attached to none of them. The stop
+  is named because two sites on one corridor are regularly called the same
+  thing, and the row's button becomes the panel's close, because two X's an
+  inch apart doing one thing is not a choice anybody makes. The baseline row
+  goes compact there (`Row`'s `compact`): the plan row an inch above already
+  carries the name, the power, the bays and the food, and what it does NOT
+  carry — the same stop re-priced from where the car is — is the only reason
+  that block exists, which is also why it says "keeping it · from here" rather
+  than "planned now". The options themselves are a PAGER, one at a time with
+  arrows and a count: stacked, four candidates and their buttons were a screen
+  and a half inside a plan row, so reading them scrolled the stop they belong
+  to off the top. It is a real scroll container with snap points rather than
+  an index that swaps one card for another, so a swipe — the first thing a
+  phone user tries — moves it, and the arrows drive that same scroll instead
+  of a second opinion about where the list is. **A
   rejection persists** on `run.state["excluded_charger_ids"]` — a rejection
   that lasts one request is not a rejection, since the standing "Re-plan"
   button would hand back the stop the driver walked away from. That state is a

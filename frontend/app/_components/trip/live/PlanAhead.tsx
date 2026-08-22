@@ -19,18 +19,24 @@
  *   because a food stop four hours out is a decision you want to make now
  *   rather than when you arrive hungry at a lay-by.
  * - **Every stop is swappable**, not just the next one. By the time a stop is
- *   the next one, the choice about it has been made for you.
+ *   the next one, the choice about it has been made for you. The answer opens
+ *   INSIDE the row it was asked from (`swapPanel`), because a list where every
+ *   row has the same button needs to say which row the reply belongs to — and
+ *   a panel of chargers that all look like plausible stops, in a card of its
+ *   own further down, does not.
  *
  * Distances are from the CAR, not from this morning: this is a list about the
  * road ahead and it is written in the road ahead's units.
  */
 
+import { ReactNode } from "react"
 import {
   BatteryCharging,
   Flag,
   Loader2,
   Replace,
   UtensilsCrossed,
+  X,
 } from "lucide-react"
 import { Stop } from "@/lib/client"
 import { fmtBays, fmtKm } from "@/lib/format"
@@ -45,6 +51,9 @@ export default function PlanAhead({
   destArrivalClock,
   onSwap,
   swappingId = null,
+  swapOpenId = null,
+  swapPanel = null,
+  onCloseSwap,
 }: {
   /** The stop under the car, if any, then everything still ahead. */
   stops: Stop[]
@@ -60,6 +69,15 @@ export default function PlanAhead({
   destArrivalClock: string
   /** Driver only: replace this stop with something else. */
   onSwap?: (chargerId: string) => void
+  /** The stop whose alternatives are open, and the panel to show under it.
+   *  Passed in rather than rendered here: it is the drive screen that owns the
+   *  answer, its staleness and what taking one does — this only knows where on
+   *  the screen it belongs. */
+  swapOpenId?: string | null
+  swapPanel?: ReactNode
+  /** Close the open panel — the same button that opened it, so a row that has
+   *  answered does not keep offering to ask again. */
+  onCloseSwap?: () => void
   /** The stop whose alternatives are being fetched, if any. The lookup takes
    *  seconds, and a row that gave no sign of having heard the tap got tapped
    *  again — one question, several requests, and eventually a refusal. Every
@@ -84,15 +102,19 @@ export default function PlanAhead({
         {stops.map((s) => {
           const atThis = s.charger_id === atChargerId
           const focused = s.charger_id === focusedId
+          const swapping = s.charger_id === swapOpenId
           return (
           <li
             key={s.charger_id}
-            className={`flex items-start gap-2.5 rounded-xl border p-2.5 transition-colors ${
-              focused
-                ? "border-brand-300 bg-brand-50/50"
-                : "border-ink-100"
+            className={`rounded-xl border p-2.5 transition-colors ${
+              swapping
+                ? "border-brand-400 bg-brand-50/70 ring-1 ring-brand-200"
+                : focused
+                  ? "border-brand-300 bg-brand-50/50"
+                  : "border-ink-100"
             }`}
           >
+          <div className="flex items-start gap-2.5">
             <BatteryCharging
               className={`mt-0.5 h-4 w-4 shrink-0 ${
                 atThis ? "text-brand-700" : "text-brand-600"
@@ -143,14 +165,27 @@ export default function PlanAhead({
             </button>
             {onSwap && (
               <button
-                onClick={() => onSwap(s.charger_id)}
+                onClick={() =>
+                  swapping ? onCloseSwap?.() : onSwap(s.charger_id)
+                }
                 disabled={swappingId !== null}
                 aria-busy={swappingId === s.charger_id}
-                aria-label={`Swap ${s.name} for somewhere else`}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-ink-400 transition-colors hover:bg-ink-100 hover:text-brand-700 disabled:hover:bg-transparent disabled:hover:text-ink-400"
+                aria-expanded={swapping}
+                aria-label={
+                  swapping
+                    ? `Close the alternatives to ${s.name}`
+                    : `Swap ${s.name} for somewhere else`
+                }
+                className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-ink-100 disabled:hover:bg-transparent ${
+                  swapping
+                    ? "text-brand-700"
+                    : "text-ink-400 hover:text-brand-700 disabled:hover:text-ink-400"
+                }`}
               >
                 {swappingId === s.charger_id ? (
                   <Loader2 className="h-4 w-4 animate-spin text-brand-600" />
+                ) : swapping ? (
+                  <X className="h-4 w-4" />
                 ) : (
                   <Replace
                     className={`h-4 w-4 ${swappingId !== null ? "opacity-40" : ""}`}
@@ -158,6 +193,9 @@ export default function PlanAhead({
                 )}
               </button>
             )}
+          </div>
+          {/* The answer, in the row it was asked from. */}
+          {swapping && swapPanel}
           </li>
           )
         })}

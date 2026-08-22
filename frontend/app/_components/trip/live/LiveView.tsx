@@ -203,6 +203,23 @@ export default function LiveView({
   // this exists to swallow.
   const altsPending = useRef<string | null>(null)
   const [pendingAltFor, setPendingAltFor] = useState<string | null>(null)
+  // The plan row the open panel belongs to. The panel renders INSIDE that row,
+  // so the answer and the question are one block: a plan has several stops,
+  // every row has the same swap button, and a list of chargers in a card of
+  // its own further down names none of them.
+  const altsStopId = altsFor ?? alts?.current?.charger_id ?? null
+  const altsIdx = focusable.findIndex((s) => s.charger_id === altsStopId)
+  const altsStop = altsIdx >= 0 ? focusable[altsIdx] : null
+  // Opening it from the stop card puts it wherever that row happens to be, so
+  // it has to be brought into view — the same reason correcting the battery
+  // from the HUD scrolls. Keyed on the answer itself, so "Redo from here"
+  // brings the new one back too.
+  const altsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (alts) {
+      altsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+  }, [alts])
   const askForBattery = useCallback(() => {
     setSocPrompt((n) => n + 1)
     batteryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -553,6 +570,28 @@ export default function LiveView({
     }
   }
 
+  // One panel, rendered in one of two places — inside the plan row it belongs
+  // to, or on its own when there is no such row left. Built once so the two
+  // cannot drift into being two different panels.
+  const anchorAlts = alts != null && !finished && altsStop != null
+  const altsPanel = alts && (
+    <div ref={altsRef}>
+      <AlternativeStops
+        data={alts}
+        stopName={altsStop?.name ?? alts.current?.name ?? "this stop"}
+        stopIndex={altsStop ? altsIdx + 1 : undefined}
+        stopTotal={altsStop ? focusable.length : undefined}
+        anchored={anchorAlts}
+        distM={distM}
+        fetchedAtM={altsAtM}
+        busy={live.busy}
+        onTake={(alt) => void takeAlternative(alt)}
+        onRefresh={isDriver ? () => void loadAlternatives(altsFor) : undefined}
+        onClose={() => setAlts(null)}
+      />
+    </div>
+  )
+
   return (
     <div className="pb-16">
       {result && (
@@ -777,22 +816,16 @@ export default function LiveView({
               isDriver ? (id) => void loadAlternatives(id) : undefined
             }
             swappingId={pendingAltFor}
+            swapOpenId={anchorAlts ? altsStop!.charger_id : null}
+            swapPanel={anchorAlts ? altsPanel : null}
+            onCloseSwap={() => setAlts(null)}
           />
         )}
 
-        {alts && (
-          <AlternativeStops
-            data={alts}
-            distM={distM}
-            fetchedAtM={altsAtM}
-            busy={live.busy}
-            onTake={(alt) => void takeAlternative(alt)}
-            onRefresh={
-              isDriver ? () => void loadAlternatives(altsFor) : undefined
-            }
-            onClose={() => setAlts(null)}
-          />
-        )}
+        {/* Only when there is no row to hang it off: the stop has been passed,
+            or the drive has finished and the list is gone. Then it is a card
+            of its own again, still naming the stop it is about. */}
+        {alts && !anchorAlts && altsPanel}
 
         {/* The plan, in the navigation the car is actually following. The HUD's
             "Navigate" is the next charger and nothing else, which is the right
