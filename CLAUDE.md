@@ -497,13 +497,27 @@ the pipeline is green before infra exists. Infra deploy is manual
   arriving under it, which is the exact thing a driver asks about ("can I not
   just push on to the services?"). A second pass runs the same DP with
   `SimParams.first_leg_reserve_soc` lowered to `STRETCH_FLOOR_SOC`, so those
-  appear, marked, with the arrival percentage as the headline. Three things
+  appear, marked, with the arrival percentage as the headline. Four things
   make it safe. The floor applies to the LEG BEING DRIVEN and nowhere else, so
   one accepted risk cannot become a journey planned on fumes — the test asserts
   every later stop still arrives on the full reserve. It is a floor and not
-  zero, because a plan arriving on vapour is a breakdown with extra steps. And
-  it travels with the choice (`min_arrival_soc`) and is PERSISTED, or the next
-  re-plan applies the full reserve and refuses the stop just chosen. A stretch
+  zero, because a plan arriving on vapour is a breakdown with extra steps. It
+  travels with the choice (`min_arrival_soc`) and is PERSISTED, or the next
+  re-plan applies the full reserve and refuses the stop just chosen. And the
+  pass is seeded where the reserve STARTS hiding chargers
+  (`runs._reserve_hides_from`), not at the stop being swapped: it walks outward
+  one charger per DP, so on a corridor with sites every couple of kilometres
+  the whole budget went on the ordinary ones in between — reachable on the full
+  reserve, already the list above's to offer, discarded here for not being
+  risky — and the panel came back with one stretch row or none. Reported from a
+  drive with four candidates inside sixty kilometres, not one of them further
+  on than the plan's own stop. It is safe to skip them only because arrival
+  falls with distance on a leg that has no stop in it, and the DP still has the
+  last word on every row (`MAX_STRETCH_SEARCH` is what stops a candidate lost
+  to a tenth of a percent costing a row). What it cannot do is invent road:
+  between the reserve and the floor there is about six percent of a battery,
+  so on a corridor with nothing mapped in that band there is genuinely nothing
+  to offer, and two is a ceiling rather than a promise. A stretch
   option can be FASTER than the optimum — going further before stopping is what
   the lower floor buys — so the UI renders a negative delta rather than
   flattening it to "same".

@@ -10,6 +10,7 @@ it" is that the run id never leaves the response that creates it.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import fields, replace
 from datetime import timedelta
 
@@ -30,7 +31,7 @@ from app.services.geo import RouteGeometry
 from app.services.networks import network_of
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode, SimParams
-from tests.fixtures import nl_to_austria_route
+from tests.fixtures import chargers_every, flat_motorway, nl_to_austria_route
 from tests.test_api import BORN_SEED, plan_body
 
 # The stubbed geometry is a single straight leg, so a "position" has to be an
@@ -72,12 +73,42 @@ async def db_session():
 
 @pytest_asyncio.fixture
 async def client(db_session, monkeypatch):
+    """The default corridor: ~950 km NL → AT, chargers every ~45 km."""
+    async with _client_on(db_session, monkeypatch, *nl_to_austria_route()) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def dense_client(db_session, monkeypatch):
+    """A corridor with a charger every 2 km — a Rhine-Ruhr or Randstad run.
+
+    Density is what tells two ways of finding the chargers beyond the reserve
+    apart: on a sparse corridor the first site past the plan's stop is already
+    the one the reserve hides, so almost anything works, while here a dozen
+    ordinary sites sit in between. See `TestSomewhereElseToCharge
+    ::test_it_offers_two_stretch_options_on_a_crowded_corridor`.
+    """
+    segments = flat_motorway(900, freeflow=120.0, country="DE")
+    nodes = chargers_every(900, 2.0, power_kw=100.0)
+    # …with a fast hub around where the plan's first stop lands. Power is what
+    # makes the DP prefer a nearer site, so this is what puts an ordinary,
+    # above-reserve charger in front of the ones the reserve hides — the shape
+    # of every real motorway corridor, and of the drive this was reported from.
+    nodes = [
+        replace(c, power_kw=350.0) if 224_000 <= c.offset_m <= 228_000 else c
+        for c in nodes
+    ]
+    async with _client_on(db_session, monkeypatch, segments, nodes) as c:
+        yield c
+
+
+@asynccontextmanager
+async def _client_on(db_session, monkeypatch, segments, charger_nodes):
     async def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
 
-    segments, charger_nodes = nl_to_austria_route()
     geometry = RouteGeometry([ORIGIN, DEST])
     # Put the chargers somewhere. `nl_to_austria_route` leaves lat/lon at their
     # (0, 0) default because the DP only ever reads offsets — but anything that
@@ -1657,6 +1688,69 @@ class TestTurningDownAStop:
             # The floor it was computed under has to travel with it, or the
             # re-plan that takes it applies the full reserve and refuses.
             assert a["min_arrival_soc"] == 4.0
+
+    async def test_it_offers_two_stretch_options_on_a_crowded_corridor(
+        self, dense_client
+    ):
+        """Both of them, not one — and on the corridor where that is hard.
+
+        The pass walks outward one charger per DP, so it matters where it
+        starts. Seeded at the stop being swapped, its whole budget went on the
+        ordinary sites in between — reachable on the full reserve, already the
+        list above's to offer, and discarded here for not being risky — and a
+        driver on a corridor with a charger every couple of kilometres got one
+        stretch row, or none. It is seeded where the reserve actually starts
+        hiding chargers instead, so every attempt is spent on the question the
+        pass exists to ask.
+        """
+        client = dense_client
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        stretch = [a for a in out["alternatives"] if a["below_reserve"]]
+        assert len(stretch) == 2, [
+            (a["name"], a["arrive_soc"], a["below_reserve"])
+            for a in out["alternatives"]
+        ]
+        for a in stretch:
+            assert a["arrive_soc"] < 10.0
+            assert a["arrive_soc"] >= 4.0 - 1e-6
+            assert a["offset_m"] > out["current"]["offset_m"]
+        # Two DIFFERENT chargers, further out one after the other — the second
+        # attempt has to move on, not re-price the first.
+        assert stretch[0]["charger_id"] != stretch[1]["charger_id"]
+
+    async def test_a_charger_the_reserve_hides_is_never_skipped_over(
+        self, dense_client
+    ):
+        """The seeding may only skip sites the FULL reserve reaches.
+
+        It excludes everything before the first hidden charger, which is safe
+        only because arrival falls with distance on a leg with no stop in it.
+        Get that backwards and the pass would step over the very rows it is
+        supposed to find, silently and only on some corridors.
+        """
+        client = dense_client
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = (await client.post(f"/api/runs/{run['run_id']}/alternatives")).json()
+
+        stretch = sorted(
+            (a for a in out["alternatives"] if a["below_reserve"]),
+            key=lambda a: a["offset_m"],
+        )
+        # Nothing between the plan's own stop and the first stretch row may
+        # itself be under the reserve: those are the ones being skipped.
+        ordinary = [
+            a
+            for a in out["alternatives"]
+            if not a["below_reserve"]
+            and out["current"]["offset_m"] < a["offset_m"] < stretch[0]["offset_m"]
+        ]
+        assert all(a["arrive_soc"] >= 10.0 for a in ordinary), ordinary
 
     async def test_taking_a_stretch_option_is_planned_under_its_own_floor(
         self, client

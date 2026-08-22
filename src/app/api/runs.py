@@ -259,6 +259,15 @@ MAX_ALTERNATIVES = 3
 # see, and the model has no business hiding the option — only naming the risk.
 MAX_STRETCH = 2
 
+# How many DP passes that search may cost. Normally it needs exactly
+# `MAX_STRETCH`, because the pass is seeded where the reserve starts hiding
+# chargers rather than at the stop being swapped — but a candidate can still
+# fall out (the DP prices the leg with the detour in it, this seeding does
+# not), and losing a row to a tenth of a percent would put the panel back
+# where it was. Bounded, because each attempt is another DP over what is left
+# of the journey.
+MAX_STRETCH_SEARCH = MAX_STRETCH + 2
+
 # How far down the ranking to keep looking for somewhere you can eat. The list
 # above is ranked by minutes, and the quickest few stops are regularly a lay-by,
 # a car park and another lay-by — so "is there anywhere to EAT" can be a
@@ -2471,15 +2480,66 @@ async def alternatives(
     offered = {a.charger_id for a in found} | (
         {current.charger_id} if current else set()
     )
+
+    def _reserve_hides_from() -> float | None:
+        """Where on the route the reserve starts hiding chargers.
+
+        This pass is seeded HERE rather than at the stop being swapped, and the
+        difference is the whole feature on a real corridor. Successive
+        exclusion walks outward one charger per DP, and between the swapped
+        stop and the first genuinely hidden site there can be half a dozen
+        others — every one of them reachable on the full reserve, every one of
+        them an ordinary alternative the list above has already had its pick
+        of. Seeded at the stop, the budget was spent re-finding those and then
+        throwing them away for not being risky, and the panel showed no stretch
+        row at all: reported from a drive where four candidates sat inside
+        sixty kilometres and only one of them was further on than the plan's
+        own stop.
+
+        Arrival falls monotonically with distance on a leg with no stop in it,
+        so this is one pass over the snapshot priced off the same
+        `RouteProfile` the simulator uses — no DP, no upstream — and the DP
+        still has the last word on every row it produces. `None` means the
+        reserve hides nothing ahead, which is a real answer: there is then no
+        such thing as a stretch option, and the loop below finds none.
+        """
+        head = slice_route(live.snapshot_segments(snapshot), [], st["offset_m"])
+        if not head.segments:
+            return None
+        prof = RouteProfile(head.segments, speed, veh, params, head.index_offset)
+        candidates = networks.usable(
+            [
+                c
+                for c in live.snapshot_chargers(snapshot)
+                if c.charger_id not in already
+            ],
+            plan_req.exclude_networks,
+        )
+        for node in sorted(candidates, key=lambda c: c.offset_m):
+            leg_m = node.offset_m - st["offset_m"]
+            if leg_m <= 0.0 or node.offset_m <= target_abs or leg_m > head.total_dist_m:
+                continue
+            arrive = soc_now - prof.kwh_at(leg_m) / max(veh.usable_kwh, 1e-6) * 100.0
+            if arrive < params.reserve_soc:
+                return node.offset_m
+        return None
+
+    hide_upto = target_abs + 1.0
+    hidden_from = _reserve_hides_from() if swapping_next else None
+    if hidden_from is not None:
+        hide_upto = max(hide_upto, hidden_from - 1.0)
     stretch_down: list[str] = [
         *(
             c.charger_id
             for c in live.snapshot_chargers(snapshot)
-            if c.offset_m <= target_abs + 1.0
+            if c.offset_m <= hide_upto
         ),
         *offered,
     ]
-    for _ in range(MAX_STRETCH if swapping_next else 0):
+    stretch_left = MAX_STRETCH
+    for _ in range(MAX_STRETCH_SEARCH if swapping_next else 0):
+        if stretch_left <= 0:
+            break
         best = await _next_best(already | set(stretch_down), stretch_params)
         if best is None or not best.stops:
             break
@@ -2492,9 +2552,11 @@ async def alternatives(
         # id would tell `replan` to refuse the charger it is offering.
         # Only worth showing if the reserve is what was hiding it. Anything
         # else here is an ordinary alternative the loop above ran out of room
-        # for, and dressing it up as a risk would be a lie.
+        # for, and dressing it up as a risk would be a lie — so it costs an
+        # attempt rather than a row, which is what `MAX_STRETCH_SEARCH` buys.
         if stop.arrive_soc < params.reserve_soc:
             found.append(_as_alt(best, stop, below_reserve=True))
+            stretch_left -= 1
 
     # 3. Somewhere to eat. The ranking above is by minutes, and the quickest
     #    few are regularly a lay-by, a car park and another lay-by — so the
