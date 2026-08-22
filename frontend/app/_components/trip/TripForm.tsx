@@ -10,7 +10,13 @@ import { defaultDepartureIso } from "@/lib/format"
 import { describeTemp } from "@/lib/weather"
 import { freeflowFactorFor } from "@/lib/driving"
 import { describePayload } from "@/lib/payload"
-import { InfoTip, NumberField, useNumberFieldValidity } from "./fields"
+import {
+  InfoTip,
+  listFieldNames,
+  NumberField,
+  revealField,
+  useNumberFieldValidity,
+} from "./fields"
 import DepartureField from "./DepartureField"
 import GeocodeInput from "./GeocodeInput"
 import VehiclePicker from "./VehiclePicker"
@@ -45,7 +51,7 @@ export default function TripForm() {
   const [submitting, setSubmitting] = useState(false)
   // A half-typed or emptied box must not be silently replaced by a default —
   // it blocks the submit and shows red until it holds a real number.
-  const { allValid, onValidity } = useNumberFieldValidity()
+  const { allValid, badFields, onValidity } = useNumberFieldValidity()
 
   useEffect(() => {
     getVehicles()
@@ -57,6 +63,29 @@ export default function TripForm() {
   }, [])
 
   const ready = origin && dest && vehicleId && allValid && !submitting
+
+  // Why the button is off. A disabled primary action that says nothing is
+  // indistinguishable from a broken one — and every number here ships with a
+  // working default, so the reader arriving at a grey button has either not
+  // named the two places yet or has emptied a box somewhere. Both are worth a
+  // sentence, in the order they have to be fixed.
+  const blocker: { text: string; wrong: boolean } | null = submitting
+    ? null
+    : badFields.length > 0
+      ? {
+          text: `${listFieldNames(badFields)} ${badFields.length > 1 ? "need" : "needs"} a usable number — take me there`,
+          wrong: true,
+        }
+      : !vehicleId
+        ? { text: "Pick the car you're driving.", wrong: false }
+        : !origin || !dest
+          ? {
+              text: !origin && !dest
+                ? "Choose where you're driving from and to."
+                : `Choose where you're driving ${origin ? "to" : "from"}.`,
+              wrong: false,
+            }
+          : null
 
   // Priced against this car at a typical 130 km/h cruise, so the figure moves
   // when you switch cars — a 58 kWh Born loses more range per kilo than a big
@@ -266,7 +295,14 @@ export default function TripForm() {
         </label>
 
         <div className={`grid gap-4 sm:grid-cols-2 ${noLimits ? "sm:grid-cols-1" : ""}`}>
-        <div className={noLimits ? "hidden" : undefined}>
+        {/* Unmounted, not hidden. A `hidden` box still holds whatever was
+            typed into it, so half-clearing the limit and then ticking "ignore
+            speed limits" left the form permanently unsubmittable, pointing at
+            a red field that was not on the screen. Unmounting hands its
+            validity flag back (see NumberField's cleanup); `motorwayCap`
+            itself lives up here, so the value survives unticking. */}
+        {!noLimits && (
+        <div>
         <NumberField
           id="motorway-cap"
           onValidity={onValidity}
@@ -285,6 +321,7 @@ export default function TripForm() {
           }
         />
         </div>
+        )}
 
         <NumberField
           id="over-cap"
@@ -304,7 +341,8 @@ export default function TripForm() {
           }
         />
         </div>
-        <div className={noLimits ? "hidden" : undefined}>
+        {!noLimits && (
+        <div>
           <label
             htmlFor="autobahn"
             className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
@@ -334,6 +372,7 @@ export default function TripForm() {
             className="h-6 w-full accent-brand-500"
           />
         </div>
+        )}
         </div>
       </FieldGroup>
 
@@ -457,11 +496,26 @@ export default function TripForm() {
           </>
         )}
       </button>
-      {!allValid && (
-        <p className="mt-2 text-center text-xs text-red-600">
-          One of the numbers is empty or out of range. The field is marked in red.
-        </p>
-      )}
+      {/* The live region itself is always mounted — one that appears at the
+          same moment as its text is not reliably announced. Empty, it
+          collapses to nothing. */}
+      <p aria-live="polite" className="text-center text-xs empty:hidden [&:not(:empty)]:mt-2">
+        {blocker &&
+          (blocker.wrong ? (
+            // Clickable, because the reader may have folded the fine print back
+            // up over the box that is blocking them — at which point a message
+            // naming a field they cannot see is only half an answer.
+            <button
+              type="button"
+              onClick={() => revealField(badFields[0].id)}
+              className="text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
+            >
+              {blocker.text}
+            </button>
+          ) : (
+            <span className="text-ink-500">{blocker.text}</span>
+          ))}
+      </p>
     </form>
   )
 }

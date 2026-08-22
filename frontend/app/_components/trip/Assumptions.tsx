@@ -8,7 +8,7 @@ import { PlanRequest, Trip, Vehicle, planTrip } from "@/lib/client"
 import { freeflowFactorFor } from "@/lib/driving"
 import { auxKwForTemp, consumptionFactorForTemp, describeTemp } from "@/lib/weather"
 import { describePayload, extraWhPerKm, payloadExtraKg } from "@/lib/payload"
-import { NumberField, useNumberFieldValidity } from "./fields"
+import { listFieldNames, NumberField, revealField, useNumberFieldValidity } from "./fields"
 
 /**
  * Everything the answer rests on, in one place: what we assume about the car,
@@ -27,7 +27,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
   const [replanning, setReplanning] = useState(false)
   // An emptied box keeps whatever it typed and blocks the re-plan, rather than
   // quietly snapping back to a number nobody chose.
-  const { allValid, onValidity } = useNumberFieldValidity()
+  const { allValid, badFields, onValidity } = useNumberFieldValidity()
   const r = draft
   const tempC = r.temperature_c ?? null
 
@@ -188,7 +188,10 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                 </span>
               </label>
             </div>
-            <div className={r.ignore_speed_limits ? "hidden" : "col-span-2"}>
+            {/* Unmounted rather than hidden — a `hidden` box holding an empty
+                string still blocks "Re-plan", with its red border off-screen. */}
+            {!r.ignore_speed_limits && (
+            <div className="col-span-2">
               <NumberField
                 id="a-motorway-cap" label="Motorway limit" unit="km/h"
                 onValidity={onValidity}
@@ -201,6 +204,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                 }
               />
             </div>
+            )}
             {/* Germany is the only country with derestricted stretches, so on a
                 route that never enters it this control does nothing at all —
                 and a dead control reads as a broken one. */}
@@ -301,6 +305,19 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               </>
             )}
           </button>
+          {/* Always mounted, so the message is announced when it arrives. */}
+          <p aria-live="polite" className="text-xs empty:hidden [&:not(:empty)]:mt-1.5">
+            {!allValid && (
+              <button
+                type="button"
+                onClick={() => revealField(badFields[0].id)}
+                className="text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
+              >
+                {listFieldNames(badFields)} {badFields.length > 1 ? "need" : "needs"} a
+                usable number — take me there
+              </button>
+            )}
+          </p>
           <p className="mt-1.5 text-xs leading-relaxed text-ink-400">
             Re-planning creates a new trip with its own link. This one stays exactly
             as it is, so a link you&apos;ve already shared keeps working.

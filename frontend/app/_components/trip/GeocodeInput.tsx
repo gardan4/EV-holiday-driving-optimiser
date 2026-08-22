@@ -86,13 +86,24 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
     } else if (e.key === "ArrowUp") {
       e.preventDefault()
       setActive((a) => (a - 1 + hits.length) % hits.length)
-    } else if (e.key === "Enter" && active >= 0) {
+    } else if (e.key === "Enter") {
+      // Nothing arrow-highlighted takes the top hit rather than doing nothing.
+      // The form cannot be submitted from here anyway — its button is disabled
+      // until both places resolve — so an Enter that fell through was a
+      // keystroke that appeared to do nothing on the one control standing
+      // between the reader and the answer.
       e.preventDefault()
-      select(hits[active])
+      select(hits[active >= 0 ? active : 0])
     } else if (e.key === "Escape") {
       setOpen(false)
     }
   }
+
+  // Typed something, picked nothing. The box LOOKS filled — the text is right
+  // there — while `value` is null and the submit button is grey, which is the
+  // single most reported way this form reads as broken. Only once the dropdown
+  // is out of the way, so it is not shouted while the reader is still choosing.
+  const unresolved = text.trim().length > 0 && !value && !open
 
   return (
     <div ref={rootRef} className="relative">
@@ -105,7 +116,7 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
           inputRef.current?.focus()
         }}
         className={`cursor-text rounded-xl border bg-white px-3.5 pb-2.5 pt-2 transition-colors focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-200 ${
-          value ? "border-brand-300" : "border-ink-200"
+          value ? "border-brand-300" : unresolved ? "border-amber-400" : "border-ink-200"
         } ${loading ? "animate-pulse-soft" : ""}`}
       >
         <label
@@ -137,6 +148,9 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
           />
         </div>
       </div>
+      {unresolved && (
+        <p className="mt-1 text-xs text-amber-700">Pick a place from the list to use it.</p>
+      )}
       {open && hits.length === 0 && error && (
         <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900 shadow-lg shadow-ink-900/5">
           {error}

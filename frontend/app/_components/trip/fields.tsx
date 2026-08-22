@@ -138,25 +138,84 @@ interface NumberFieldProps {
   explain?: string
   /** Optional line showing what the entered number actually does. */
   readout?: string
-  /** Told whenever this field starts or stops holding a usable number. */
-  onValidity?: (id: string, valid: boolean) => void
+  /** Told whenever this field starts or stops holding a usable number. The
+   *  label travels with it so the form can NAME the field that is blocking
+   *  submit — see `useNumberFieldValidity`. */
+  onValidity?: (id: string, valid: boolean, label: string) => void
+}
+
+/** A field currently holding something unusable, and what it is called. */
+export interface BadField {
+  id: string
+  label: string
 }
 
 /**
  * Collects the "this box is empty / out of range" flags from a set of
  * NumberFields so the surrounding form can refuse to submit. Pass `onValidity`
- * down to every field; read `allValid` next to the submit button.
+ * down to every field; read `allValid` next to the submit button, and
+ * `badFields` to say WHICH one is holding it up.
+ *
+ * Naming them is not a nicety. A disabled primary action that explains nothing
+ * is indistinguishable from a broken one, and every field on these forms ships
+ * with a working default — so the only way to reach this state is to empty or
+ * mistype a box, which is exactly the thing the reader needs pointing at.
  */
 export function useNumberFieldValidity() {
-  const [bad, setBad] = useState<string[]>([])
-  const onValidity = useCallback((id: string, valid: boolean) => {
+  const [bad, setBad] = useState<BadField[]>([])
+  const onValidity = useCallback((id: string, valid: boolean, label: string) => {
     setBad((prev) => {
-      const has = prev.includes(id)
-      if (valid === !has) return prev
-      return valid ? prev.filter((x) => x !== id) : [...prev, id]
+      const at = prev.findIndex((f) => f.id === id)
+      if (valid) return at === -1 ? prev : prev.filter((f) => f.id !== id)
+      if (at !== -1 && prev[at].label === label) return prev
+      return [...prev.filter((f) => f.id !== id), { id, label }]
     })
   }, [])
-  return { allValid: bad.length === 0, onValidity }
+
+  // A field the reader cannot SEE cannot be fixed, and the submit button stays
+  // grey for ever. Both these forms park fields inside a collapsed <details>:
+  // empty "Queue" in the fine print, fold it away, and the form is dead with
+  // its red box two clicks out of sight. So a field that goes invalid opens
+  // every <details> above it. Only when the set CHANGES, so a reader who folds
+  // the panel back up while still fixing it is not fought — the named message
+  // beside the button is the way back from there.
+  const revealed = useRef("")
+  useEffect(() => {
+    const key = bad.map((f) => f.id).join(",")
+    if (key === revealed.current) return
+    revealed.current = key
+    for (const f of bad) openAncestors(f.id)
+  }, [bad])
+
+  return { allValid: bad.length === 0, badFields: bad, onValidity }
+}
+
+/** Open every <details> above a field. Walked from the DOM rather than from a
+ *  list of which ids live in which panel, because that list is the kind that
+ *  silently stops being true. */
+function openAncestors(id: string) {
+  let node: HTMLElement | null = document.getElementById(id)
+  while (node) {
+    if (node instanceof HTMLDetailsElement) node.open = true
+    node = node.parentElement
+  }
+}
+
+/** Bring a field back to the reader: unfold whatever it is buried under,
+ *  scroll to it, and put the cursor in it. */
+export function revealField(id: string) {
+  openAncestors(id)
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ block: "center", behavior: "smooth" })
+  el.focus({ preventScroll: true })
+}
+
+/** "Queue", or "Queue and Break length", or "Queue, Break length and Price". */
+export function listFieldNames(fields: BadField[]): string {
+  const names = fields.map((f) => f.label)
+  if (names.length <= 1) return names[0] ?? ""
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
 }
 
 /**
@@ -205,9 +264,13 @@ export function NumberField({
       : null
 
   useEffect(() => {
-    onValidity?.(id, problem === null)
-    return () => onValidity?.(id, true)
-  }, [id, problem, onValidity])
+    onValidity?.(id, problem === null, label)
+    // Unmounting clears the flag, which is what lets a form drop a field that
+    // no longer applies (the motorway limit under "ignore speed limits")
+    // instead of hiding it — a hidden box still holding "" would block submit
+    // with nothing on screen to fix.
+    return () => onValidity?.(id, true, label)
+  }, [id, label, problem, onValidity])
 
   function commit(next: string) {
     setDraft(next)

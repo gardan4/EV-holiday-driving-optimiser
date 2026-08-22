@@ -1112,7 +1112,26 @@ docker compose -f docker-compose.local-db.yml up -d
   clearing it snaps back to `min` (hence the "040" people kept typing) and
   "0.59" is unreachable because "0." parses to 0 mid-word. An empty or
   out-of-range box stays what you typed, turns red, and blocks submit via
-  `useNumberFieldValidity`.
+  `useNumberFieldValidity`. Three rules come with blocking submit that way,
+  because between them they are how "the button is always greyed out" gets
+  reported. **A disabled primary action has to say why**: nothing else on the
+  screen distinguishes a form waiting on you from a broken one, so `badFields`
+  carries the LABEL of every field holding it up and the line under the button
+  names them — and is a button itself, since the reader may have folded the
+  fine print back over the box in question. **A field that no longer applies is
+  unmounted, not hidden**: a `hidden` box still holds the empty string somebody
+  left in it, so half-clearing the motorway limit and then ticking "ignore
+  speed limits" locked the form for ever, pointing at a red field that was not
+  on the screen. NumberField's cleanup hands the flag back on unmount, which is
+  what makes that safe. And **an invalid field opens every `<details>` above
+  it**, walked from the DOM rather than from a list of which id lives in which
+  panel — that list is the kind that silently stops being true.
+- **A place is only chosen when it is picked from the list** (`GeocodeInput`).
+  `origin`/`dest` are set by `select()` alone, so a box reading "Utrecht" with
+  nothing selected looks filled and submits nothing. Typing shows an amber
+  border and says to pick one; Enter takes the highlighted hit or the top one.
+  Keep both — the geocoder is a free tier that answers 403 when it is out of
+  quota, and that failure surfaces here as a form that cannot be submitted.
 - **Anything drawn from "today" must be resolved after mount**
   (`trip/DepartureField.tsx`). The departure picker's day strip, its presets and
   its "in 3 days" all start from the current date, and a client component is
