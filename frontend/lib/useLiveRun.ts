@@ -21,6 +21,7 @@ import {
   RerouteResult,
   RevisedPlan,
   ArriveResult,
+  acceptStretch,
   arriveAt,
   finishRun,
   getAlternatives,
@@ -30,6 +31,7 @@ import {
   recordSoc,
   replanRun,
   rerouteRun,
+  undoStretch,
   undoArrival,
 } from "./client"
 import { RouteIndex, buildRouteIndex, project } from "./route"
@@ -133,6 +135,11 @@ export interface LiveHandle {
   /** Take back the last arrival. The one tap on this screen that no later fix
    *  can correct, so it needs a way out that is not "end the drive". */
   undoArrive: () => Promise<LiveState | null>
+  /** "I'll take that stop anyway." Records the accepted floor; does not
+   *  re-plan, because the plan already goes there. */
+  keepStopAnyway: () => Promise<LiveState | null>
+  /** Take that back. The reserve applies again from the next plan onwards. */
+  undoKeepStop: () => Promise<LiveState | null>
   /** The road the drive is on, once it is no longer the trip's own. Null until
    *  something has been re-routed, so an ordinary drive fetches no geometry. */
   route: LiveRoute | null
@@ -472,6 +479,30 @@ export function useLiveRun(
     }
   }, [runId])
 
+  const keepStopAnyway = useCallback(async () => {
+    if (!runId) return null
+    setBusy(true)
+    try {
+      const st = await acceptStretch(runId)
+      setState(st)
+      return st
+    } finally {
+      setBusy(false)
+    }
+  }, [runId])
+
+  const undoKeepStop = useCallback(async () => {
+    if (!runId) return null
+    setBusy(true)
+    try {
+      const st = await undoStretch(runId)
+      setState(st)
+      return st
+    } finally {
+      setBusy(false)
+    }
+  }, [runId])
+
   const reroute = useCallback(
     async (force = false) => {
       if (!runId) return null
@@ -582,6 +613,8 @@ export function useLiveRun(
     requestReplan,
     findAlternatives,
     markArrived,
+    keepStopAnyway,
+    undoKeepStop,
     route,
     routeIndex,
     reroute,

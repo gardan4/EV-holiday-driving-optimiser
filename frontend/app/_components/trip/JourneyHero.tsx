@@ -22,6 +22,7 @@ import {
   parseLocalIso,
   parseServerTime,
 } from "@/lib/format"
+import { useMounted } from "@/lib/mounted"
 import { isCharging, sampleTimeline, timeAtDist } from "@/lib/playback"
 import type { JourneyWorldRef } from "./scene/JourneyScene"
 import LiveHud from "./live/LiveHud"
@@ -449,6 +450,7 @@ export default function JourneyHero({
   // planned `departure_iso` (naive local, typed by a person). They are the same
   // shape as text, so `clockAt` could only guess — and guessed local, which put
   // every clock on a live drive out by the viewer's UTC offset.
+  const mounted = useMounted()
   const clockBaseMs = live
     ? parseServerTime(live.startedAtIso)
     : parseLocalIso(departIso).getTime()
@@ -581,7 +583,7 @@ export default function JourneyHero({
         aria-valuetext={
           followLocked
             ? undefined
-            : `${clockAtMs(clockBaseMs, hud.min)}, ${Math.round(shownSoc)} percent battery`
+            : `${mounted ? clockAtMs(clockBaseMs, hud.min) : ""}, ${Math.round(shownSoc)} percent battery`
         }
         className={`absolute inset-0 z-10 overflow-y-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand-400 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
           // Locked: horizontal scroll off entirely, and `pan-y` so a vertical

@@ -338,7 +338,8 @@ class TripEvent(Base):
         DateTime, nullable=False, default=datetime.utcnow
     )
     # start | breadcrumb | soc_reading | arrive | arrive_undo | charge_start |
-    # charge_end | replan | reroute | off_route | finish
+    # charge_end | replan | reroute | stretch | stretch_undo | off_route |
+    # finish
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
     # Distance driven in TOTAL, across every road this drive has been on — not
     # the offset along the current one. A re-route replaces the route and

@@ -542,6 +542,36 @@ the pipeline is green before infra exists. Infra deploy is manual
   its own request against the free tier. **Origin only** — a destination you
   are already standing at is not a journey. It is metered as `geocode` because
   HeiGIT counts Pelias against one allowance whichever endpoint spends it.
+- **A battery correction ASKS about the next stop, it does not re-route around
+  it** (`runs._next_stop_risk`, `POST /runs/{id}/stretch`). Typing the real
+  figure is the moment the plan's next stop can stop fitting inside
+  `reserve_soc` — and "I'll take it at 6% anyway" is an ordinary judgement
+  about a road the driver can see, made with knowledge the model does not have
+  (what is at that services, who is asleep in the back, whether the next one is
+  a lay-by). Re-planning on their behalf sends them to a charger they never
+  chose, silently, at the exact moment they were being helpful. Five things
+  hold it up. **Accepting does NOT re-plan**: the plan already goes to that
+  stop, so agreeing to reach it on less than the reserve changes nothing about
+  where the car is heading — only `first_leg_reserve_soc`, which is what stops
+  the standing "Re-plan" button, the alternatives panel and any later re-route
+  from quietly refusing it. That is also what makes the undo honest: there is
+  no superseded plan to restore and nothing recomputed from a position the car
+  has since left, so taking it back is removing one number. **Undo recomputes
+  the question rather than restoring it**, because by the time somebody changes
+  their mind they have driven on, and handing back the arrival percentage from
+  before those kilometres would be worse than saying nothing. **Out of range is
+  refused, not offered**: lowering the floor cannot make an unreachable stop
+  reachable, and an "accept" button there would be the app agreeing to a
+  journey it knows ends on the hard shoulder — so that case gets a different
+  sentence and only "somewhere closer". **It is computed at the reading and
+  held**, never per ping: it is the same `RouteProfile` slice `_soc_needed_next`
+  builds, and keeping that off the ping path is deliberate. And **the drift
+  panel goes quiet** once the question is answered (`needs_replan`'s
+  `soc_accepted`) and while it is still open — two amber panels about the same
+  battery, one asking and one offering a blunt re-plan, answers the question on
+  the driver's behalf, which is the whole thing this exchange exists not to do.
+  The floor expires the way every accepted stretch does, on arriving at any
+  charger (`_clear_first_leg_floor`).
 - **An accepted stretch is about ONE leg, and ends when that leg does**
   (`runs._clear_first_leg_floor`). `first_leg_reserve_soc` is persisted so the
   standing "Re-plan" button cannot refuse the stop the driver just chose — and
@@ -1280,6 +1310,18 @@ docker compose -f docker-compose.local-db.yml up -d
   padding, since an expanded box would overlap the row above and hand the tap
   to the wrong network. Toast actions are set once in `providers.tsx`, so no
   call site can ship a target the others have grown out of.
+- **Anything that depends on the READER's clock or timezone must resolve after
+  mount** (`lib/mounted.useMounted`). The rule already existed for "today" in
+  `DepartureField`; the drive screen's clocks are the same rule one step
+  further out. They count from `run.started_at`, an instant the server recorded
+  in UTC, so rendering it as a wall clock needs a timezone the server does not
+  have — the container renders 18:58 and a phone in CEST renders 20:58, which
+  is a hydration mismatch and a visible flash of the wrong time. Worth knowing
+  WHY it only appeared once the clocks were correct: parsing a naive UTC string
+  as local and formatting it as local is zero-sum in its digits, so both sides
+  used to produce the same wrong answer and matched. `useSyncExternalStore`
+  rather than `useState` + `useEffect`, so it does not lint as a cascading
+  render.
 - **A clock needs an EPOCH, not a timestamp string** (`lib/format.clockAtMs`).
   This app has two kinds of naive timestamp and they are identical as text:
   `departure_iso` is naive LOCAL because a person typed it, `started_at` is

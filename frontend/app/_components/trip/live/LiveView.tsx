@@ -23,6 +23,7 @@ import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
 import { clockSince, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
+import { useMounted } from "@/lib/mounted"
 import { projectedSoc } from "@/lib/liveSoc"
 import { remainingRouteLegs } from "@/lib/maps"
 import { useLiveRun } from "@/lib/useLiveRun"
@@ -33,6 +34,7 @@ import BatteryCheck from "./BatteryCheck"
 import ChargingHere from "./ChargingHere"
 import HoldSpeed from "./HoldSpeed"
 import PlanAhead from "./PlanAhead"
+import ReserveCheck from "./ReserveCheck"
 import NextStopCard from "./NextStopCard"
 
 export default function LiveView({
@@ -64,6 +66,9 @@ export default function LiveView({
   const live = useLiveRun(trip.id, plannedRoute, initial)
   const { run, isDriver } = live
   const liveRoute = live.route
+  // Clocks below count from an instant the SERVER recorded, so rendering
+  // them needs the viewer's timezone — which the server render does not have.
+  const mounted = useMounted()
 
   // Kilometres already driven on roads this drive has left. `distM` is
   // measured along the CURRENT one, so this is what turns it back into "how
@@ -431,6 +436,34 @@ export default function LiveView({
     }
   }
 
+  /** "Go there anyway." Records the accepted floor and nothing else — the plan
+   *  already goes to this stop, so there is no re-plan and no spinner-worth of
+   *  DP. What it buys is that every later plan stops refusing it. */
+  async function doKeepStop() {
+    try {
+      const st = await live.keepStopAnyway()
+      if (!st) return
+      toast.success(
+        `Keeping the stop. Arriving on about ${Math.round(st.stretch_soc ?? 0)}%.`,
+        { duration: 8_000, action: { label: "Undo", onClick: () => void doUndoKeepStop() } }
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save that")
+    }
+  }
+
+  async function doUndoKeepStop() {
+    try {
+      const st = await live.undoKeepStop()
+      if (!st) return
+      // Whatever was on offer was costed against the lowered floor.
+      setAlts(null)
+      toast.message("Back on the full reserve.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not undo that")
+    }
+  }
+
   async function doReplan() {
     try {
       const plan = await live.requestReplan()
@@ -629,7 +662,7 @@ export default function LiveView({
             focusedId={focused?.charger_id ?? null}
             onFocus={setFocusId}
             destLabel={trip.request.dest.label.split(",")[0]}
-            destArrivalClock={clockSince(run.started_at, etaMin)}
+            destArrivalClock={mounted ? clockSince(run.started_at, etaMin) : "--:--"}
             onSwap={
               isDriver ? (id) => void loadAlternatives(id) : undefined
             }
@@ -756,8 +789,28 @@ export default function LiveView({
           </div>
         )}
 
-        {/* --- diverged? offer to re-plan --------------------------------- */}
-        {state.needs_replan && !finished && (
+        {/* Directly under the battery row, because it is the consequence of
+            the figure just typed there — and above the "reality has drifted"
+            panel, which the server now stops raising once this is answered. */}
+        {!finished && (
+          <ReserveCheck
+            risk={state.next_stop_risk}
+            acceptedSoc={state.stretch_soc}
+            isDriver={isDriver}
+            busy={live.busy}
+            onKeep={() => void doKeepStop()}
+            onUndo={() => void doUndoKeepStop()}
+            onFindCloser={() => void loadAlternatives()}
+          />
+        )}
+
+        {/* --- diverged? offer to re-plan ---------------------------------
+            Held back while ReserveCheck has an open question. They are about
+            the same battery, and stacking a blunt "Re-plan the rest from here"
+            under a panel that just asked whether you would rather keep the
+            stop answers the question on the driver's behalf — which is the one
+            thing this whole exchange exists not to do. */}
+        {state.needs_replan && !state.next_stop_risk && !finished && (
           <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
             <p className="font-display text-sm font-semibold text-amber-900">
               Reality has drifted from the plan
@@ -874,6 +927,7 @@ function RevisedPanel({
    *  in" under a header saying 93 km is the plan disagreeing with the page. */
   drivenBeforeM?: number
 }) {
+  const mounted = useMounted()
   const b = plan.benchmark
   const worse = b.delta_min > 1
   return (
@@ -904,11 +958,11 @@ function RevisedPanel({
         />
         <Stat
           label="Arriving"
-          value={clockSince(startedAtIso, b.live_total_min)}
+          value={mounted ? clockSince(startedAtIso, b.live_total_min) : "--:--"}
           sub={
             Math.abs(b.delta_min) < 1
               ? "as promised"
-              : `${clockSince(startedAtIso, b.original_total_min)} promised`
+              : `${mounted ? clockSince(startedAtIso, b.original_total_min) : "--:--"} promised`
           }
           tone={worse ? "warn" : "brand"}
         />

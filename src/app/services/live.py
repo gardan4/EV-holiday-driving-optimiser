@@ -680,17 +680,28 @@ def schedule_delta_min(timeline: list, offset_m: float, elapsed_min: float) -> f
 
 
 def needs_replan(
-    *, delta_min: float, soc_now: float, soc_planned: float, stale: bool
+    *,
+    delta_min: float,
+    soc_now: float,
+    soc_planned: float,
+    stale: bool,
+    soc_accepted: bool = False,
 ) -> tuple[bool, list[str]]:
     """Whether reality has diverged enough to be worth re-optimising, and the
-    plain-language reasons — which are what the driver is actually shown."""
+    plain-language reasons — which are what the driver is actually shown.
+
+    `soc_accepted` is the driver having already answered the battery half of
+    this: they were shown what they would arrive on, and chose to go anyway.
+    Repeating it back as "reality has drifted from the plan" is the app asking
+    a question it has been given an answer to.
+    """
     reasons: list[str] = []
     if stale:
         return (False, ["off the planned route, so position and battery are unknown"])
     if delta_min >= BEHIND_MIN_TO_REPLAN:
         reasons.append(f"{delta_min:.0f} min behind the plan")
     shortfall = soc_planned - soc_now
-    if shortfall >= SOC_SHORTFALL_TO_REPLAN:
+    if shortfall >= SOC_SHORTFALL_TO_REPLAN and not soc_accepted:
         reasons.append(
             f"battery {shortfall:.0f}% below what the plan expected by now"
         )

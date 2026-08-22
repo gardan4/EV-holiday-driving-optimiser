@@ -30,6 +30,7 @@ import {
 } from "lucide-react"
 import { LiveHeroState } from "../JourneyHero"
 import { clockAtMs, fmtDuration, fmtKm } from "@/lib/format"
+import { useMounted } from "@/lib/mounted"
 
 export default function LiveHud({
   live,
@@ -54,6 +55,7 @@ export default function LiveHud({
    *  lives below a full-bleed scene, which on a phone means below the fold. */
   onCorrectBattery?: () => void
 }) {
+  const mounted = useMounted()
   const late = live.aheadBehindMin > 1
   const early = live.aheadBehindMin < -1
   // Past a few minutes of silence the numbers are history, not telemetry, and
@@ -97,7 +99,7 @@ export default function LiveHud({
         <Readout
           icon={<Clock className="h-3 w-3" />}
           label="arriving"
-          value={clockAtMs(clockBaseMs, live.etaMin)}
+          value={mounted ? clockAtMs(clockBaseMs, live.etaMin) : "--:--"}
           sub={
             Math.abs(live.aheadBehindMin) < 1
               ? "on time"

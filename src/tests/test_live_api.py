@@ -1888,6 +1888,185 @@ class TestExcludingNetworks:
         assert at["planned"] is False
 
 
+class TestKeepingAStopYouWouldArriveLowAt:
+    """A battery correction can put the next stop under the reserve, and the
+    driver may still want it — "I'll take it at 6%" is an ordinary judgement
+    about a road they can see. The app's job is to put the number in front of
+    them, not to re-route them somewhere they never chose.
+    """
+
+    async def _short_of_the_next_stop(self, client, trip, run):
+        """Drive an hour, then confess to a battery that reaches the next stop
+        but not with the reserve intact.
+
+        On this corridor that band is roughly 44-49%: above it the stop fits
+        comfortably, below ~40 it is out of range altogether and the answer is
+        "pick somewhere closer" rather than "accept it". Three values rather
+        than one so a modest change to the fixture's consumption does not break
+        the test, and only three because `/soc` shares the ping budget — a long
+        ladder gets a 429 and every assertion after it becomes noise.
+        """
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        for soc in (48.0, 46.0, 44.0):
+            out = await client.post(
+                f"/api/runs/{run['run_id']}/soc", json={"soc": soc}
+            )
+            assert out.status_code == 200, out.text
+            risk = out.json()["next_stop_risk"]
+            if risk and risk["reachable"]:
+                return risk
+        return None
+
+    async def test_a_comfortable_reading_asks_nothing(self, client):
+        """Its own drive, deliberately: `apply_reading` calibrates
+        `run_factor` off every figure typed, so a healthy reading and a tight
+        one in the same run would have the first quietly teaching the model
+        that the car is thriftier than it is — and the second would then fit."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": 85.0})
+        assert out.status_code == 200, out.text
+        assert out.json()["next_stop_risk"] is None
+
+    async def test_a_correction_asks_rather_than_re_routing(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None, "expected a reading that puts the stop under the reserve"
+        assert risk["arrive_soc"] < risk["reserve_soc"]
+        assert risk["charger_id"]
+        assert 0.0 <= risk["min_arrival_soc"] <= 20.0
+
+        # …and the plan has NOT been changed behind their back.
+        live = (await client.get(f"/api/trips/{trip['id']}/live")).json()
+        assert live["plan"] is None
+
+    async def test_accepting_keeps_the_stop_without_re_planning(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None
+
+        st = (await client.post(f"/api/runs/{run['run_id']}/stretch")).json()
+        assert st["stretch_soc"] == pytest.approx(risk["min_arrival_soc"])
+        assert st["next_stop_risk"] is None, "answered"
+        # No plan was written: the plan already went here.
+        assert (await client.get(f"/api/trips/{trip['id']}/live")).json()["plan"] is None
+
+    async def test_the_accepted_stop_survives_the_next_re_plan(self, client):
+        """The whole reason the floor is persisted: the standing "Re-plan"
+        button must not quietly refuse the stop just chosen."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None
+        await client.post(f"/api/runs/{run['run_id']}/stretch")
+
+        plan = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert plan.status_code == 200, plan.text
+        stops = plan.json()["remaining"]["stops"]
+        assert stops and stops[0]["charger_id"] == risk["charger_id"], [
+            s["name"] for s in stops
+        ]
+
+    async def test_it_can_be_taken_back(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None
+        await client.post(f"/api/runs/{run['run_id']}/stretch")
+
+        undone = await client.post(f"/api/runs/{run['run_id']}/stretch/undo")
+        assert undone.status_code == 200, undone.text
+        st = undone.json()
+        assert st["stretch_soc"] is None
+        # The question comes back, recomputed from where the car is now.
+        assert st["next_stop_risk"] is not None
+
+        # And the full reserve applies again, so the DP stops short instead.
+        plan = (
+            await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        ).json()
+        stops = plan["remaining"]["stops"]
+        assert not stops or stops[0]["charger_id"] != risk["charger_id"]
+
+    async def test_undoing_twice_is_refused(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._short_of_the_next_stop(client, trip, run)
+        await client.post(f"/api/runs/{run['run_id']}/stretch")
+        assert (
+            await client.post(f"/api/runs/{run['run_id']}/stretch/undo")
+        ).status_code == 200
+        assert (
+            await client.post(f"/api/runs/{run['run_id']}/stretch/undo")
+        ).status_code == 409
+
+    async def test_there_is_nothing_to_accept_when_the_stop_fits(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": 95.0})
+        resp = await client.post(f"/api/runs/{run['run_id']}/stretch")
+        assert resp.status_code == 409
+        assert "within the reserve" in resp.json()["detail"]
+
+    async def test_a_stop_out_of_range_is_refused_not_accepted(self, client):
+        """Lowering the floor cannot make an unreachable stop reachable, and
+        letting somebody "accept" it would be the app agreeing to a journey it
+        knows ends on the hard shoulder."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        out = await client.post(f"/api/runs/{run['run_id']}/soc", json={"soc": 2.0})
+        risk = out.json()["next_stop_risk"]
+        assert risk is not None and risk["reachable"] is False
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/stretch")
+        assert resp.status_code == 409
+        assert "out of range" in resp.json()["detail"]
+
+    async def test_arriving_anywhere_ends_it(self, client):
+        """The floor was about reaching ONE charger, and one has been reached —
+        the same rule `_clear_first_leg_floor` already enforces."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None
+        await client.post(f"/api/runs/{run['run_id']}/stretch")
+
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": risk["charger_id"]},
+            )
+        ).json()["state"]
+        assert st["stretch_soc"] is None
+
+    async def test_the_drifted_panel_stops_nagging_once_answered(self, client):
+        """"Reality has drifted from the plan", under a panel where they have
+        just accepted exactly that drift, reads as the app not listening."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        risk = await self._short_of_the_next_stop(client, trip, run)
+        assert risk is not None
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert any("battery" in r for r in before["replan_reasons"]), before
+
+        await client.post(f"/api/runs/{run['run_id']}/stretch")
+        after = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert not any("battery" in r for r in after["replan_reasons"]), after
+
+    async def test_a_watcher_cannot_accept_it(self, client):
+        """Every write on the drive needs the run id; the trip id is read-only."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await self._short_of_the_next_stop(client, trip, run)
+        live = await client.get(f"/api/trips/{trip['id']}/live")
+        assert run["run_id"] not in live.text
+
+
 class TestPlanParity:
     """A drive must be simulated under the assumptions its plan was made with.
 

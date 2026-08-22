@@ -29,6 +29,7 @@ import { useState } from "react"
 import { Check, Gauge, Loader2 } from "lucide-react"
 import { RevisedPlan } from "@/lib/client"
 import { clockSince, fmtDuration } from "@/lib/format"
+import { useMounted } from "@/lib/mounted"
 
 export default function HoldSpeed({
   plan,
@@ -43,6 +44,7 @@ export default function HoldSpeed({
   /** null means "give the choice back to the optimiser". */
   onHold: (speedKph: number | null) => void
 }) {
+  const mounted = useMounted()
   const feasible = plan.speeds.filter((s) => s.feasible && s.total_min != null)
   const inForce = plan.optimum_speed ?? feasible[0]?.speed_kph ?? 0
   const [picked, setPicked] = useState<number>(inForce)
@@ -97,7 +99,10 @@ export default function HoldSpeed({
           </div>
           {current?.total_min != null && (
             <div className="mt-0.5 text-xs text-ink-500">
-              arrive {clockSince(startedAtIso, plan.elapsed_min + current.total_min)}
+              arrive{" "}
+              {mounted
+                ? clockSince(startedAtIso, plan.elapsed_min + current.total_min)
+                : "--:--"}
               {" · "}
               {current.n_stops} {current.n_stops === 1 ? "stop" : "stops"} left
             </div>

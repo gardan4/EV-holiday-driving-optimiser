@@ -20,6 +20,7 @@ only when the driver asks for it.
 import asyncio
 import hashlib
 import logging
+import math
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -40,6 +41,7 @@ from app.api.schemas import (
     LiveOut,
     LiveRouteOut,
     LiveStateOut,
+    NextStopRiskOut,
     PingRequest,
     PlanRequest,
     PlanResult,
@@ -455,6 +457,58 @@ def _soc_needed_next(
     return round(min(100.0, kwh / max(veh.usable_kwh, 1e-6) * 100.0 + reserve), 1)
 
 
+def _next_stop_risk(
+    run: TripRun,
+    trip: Trip,
+    vehicle: Vehicle,
+    st: dict,
+) -> dict | None:
+    """Is the plan's next stop still reachable with the reserve intact?
+
+    Answered when the driver types a battery figure, because that is the moment
+    it can change and the moment they are looking. NOT per ping: it is the same
+    `RouteProfile` slice `_soc_needed_next` builds, and the decision not to put
+    that on the ping path is deliberate.
+
+    `None` means there is nothing to ask about — no stop ahead, or enough
+    battery to reach it on the full margin.
+    """
+    cid = _planned_next_stop_id(run, trip, st)
+    if cid is None:
+        return None
+    veh = VehicleParams.from_vehicle(vehicle)
+    plan_req = PlanRequest.model_validate(trip.request)
+    params = _sim_params(plan_req, st.get("run_factor", 1.0))
+    need = _soc_needed_next(run, trip, veh, params, st["offset_m"])
+    if need is None:
+        return None
+    soc_now = _live_soc(run, trip, vehicle)
+    if soc_now >= need:
+        return None
+
+    # `need` is the energy to the stop PLUS the reserve, so the shortfall comes
+    # straight off what you would arrive on.
+    arrive = params.reserve_soc - (need - soc_now)
+    node = next(
+        (c for c in live.snapshot_chargers(run.route_snapshot) if c.charger_id == cid),
+        None,
+    )
+    return {
+        "charger_id": cid,
+        "name": node.name if node else "the next stop",
+        "arrive_soc": round(max(0.0, arrive), 1),
+        "reserve_soc": round(params.reserve_soc, 1),
+        "reachable": arrive > 0.0,
+        # What accepting it would set as the floor for this leg. Rounded DOWN
+        # and held just under the projection, so the DP that re-plans later
+        # still finds this stop feasible rather than missing it by a rounding
+        # error. Clamped to the range `min_arrival_soc` accepts.
+        "min_arrival_soc": round(
+            min(20.0, max(0.0, math.floor(max(0.0, arrive) * 2) / 2)), 1
+        ),
+    }
+
+
 def _planned_stops_ahead(run: TripRun, trip: Trip, st: dict) -> list[str]:
     """The chargers the plan in force still intends to stop at, in order.
 
@@ -687,6 +741,10 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
         soc_now=soc,
         soc_planned=planned_soc,
         stale=bool(st.get("stale")),
+        # A shortfall the driver has looked at and accepted is not a surprise,
+        # and "reality has drifted from the plan" under a panel where they just
+        # chose to accept exactly that drift reads as the app not listening.
+        soc_accepted=_first_leg_floor(st) is not None,
     )
     return LiveStateOut(
         at_min=round(st["at_min"], 1),
@@ -717,6 +775,12 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
         # too.
         can_undo_arrive=bool(st.get("arrive_undo")),
         charging=_charging_out(run, trip, vehicle, soc),
+        next_stop_risk=(
+            NextStopRiskOut(**st["next_stop_risk"])
+            if st.get("next_stop_risk")
+            else None
+        ),
+        stretch_soc=_first_leg_floor(st),
         route_version=_route_version(run),
         distance_before_m=round(st.get("distance_before_m", 0.0)),
         # Off the route long enough that waiting for a rejoin has stopped being
@@ -1318,6 +1382,23 @@ async def record_soc(
         # about standing still, and the answer to it has just been acted on.
         new_st = {**new_st, "need_soc_next": None}
     run.state = new_st
+
+    # Does the corrected figure still reach the stop the plan is heading for?
+    #
+    # Asked HERE and nowhere else on the hot path: a battery correction is the
+    # one moment this can change and the one moment the driver is looking. And
+    # asked rather than acted on — arriving somewhere at 6% instead of 12% is
+    # an ordinary decision about a road they can see out of the window, so the
+    # app's job is to put the number in front of them, not to quietly re-route
+    # them to a charger they never chose. A floor already accepted for this leg
+    # means they have answered it once; do not ask again.
+    risk = (
+        None
+        if _first_leg_floor(new_st) is not None
+        else _next_stop_risk(run, trip, vehicle, new_st)
+    )
+    run.state = {**new_st, "next_stop_risk": risk}
+    new_st = run.state
     run.n_soc_readings = run.n_soc_readings + 1
     now = datetime.utcnow()
     run.last_seen_at = now
@@ -1470,6 +1551,118 @@ async def _plan_remaining(
         benchmark=BenchmarkOut(**bench),
     )
     return out, best, bench
+
+
+@router.post("/runs/{run_id}/stretch", response_model=LiveStateOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_REPLAN, key_func=run_key)
+async def accept_stretch(
+    request: Request,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> LiveStateOut:
+    """"I'll take that stop anyway, on whatever I arrive with."
+
+    Answers the question `record_soc` raised. It does NOT re-plan, and that is
+    the point: the plan already goes to this stop, so agreeing to reach it on
+    less than the reserve changes nothing about where the car is heading. What
+    it changes is what happens NEXT — the floor is what stops the standing
+    "Re-plan" button, the alternatives panel and any later re-route from
+    quietly refusing the stop the driver has just chosen. Same mechanism the
+    stretch options in `alternatives` use, reached from the other direction.
+
+    Not re-planning is also what makes the undo below honest. There is no
+    superseded plan to restore and nothing recomputed from a position the car
+    has since left: the decision is one number, and taking it back removes it.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    risk = run.state.get("next_stop_risk")
+    if not risk:
+        raise HTTPException(
+            status_code=409,
+            detail="Nothing to accept — the next stop is within the reserve.",
+        )
+    if not risk.get("reachable"):
+        # A stop the car cannot reach at all is not a risk to accept, it is a
+        # plan that does not work. Lowering the floor would not change that,
+        # and letting somebody "accept" it would be the app agreeing to a
+        # journey it knows ends on the hard shoulder.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{risk['name']} is out of range on this charge, not just tight. "
+                "Pick somewhere closer."
+            ),
+        )
+
+    floor = float(risk["min_arrival_soc"])
+    now = datetime.utcnow()
+    run.state = {
+        **run.state,
+        "first_leg_floor_soc": floor,
+        # Answered. It comes back if a later reading raises it again.
+        "next_stop_risk": None,
+    }
+    run.last_seen_at = now
+    db.add(
+        TripEvent(
+            run_id=run.id, at=now, kind="stretch", offset_m=_travelled_m(run.state),
+            lat=run.state["lat"], lon=run.state["lon"],
+            soc=_live_soc(run, trip, vehicle),
+            payload={
+                "charger_id": risk["charger_id"],
+                "arrive_soc": risk["arrive_soc"],
+                "reserve_soc": risk["reserve_soc"],
+                "floor_soc": floor,
+            },
+        )
+    )
+    await db.commit()
+    return _state_out(run, trip, vehicle)
+
+
+@router.post("/runs/{run_id}/stretch/undo", response_model=LiveStateOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_REPLAN, key_func=run_key)
+async def undo_stretch(
+    request: Request,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> LiveStateOut:
+    """Take back an accepted stretch, and put the question back on screen.
+
+    Cheap and exact because accepting was cheap and exact: one number goes
+    away, the plan was never rewritten, and the reserve applies again from the
+    next DP run onwards. The risk is recomputed rather than restored, so what
+    comes back describes where the car is NOW — by the time somebody changes
+    their mind they have usually driven a few more kilometres, and handing back
+    the arrival percentage from before those kilometres would be worse than
+    saying nothing.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    if _first_leg_floor(run.state) is None:
+        raise HTTPException(status_code=409, detail="Nothing to undo.")
+
+    st = _clear_first_leg_floor(run.state)
+    now = datetime.utcnow()
+    run.state = {**st, "next_stop_risk": _next_stop_risk(run, trip, vehicle, st)}
+    run.last_seen_at = now
+    db.add(
+        TripEvent(
+            run_id=run.id, at=now, kind="stretch_undo",
+            offset_m=_travelled_m(run.state),
+            lat=run.state["lat"], lon=run.state["lon"],
+            soc=_live_soc(run, trip, vehicle), payload={},
+        )
+    )
+    await db.commit()
+    return _state_out(run, trip, vehicle)
 
 
 @router.post("/runs/{run_id}/replan", response_model=ReplanOut)

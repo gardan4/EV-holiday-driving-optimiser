@@ -503,6 +503,34 @@ class ChargingOut(BaseModel):
     to_target_min: Optional[float] = None
 
 
+class NextStopRiskOut(BaseModel):
+    """The plan's next stop is no longer reachable on the reserve.
+
+    Raised by a battery correction, which is the moment it becomes true: the
+    driver types the real figure, and the stop the plan is heading for now
+    arrives under the margin they asked to keep. The app must not quietly
+    re-plan around that — "I'll take it at 6% anyway" is an ordinary decision
+    about a road the driver can see, and re-routing them to a charger they did
+    not ask for is the app overruling it.
+
+    Computed at the reading and held, not recomputed per ping: it is a property
+    of a figure a human typed, and the panel it feeds is about that figure.
+    """
+
+    charger_id: str
+    name: str
+    #: What you would actually arrive on. Can be 0 — see `reachable`.
+    arrive_soc: float
+    #: The margin the plan was told to keep between stops.
+    reserve_soc: float
+    #: False when the stop cannot be reached at all, not merely reached low.
+    #: The panel offers a different sentence for that, because "you'd arrive on
+    #: 0%" and "you would not get there" are not the same warning.
+    reachable: bool
+    #: The floor accepting this would put on the leg being driven.
+    min_arrival_soc: float
+
+
 class LiveStateOut(BaseModel):
     at_min: float                  # minutes since departure
     offset_m: float
@@ -553,6 +581,14 @@ class LiveStateOut(BaseModel):
     # is no longer the useful answer. The drive screen acts on this — see
     # `POST /runs/{id}/reroute`.
     reroute_suggested: bool = False
+    # Set by a battery reading that puts the next planned stop under the
+    # reserve. Null once the driver has answered it, or once the question
+    # stops being about the leg they are on.
+    next_stop_risk: Optional[NextStopRiskOut] = None
+    # The driver has accepted arriving under the reserve on this leg. Shown so
+    # the screen can say so and offer to take it back — and so nothing nags
+    # about a shortfall somebody has already looked at and decided on.
+    stretch_soc: Optional[float] = None
 
 
 class BenchmarkOut(BaseModel):

@@ -402,6 +402,12 @@ export interface LiveState {
   can_undo_arrive?: boolean
   /** The session at the plug, while there is one. */
   charging?: ChargingSession | null
+  /** Raised by a battery correction: the stop the plan is heading for no
+   *  longer arrives with the reserve intact. A question, not a decision —
+   *  the app must not re-route around it on its own. */
+  next_stop_risk?: NextStopRisk | null
+  /** The floor the driver accepted for the leg they are on, if any. */
+  stretch_soc?: number | null
   /** Which road this drive is on: 0 is the trip's own route, every re-route
    *  bumps it. `offset_m` is measured along THAT road, so a page still holding
    *  the trip's polyline is projecting onto a road the car has left. */
@@ -412,6 +418,19 @@ export interface LiveState {
   /** Off the route long enough that waiting to rejoin has stopped being the
    *  useful answer. The driver's device acts on this; a watcher just sees it. */
   reroute_suggested: boolean
+}
+
+export interface NextStopRisk {
+  charger_id: string
+  name: string
+  /** What you would actually arrive on. 0 when `reachable` is false. */
+  arrive_soc: number
+  /** The margin the plan was told to keep between stops. */
+  reserve_soc: number
+  /** False means out of range, not merely tight — a different sentence. */
+  reachable: boolean
+  /** The floor accepting it would put on this leg. */
+  min_arrival_soc: number
 }
 
 export interface Benchmark {
@@ -664,6 +683,24 @@ export async function rerouteRun(
  *  rather than watching it drive through fields. */
 export async function getLiveRoute(tripId: string): Promise<LiveRoute> {
   return unwrap<LiveRoute>(await apiFetch(`/api/trips/${tripId}/live/route`))
+}
+
+/** "I'll take that stop anyway, on whatever I arrive with."
+ *
+ *  Does not re-plan: the plan already goes there. It records the floor so the
+ *  standing "Re-plan" button, the alternatives panel and any later re-route
+ *  cannot quietly refuse the stop the driver just chose. */
+export async function acceptStretch(runId: string): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/stretch`, { method: "POST" })
+  )
+}
+
+/** Take it back. Cheap and exact, because accepting never rewrote the plan. */
+export async function undoStretch(runId: string): Promise<LiveState> {
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/stretch/undo`, { method: "POST" })
+  )
 }
 
 export async function replanRun(
