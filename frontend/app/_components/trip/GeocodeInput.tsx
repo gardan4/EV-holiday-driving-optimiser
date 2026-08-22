@@ -168,7 +168,17 @@ export default function GeocodeInput({
   const unresolved = text.trim().length > 0 && !value && !open
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative min-w-0">
+      {/* `min-w-0` is load-bearing, not tidiness. A grid item defaults to
+          `min-width: auto`, so an auto-sized track takes the item's MAX-content
+          width — and a text input carries an intrinsic ~207 px from its default
+          `size`, which `min-w-0 flex-1` on the input itself cannot undo while
+          nothing upstream is squeezing the row. The field therefore rendered
+          wider than the card that holds it and was clipped on a 320 px phone.
+          It was 15 px over before this box gained a button and 80 px over
+          after, which is the only reason anybody noticed. Fixed here rather
+          than by adding `grid-cols-1` at each call site, because that is a list
+          somebody has to remember to extend. */}
       {/* Label inside the box, same as the number fields — see the note in
           fields.tsx. Unlike those this one CAN be empty, so it keeps a
           placeholder underneath the label rather than relying on it. */}
@@ -212,7 +222,19 @@ export default function GeocodeInput({
               a phone and a control alongside would halve it. A <button> so the
               wrapper's click-to-focus handler steps over it — that handler
               already skips anything inside a button, which is why the tap does
-              not shove the keyboard up over the answer. */}
+              not shove the keyboard up over the answer.
+
+              Sized for a thumb. It renders at ~62 × 34 and the `before`
+              pseudo-element carries the hit area to 44 high, which is what a
+              phone needs and what the visible chip cannot be without making
+              this field taller than the one beside it. Vertical only: the text
+              of the input runs up to its left edge, and stealing taps from
+              there would cost somebody their cursor position.
+
+              The label shows at EVERY width, deliberately — it was hidden
+              below `sm`, which is backwards. A phone is where "start from
+              where I am" is most likely to be the true answer, and a lone
+              crosshair beside a text field is a guess about what it does. */}
           {allowHere && (
             <button
               type="button"
@@ -220,16 +242,14 @@ export default function GeocodeInput({
               disabled={locating}
               title="Use my current location"
               aria-label="Use my current location"
-              className="-mr-1 flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-50 disabled:text-ink-400"
+              className="relative -mr-1 flex shrink-0 items-center gap-1 rounded-lg px-2 py-2 text-xs font-semibold text-brand-700 transition-colors before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] hover:bg-brand-50 disabled:text-ink-400"
             >
               {locating ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Crosshair className="h-3.5 w-3.5" />
               )}
-              <span className="hidden sm:inline">
-                {locating ? "Locating…" : "Here"}
-              </span>
+              {locating ? "Locating…" : "Here"}
             </button>
           )}
         </div>
@@ -261,7 +281,7 @@ export default function GeocodeInput({
                 aria-selected={i === active}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => select(hit)}
-                className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm ${
+                className={`flex min-h-11 w-full items-center gap-2 px-3 py-2.5 text-left text-sm ${
                   i === active ? "bg-brand-50 text-ink-900" : "text-ink-700"
                 }`}
               >

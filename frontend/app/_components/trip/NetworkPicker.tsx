@@ -99,7 +99,14 @@ export default function NetworkPicker({
               type="button"
               onClick={() => toggle(n.slug)}
               aria-pressed={off}
-              className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+              // `py-2.5` rather than the `py-1.5` a chip normally wants: at
+              // that size it is 30 px tall, and this is a row of twenty-odd
+              // targets sitting six pixels apart on a phone. Real padding
+              // rather than an invisible hit area, because the chips WRAP — an
+              // expanded box would overlap the row above and hand a tap to the
+              // wrong network, which is the one mistake this control must not
+              // make silently.
+              className={`flex min-h-11 items-center gap-1 rounded-lg border px-3 py-2.5 text-xs font-semibold transition-colors ${
                 off
                   ? "border-red-300 bg-red-50 text-red-800 line-through decoration-red-400"
                   : "border-ink-200 bg-white text-ink-600 hover:border-ink-300 hover:bg-ink-100"

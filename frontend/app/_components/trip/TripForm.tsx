@@ -310,8 +310,11 @@ export default function TripForm() {
             a red field that was not on the screen. Unmounting hands its
             validity flag back (see NumberField's cleanup); `motorwayCap`
             itself lives up here, so the value survives unticking. */}
+        {/* `min-w-0` on the wrappers for the same reason as inside NumberField:
+            these are the grid items now, and an item that cannot shrink drags
+            the whole track wider than the card holding it. */}
         {!noLimits && (
-        <div>
+        <div className="min-w-0">
         <NumberField
           id="motorway-cap"
           onValidity={onValidity}
@@ -351,7 +354,7 @@ export default function TripForm() {
         />
         </div>
         {!noLimits && (
-        <div>
+        <div className="min-w-0">
           <label
             htmlFor="autobahn"
             className="mb-1.5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-ink-500"
@@ -522,7 +525,7 @@ export default function TripForm() {
             <button
               type="button"
               onClick={() => revealField(badFields[0].id)}
-              className="text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
+              className="inline-flex min-h-11 items-center px-2 text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
             >
               {blocker.text}
             </button>

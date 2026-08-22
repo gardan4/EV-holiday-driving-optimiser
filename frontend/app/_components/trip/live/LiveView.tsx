@@ -724,7 +724,7 @@ export default function LiveView({
               <button
                 onClick={() => void doReroute()}
                 disabled={live.rerouting || live.busy}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-800 disabled:bg-amber-900/40"
+                className="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-amber-900 px-3 py-2 text-sm font-semibold text-white transition-colors active:scale-[0.99] hover:bg-amber-800 disabled:bg-amber-900/40"
               >
                 {live.rerouting ? (
                   <>

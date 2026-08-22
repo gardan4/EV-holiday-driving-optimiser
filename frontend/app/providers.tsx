@@ -22,6 +22,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
             border: "1px solid #1e293b",
             color: "#e2e8f0",
           },
+          classNames: {
+            // Sonner's action chip is 24 px tall. Several of these are pressed
+            // one-handed in a moving car — "Re-plan" after a charge stop,
+            // "Battery?" after a re-route — and 24 px is half what a thumb
+            // needs. Set once here rather than per toast, so no call site can
+            // ship a target the others already grew out of.
+            actionButton: "min-h-11 px-3 text-sm font-semibold",
+            cancelButton: "min-h-11 px-3 text-sm",
+          },
         }}
       />
     </TripsProvider>

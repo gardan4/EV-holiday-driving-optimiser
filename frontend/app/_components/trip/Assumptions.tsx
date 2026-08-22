@@ -318,7 +318,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               <button
                 type="button"
                 onClick={() => revealField(badFields[0].id)}
-                className="text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
+                className="inline-flex min-h-11 items-center px-2 text-red-600 underline decoration-red-300 underline-offset-2 hover:decoration-red-600"
               >
                 {listFieldNames(badFields)} {badFields.length > 1 ? "need" : "needs"} a
                 usable number — take me there

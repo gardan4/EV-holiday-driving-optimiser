@@ -292,7 +292,17 @@ export function NumberField({
   }
 
   return (
-    <div>
+    <div className="min-w-0">
+      {/* `min-w-0` is load-bearing, not tidiness. A grid item defaults to
+          `min-width: auto`, so an auto-sized track takes the item's MAX-content
+          width — and a text input carries an intrinsic ~207 px from its default
+          `size`, which `min-w-0 flex-1` on the input itself cannot undo while
+          nothing upstream is squeezing the row. The field therefore rendered
+          wider than the card that holds it and was clipped on a 320 px phone.
+          It was 15 px over before the box beside it gained a button and 80 px over
+          after, which is the only reason anybody noticed. Fixed here rather
+          than by adding `grid-cols-1` at each call site, because that is a list
+          somebody has to remember to extend. */}
       {/* The label is the box's own first line rather than a row above it.
           This is a Material "filled" field with the label permanently in its
           floated position — deliberately NOT a floating label, which animates

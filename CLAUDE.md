@@ -1254,6 +1254,32 @@ docker compose -f docker-compose.local-db.yml up -d
   reads as pre-filled, and neither applies when every field ships with a value.
   Keep it static, keep the real `<label for>`, and keep the input at 16px on a
   phone or WebKit zooms the page on focus.
+- **A grid item needs `min-w-0`, or a text input drags the card wider than the
+  screen** (`GeocodeInput`, `NumberField`). A grid item defaults to
+  `min-width: auto`, so an auto-sized track takes the item's MAX-content width
+  — and an `<input>` carries an intrinsic ~207 px from its default `size` that
+  `min-w-0 flex-1` on the input itself cannot undo while nothing upstream is
+  squeezing the row. Both field components therefore rendered wider than the
+  card holding them and were clipped on a 320 px phone: "…Netherlan", "peopl",
+  "€/k". It survived because `sm:grid-cols-2` is `minmax(0, 1fr)` and DOES cap
+  the track, so every desktop check passed — it was 15 px over until the From
+  box gained a button and 80 px after, which is the only reason anybody looked.
+  Set on the component roots rather than by adding `grid-cols-1` at each call
+  site, because that is a list somebody has to remember to extend; a wrapper
+  `<div>` introduced around a field is a new grid item and needs it too.
+- **Anything a thumb presses is 44 px, and an invisible hit area is how you get
+  there without redrawing the control.** The phone guidance is 44 (Apple) / 48
+  (Android), against a 24 px WCAG floor; several controls shipped at 22-32,
+  including "Here" beside the origin box, the network chips, the off-route
+  "Plan from where I am" button and sonner's 24 px action chip — which is
+  pressed one-handed in a moving car. Two techniques, and which one is safe
+  depends on the neighbours: a `before:` pseudo-element grows the target
+  without touching layout, but only where it cannot steal taps from something
+  else (on "Here" it is expanded VERTICALLY only, because the input's text runs
+  up to its left edge), while wrapped rows like the network chips need real
+  padding, since an expanded box would overlap the row above and hand the tap
+  to the wrong network. Toast actions are set once in `providers.tsx`, so no
+  call site can ship a target the others have grown out of.
 - **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless
