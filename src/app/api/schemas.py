@@ -511,6 +511,37 @@ class ChargingOut(BaseModel):
     #: Minutes from NOW to each, null when already past it.
     to_min_min: Optional[float] = None
     to_target_min: Optional[float] = None
+    #: What the DRIVER said they want to leave on, when they have said. A third
+    #: target because it answers a third question: the floor is what the road
+    #: needs, the plan's figure is what is quickest, and this is "wake me at
+    #: 80%" — a decision about the coffee, the queue, or the fact that the next
+    #: hundred kilometres are through the mountains. Null when unset, and it is
+    #: then the plan's target the stop is priced on.
+    leave_at_soc: Optional[float] = None
+    to_leave_min: Optional[float] = None
+    #: Whether the driver's own target has been reached. A field rather than a
+    #: comparison in the browser: it is what the card says in words, and the
+    #: arrival time is priced off the same answer.
+    leave_ready: bool = False
+
+
+class ChargingRequest(BaseModel):
+    """"The cable is in", and "wake me at 80%".
+
+    One endpoint for the state of a stop, because both answers are about the
+    same plug and a driver sets them within seconds of each other. Every field
+    is optional and ABSENT MEANS LEAVE IT ALONE — the same three-way split
+    `HoldSpeed` uses, so "I've plugged in" does not silently clear a leave
+    target set a minute earlier, and an explicit null is how one is cleared.
+    """
+
+    #: True when the cable goes in, false when it comes out and the car stays
+    #: parked. Arriving no longer implies it: a car waiting for a free stall is
+    #: standing at the charger and not charging, and the projection that
+    #: assumed otherwise was climbing while the driver stood there.
+    plugged_in: Optional[bool] = None
+    #: The battery to charge to. Null clears it, back to the plan's target.
+    leave_at_soc: Optional[float] = Field(default=None, ge=1, le=100)
 
 
 class NextStopRiskOut(BaseModel):

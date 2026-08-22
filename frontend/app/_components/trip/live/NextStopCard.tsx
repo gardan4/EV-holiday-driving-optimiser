@@ -69,6 +69,7 @@ function Step({
 export default function NextStopCard({
   stop,
   here = false,
+  charging = false,
   distM,
   destLabel,
   vehicle,
@@ -89,6 +90,10 @@ export default function NextStopCard({
   /** The car is AT this stop. Standing at the charger, "24 km to go" and a
    *  Navigate button are noise, and the charge figures are the whole card. */
   here?: boolean
+  /** Whether the cable is actually in. `here` is about POSITION and stopped
+   *  implying this: a car queueing for a free stall is at the charger and not
+   *  charging, and the countdown below must not run for it. */
+  charging?: boolean
   /** How far the car has come, to turn the stop's offset into "still to go". */
   distM: number
   destLabel: string
@@ -157,8 +162,12 @@ export default function NextStopCard({
   // factor gets in: it is not on the wire, but the plan's `charge_min` for a
   // known SoC window is enough to recover it, and a "12 min left" that
   // contradicts the plan it sits under is worse than no number.
+  //
+  // Only while the cable is actually IN. Arriving stopped implying that, and a
+  // countdown that is not running is the worst thing this card could show: it
+  // is the number a driver walks away from the screen trusting.
   let leftMin: number | null = null
-  if (here && liveSoc != null && liveSoc < stop.depart_soc) {
+  if (here && charging && liveSoc != null && liveSoc < stop.depart_soc) {
     const raw = chargeMinutes(vehicle, liveSoc, stop.depart_soc, stop.power_kw)
     const modelled = chargeMinutes(
       vehicle,
@@ -183,7 +192,13 @@ export default function NextStopCard({
 
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-700">
-            {here ? "Charging here" : index === 0 ? "Next stop" : "Later stop"}
+            {here
+              ? charging
+                ? "Charging here"
+                : "Stopped here"
+              : index === 0
+                ? "Next stop"
+                : "Later stop"}
             {total > 1 && (
               <span className="font-mono text-ink-400"> · {index + 1}/{total}</span>
             )}

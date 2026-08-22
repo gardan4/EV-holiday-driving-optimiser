@@ -35,10 +35,25 @@
  * the dashboard is the only ground truth this app ever gets. So the last thing
  * on the card is "I'm leaving on ___%", which ends the stop, anchors the
  * battery, and is what the rest of the drive is then planned from.
+ *
+ * **Pulling in is not plugging in.** Arriving here used to start the charge by
+ * itself, and the several minutes at the front of a real stop are exactly the
+ * ones where that is false: the queue for a free stall, the walk over to read
+ * the screen, the post that turns out to be dead. The battery climbed through
+ * all of them. So the card asks, once, with a button — and until it is
+ * pressed it says plainly that nothing is being counted, because a projection
+ * that has quietly stopped is worse than one that never started.
+ *
+ * **A third target, which is the driver's own.** The floor is what the road
+ * needs and the plan's figure is what is quickest; neither is "I'll sit for
+ * another ten minutes, the next hundred kilometres are through the Alps".
+ * Chips rather than a stepper, deliberately — this card already has one and
+ * two of them is how a stop turns into a form — and coarse, because nobody
+ * decides to leave on 73%.
  */
 
 import { useEffect, useState } from "react"
-import { BatteryCharging, Check, LogOut, MapPin, UtensilsCrossed } from "lucide-react"
+import { BatteryCharging, Check, LogOut, MapPin, Plug, UtensilsCrossed, X } from "lucide-react"
 import { AtCharger, ChargingSession } from "@/lib/client"
 import { fmtBays, fmtDuration, mapsLink } from "@/lib/format"
 
@@ -52,6 +67,8 @@ export default function ChargingHere({
   busy,
   onCorrect,
   onLeave,
+  onPlugIn,
+  onLeaveAt,
 }: {
   charger: AtCharger
   /** The battery estimate now — the projection while the cable is in. */
@@ -68,12 +85,17 @@ export default function ChargingHere({
   onCorrect: (soc: number) => void
   /** "I'm leaving on this much." Ends the stop. Driver only, both of them. */
   onLeave: (soc: number) => void
+  /** "The cable is in." Nothing counts until this is pressed. */
+  onPlugIn: () => void
+  /** "Wake me at 80%." Null clears it, back to the plan's figure. */
+  onLeaveAt: (soc: number | null) => void
 }) {
   const min = session?.min_soc ?? null
   const target = session?.target_soc ?? null
-  // The bar runs to whichever goal is further out, so both markers fit on it
-  // and the one already passed reads as passed.
-  const top = Math.max(min ?? 0, target ?? 0, soc)
+  const leaveAt = session?.leave_at_soc ?? null
+  // The bar runs to whichever goal is furthest out, so every marker fits on it
+  // and the ones already passed read as passed.
+  const top = Math.max(min ?? 0, target ?? 0, leaveAt ?? 0, soc)
 
   return (
     <div className="mt-3 rounded-2xl border border-brand-300 bg-white p-3 sm:p-4">
@@ -112,17 +134,45 @@ export default function ChargingHere({
         </a>
       </div>
 
+      {/* Not plugged in. The battery is standing still and the card says so
+          in words — an estimate that has quietly stopped moving is worse than
+          one that never started, because it still looks live. */}
+      {!session && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <p className="font-display text-2xl font-semibold tabular-nums text-ink-900">
+              {socLabel}
+            </p>
+            <p className="text-xs font-semibold text-amber-900">not charging</p>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-amber-900/90">
+            Nothing is being counted yet. Tell us when the cable is actually in
+            — waiting for a free stall, or a post that won&apos;t start, is time
+            the battery doesn&apos;t move.
+          </p>
+          {isDriver && (
+            <button
+              onClick={onPlugIn}
+              disabled={busy}
+              className="mt-2.5 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-3 text-sm font-semibold text-white transition-transform active:scale-[0.99] disabled:opacity-50"
+            >
+              <Plug className="h-4 w-4 shrink-0" />
+              I&apos;m plugged in now
+            </button>
+          )}
+        </div>
+      )}
+
+      {session && (
       <div className="mt-3 rounded-xl bg-brand-50/70 p-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3">
           <p className="font-display text-2xl font-semibold tabular-nums text-ink-900">
             {socLabel}
           </p>
-          {session && (
-            <p className="text-xs text-ink-500">
-              at {Math.round(session.power_kw)} kW, from{" "}
-              {Math.round(session.start_soc)}%
-            </p>
-          )}
+          <p className="text-xs text-ink-500">
+            at {Math.round(session.power_kw)} kW, from{" "}
+            {Math.round(session.start_soc)}%
+          </p>
         </div>
 
         {/* Where the two goals sit relative to the battery now. */}
@@ -133,24 +183,53 @@ export default function ChargingHere({
           />
           {min != null && <Tick at={pct(min, top)} tone="ink" />}
           {target != null && <Tick at={pct(target, top)} tone="brand" />}
+          {leaveAt != null && <Tick at={pct(leaveAt, top)} tone="brand" />}
         </div>
 
         <div className="mt-2.5 space-y-1.5">
           <Goal
             label={`Enough for ${nextName ?? "the next stop"}`}
             soc={min}
-            left={session?.to_min_min ?? null}
+            left={session.to_min_min ?? null}
             now={soc}
             tone="ink"
           />
           <Goal
             label="The plan leaves on"
             soc={target}
-            left={session?.to_target_min ?? null}
+            left={session.to_target_min ?? null}
+            now={soc}
+            tone="brand"
+          />
+          <Goal
+            label="You said"
+            soc={leaveAt}
+            left={session.to_leave_min ?? null}
             now={soc}
             tone="brand"
           />
         </div>
+
+
+        {/* Reached. Said in words rather than left to be read off the bar,
+            because this is the one thing on the card somebody is waiting for
+            and they are not looking at the screen while they wait. */}
+        {session.leave_ready && (
+          <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-brand-600 px-2.5 py-2 text-sm font-semibold text-white">
+            <Check className="h-4 w-4 shrink-0" />
+            You&apos;re at {Math.round(leaveAt ?? soc)}% — good to go
+          </p>
+        )}
+
+        {isDriver && (
+          <LeaveAt
+            soc={soc}
+            planTarget={target}
+            value={leaveAt}
+            busy={busy}
+            onPick={onLeaveAt}
+          />
+        )}
 
         <p className="mt-2 text-[11px] leading-relaxed text-ink-500">
           {min != null && target != null && target > min ? (
@@ -169,6 +248,7 @@ export default function ChargingHere({
           the screen is off. It&apos;s an estimate until you tell it otherwise.
         </p>
       </div>
+      )}
 
       {isDriver && (
         <ReadingControls
@@ -178,6 +258,84 @@ export default function ChargingHere({
           onLeave={onLeave}
         />
       )}
+    </div>
+  )
+}
+
+/** "Wake me at 80%."
+ *
+ *  Chips, not a stepper. This card already has one and its own note says why a
+ *  second would be wrong — two steppers is how a stop turns into a form — and
+ *  the decision is coarse anyway: nobody sits at a plug deciding to leave on
+ *  73%. One tap, and one tap to take it back.
+ *
+ *  Only offers figures ABOVE the battery now, because a target already passed
+ *  is not a target, and it would render as "good to go" the instant it was
+ *  set. The plan's own figure is offered too when it is not one of the round
+ *  numbers — it is the one target with a reason behind it, and making the
+ *  driver dial past it to reach 80 would be pretending it does not exist.
+ */
+function LeaveAt({
+  soc,
+  planTarget,
+  value,
+  busy,
+  onPick,
+}: {
+  soc: number
+  planTarget: number | null
+  value: number | null
+  busy: boolean
+  onPick: (soc: number | null) => void
+}) {
+  if (value != null) {
+    return (
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs text-ink-600">
+        <span className="min-w-0 truncate">
+          Charging to <strong className="text-ink-900">{Math.round(value)}%</strong>{" "}
+          because you asked
+        </span>
+        <button
+          onClick={() => onPick(null)}
+          disabled={busy}
+          aria-label="Drop that target and go back to the plan's"
+          className="-mr-2 inline-flex min-h-11 shrink-0 items-center gap-1 px-2 font-semibold text-ink-500 disabled:opacity-40"
+        >
+          <X className="h-3.5 w-3.5" />
+          Drop
+        </button>
+      </div>
+    )
+  }
+
+  const rounds = [70, 80, 90, 100].filter((v) => v > soc + 1)
+  const withPlan =
+    planTarget != null && planTarget > soc + 1 && !rounds.some((v) => Math.abs(v - planTarget) < 3)
+      ? [Math.round(planTarget), ...rounds]
+      : rounds
+  const options = withPlan.slice(0, 4)
+  if (options.length === 0) return null
+
+  return (
+    <div className="mt-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+        Or stay until
+      </p>
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {options.map((v) => (
+          <button
+            key={v}
+            onClick={() => onPick(v)}
+            disabled={busy}
+            // Real padding rather than an invisible hit area: these chips
+            // WRAP, and an expanded box would overlap the row above and hand
+            // the tap to a different percentage.
+            className="min-h-11 rounded-lg border border-ink-200 bg-white px-3 py-2.5 text-xs font-semibold text-ink-700 transition-colors hover:border-ink-300 disabled:opacity-40"
+          >
+            {v}%
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

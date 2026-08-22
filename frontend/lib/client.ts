@@ -371,6 +371,14 @@ export interface ChargingSession {
   /** Minutes from now to each, null once already past it. */
   to_min_min?: number | null
   to_target_min?: number | null
+  /** What the DRIVER said they want to leave on — a third target, because it
+   *  answers a third question. The floor is what the road needs, the plan's
+   *  figure is what is quickest, and this is "wake me at 80%". */
+  leave_at_soc?: number | null
+  to_leave_min?: number | null
+  /** Whether that target is reached. A field and not a comparison here, so the
+   *  card and the arrival time are priced off one answer. */
+  leave_ready?: boolean
 }
 
 export interface LiveState {
@@ -697,6 +705,31 @@ export async function getLiveRoute(tripId: string): Promise<LiveRoute> {
 export async function acceptStretch(runId: string): Promise<LiveState> {
   return unwrap<LiveState>(
     await apiFetch(`/api/runs/${runId}/stretch`, { method: "POST" })
+  )
+}
+
+/** "The cable is in", and "wake me at 80%".
+ *
+ *  Arriving at a charger no longer starts the charge — a car queueing for a
+ *  free stall is standing at the plug and not charging, and the projection
+ *  that assumed otherwise climbed through the whole wait. This is where the
+ *  claim is made.
+ *
+ *  Both fields are optional and OMITTED MEANS LEAVE ALONE, which is what stops
+ *  "I've plugged in" clearing a leave target set ten seconds before it. Pass
+ *  `null` for `leaveAtSoc` to clear one. */
+export async function setCharging(
+  runId: string,
+  opts: { pluggedIn?: boolean; leaveAtSoc?: number | null }
+): Promise<LiveState> {
+  const body: Record<string, unknown> = {}
+  if (opts.pluggedIn !== undefined) body.plugged_in = opts.pluggedIn
+  if ("leaveAtSoc" in opts) body.leave_at_soc = opts.leaveAtSoc
+  return unwrap<LiveState>(
+    await apiFetch(`/api/runs/${runId}/charging`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    })
   )
 }
 

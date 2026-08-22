@@ -38,6 +38,7 @@ from app.api.schemas import (
     ArriveRequest,
     BenchmarkOut,
     ChargingOut,
+    ChargingRequest,
     LiveOut,
     LiveRouteOut,
     LiveStateOut,
@@ -659,6 +660,8 @@ def _charging_out(
         return round(charge_minutes(veh, soc_now, to, kw, p.charge_power_factor), 1)
 
     floor = st.get("need_soc_next")
+    leave_at = st.get("leave_at_soc")
+    leave_at = None if leave_at is None else float(leave_at)
     return ChargingOut(
         since_min=round(
             max(0.0, _now_min(run) - float(st.get("charge_anchor_min", 0.0))), 1
@@ -669,7 +672,35 @@ def _charging_out(
         target_soc=None if target is None else round(target, 1),
         to_min_min=remaining(None if floor is None else float(floor)),
         to_target_min=remaining(target),
+        leave_at_soc=None if leave_at is None else round(leave_at, 1),
+        to_leave_min=remaining(leave_at),
+        # Reached, so the card can say "you can go" and mean it. `remaining`
+        # returns None both for "already past it" and for "nobody set one",
+        # which are opposite answers to the question the card is asking.
+        leave_ready=leave_at is not None and soc_now >= leave_at - 0.05,
     )
+
+
+def _leaving_in_min(charging: ChargingOut | None) -> float | None:
+    """Minutes until the car pulls out, or None when it is not plugged in.
+
+    The single place that decides WHICH target ends this stop, because two
+    surfaces read it and they must not disagree: the card counts down to it,
+    and the arrival time is priced off it. The driver's own figure wins when
+    they have set one — it is the most recent thing anybody said about when
+    this stop ends — then the plan's, then the floor. Zero rather than None
+    once a target is reached: the stop is over as far as the model is
+    concerned, and None here means something else entirely.
+    """
+    if charging is None:
+        return None
+    if charging.leave_at_soc is not None:
+        return charging.to_leave_min or 0.0
+    if charging.target_soc is not None:
+        return charging.to_target_min or 0.0
+    if charging.min_soc is not None:
+        return charging.to_min_min or 0.0
+    return 0.0
 
 
 def _log_charge_edges(
@@ -734,7 +765,18 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
     soc = _live_soc(run, trip, vehicle)
     timeline = _benchmark_timeline(run, trip)
 
-    delta = live.schedule_delta_min(timeline, st["offset_m"], st["at_min"])
+    # Before the delta, because at a plug the delta is a function of it: the
+    # arrival time used to sit frozen on the plan's own figure for the whole
+    # of a charge stop, however far the real battery was from what the plan
+    # assumed, and only started moving once the car OVERRAN the planned
+    # departure. See `live.schedule_delta_min`.
+    charging = _charging_out(run, trip, vehicle, soc)
+    delta = live.schedule_delta_min(
+        timeline,
+        st["offset_m"],
+        st["at_min"],
+        leaving_in_min=_leaving_in_min(charging),
+    )
     planned_soc = live.plan_soc_at(timeline, st["offset_m"]) if timeline else soc
     flag, reasons = live.needs_replan(
         delta_min=delta,
@@ -774,7 +816,7 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
         # business but the server's, and a read of this run belongs to watchers
         # too.
         can_undo_arrive=bool(st.get("arrive_undo")),
-        charging=_charging_out(run, trip, vehicle, soc),
+        charging=charging,
         next_stop_risk=(
             NextStopRiskOut(**st["next_stop_risk"])
             if st.get("next_stop_risk")
@@ -1220,21 +1262,25 @@ async def arrive(
     # The SITE's power, uncapped: `charge_forward` takes the car's own curve
     # from the other side, exactly as the ping path does.
     charge_kw = float(node.power_kw) if node and node.power_kw else None
+    # This button says "I'm plugged in here now", so it still anchors — it is
+    # the driver's own claim, which is the only thing that ever could. What
+    # stopped anchoring is the PING that merely finds the car stopped nearby.
+    plugged = (
+        live.plug_in(
+            new_st,
+            soc=live.current_soc(new_st, vehicle.usable_kwh),
+            at_min=at_min,
+            kw=charge_kw,
+        )
+        if charge_kw
+        else new_st
+    )
     run.state = {
         # Same transition as a ping's, declared by hand — and the same end of
         # the leg an accepted stretch belonged to.
-        **(_clear_first_leg_floor(new_st) if node else new_st),
+        **(_clear_first_leg_floor(plugged) if node else plugged),
         "at_charger_id": node.charger_id if node else None,
         "stale": False,
-        **(
-            {
-                "charge_anchor_soc": live.current_soc(new_st, vehicle.usable_kwh),
-                "charge_anchor_min": at_min,
-                "charge_kw": charge_kw,
-            }
-            if charge_kw
-            else {}
-        ),
         "need_soc_next": _soc_needed_next(
             run, trip, veh, params, float(new_st["offset_m"])
         ),
@@ -1272,6 +1318,104 @@ async def arrive(
         state=_state_out(run, trip, vehicle),
         matched_name=node.name if node else None,
     )
+
+
+@router.post("/runs/{run_id}/charging", response_model=LiveStateOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_PING, key_func=run_key)
+async def set_charging(
+    request: Request,
+    run_id: str,
+    body: ChargingRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LiveStateOut:
+    """"The cable is in", and "wake me at 80%".
+
+    Arriving at a charger used to BE plugging in: the first ping that found the
+    car stopped near a plug anchored the charge, and the battery started
+    climbing. That is wrong for the several minutes at the front of a real stop
+    — queueing for a free stall, walking over to read the screen, finding the
+    post dead and driving to the next one — and it is wrong silently, in the
+    optimistic direction, which is the direction that costs somebody a leg they
+    could not make. Standing at a charger and charging at it are now different
+    states, and only the driver can say which one this is.
+
+    The other half is "leave at 80%". The card had two targets and neither was
+    the driver's: the floor is what the road needs and the plan's figure is
+    what is quickest, and a person deciding to sit for another ten minutes
+    because the next hundred kilometres are through the Alps had nowhere to put
+    that. It is kept on the run, so the standing "Re-plan" button and the next
+    ping cannot quietly revert it, and it is dropped when the cable comes out
+    (`live.bank_charge`) because it was a decision about this stop.
+
+    Both fields are optional and ABSENT MEANS LEAVE ALONE, which is what stops
+    "I've plugged in" clearing a target set ten seconds earlier.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    fields = body.model_fields_set
+    st = dict(run.state)
+    prev_st = run.state
+    now = datetime.utcnow()
+    at_min = max((now - run.started_at).total_seconds() / 60.0, st["at_min"])
+
+    if "plugged_in" in fields and body.plugged_in is not None:
+        cid = st.get("at_charger_id")
+        if body.plugged_in:
+            if not cid:
+                # Refused rather than anchored at the car's current position:
+                # a charge projection needs a charger's power curve, and there
+                # is no honest kW for a stretch of motorway.
+                raise HTTPException(
+                    status_code=409,
+                    detail="We don't have you at a charger. Say where you are first.",
+                )
+            node = next(
+                (
+                    c
+                    for c in live.snapshot_chargers(run.route_snapshot)
+                    if c.charger_id == str(cid)
+                ),
+                None,
+            )
+            kw = float(node.power_kw) if node and node.power_kw else None
+            if not kw:
+                raise HTTPException(
+                    status_code=409,
+                    detail="We don't know what this charger delivers, so we can't estimate the charge.",
+                )
+            if st.get("charge_anchor_soc") is None:
+                # From the battery as it stands NOW, which after a wait in the
+                # queue is not what it was on arrival.
+                st = live.plug_in(
+                    st,
+                    soc=live.current_soc(st, vehicle.usable_kwh),
+                    at_min=at_min,
+                    kw=kw,
+                )
+        elif st.get("charge_anchor_soc") is not None:
+            # Unplugged and still standing here — done charging, having lunch.
+            # Banked at NOW, because the car has not moved and every one of
+            # those minutes was spent plugged in.
+            veh = VehicleParams.from_vehicle(vehicle)
+            params = _sim_params(
+                PlanRequest.model_validate(trip.request), st.get("run_factor", 1.0)
+            )
+            st = live.bank_charge(st, veh, params, at_min)
+
+    if "leave_at_soc" in fields:
+        if body.leave_at_soc is None:
+            st.pop("leave_at_soc", None)
+        else:
+            st["leave_at_soc"] = float(body.leave_at_soc)
+
+    run.state = st
+    run.last_seen_at = now
+    _log_charge_edges(db, run, prev_st, run.state, now, _live_soc(run, trip, vehicle))
+    await db.commit()
+    return _state_out(run, trip, vehicle)
 
 
 @router.post("/runs/{run_id}/arrive/undo", response_model=LiveStateOut)

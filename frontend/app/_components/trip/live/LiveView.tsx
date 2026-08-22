@@ -496,6 +496,41 @@ export default function LiveView({
     }
   }
 
+  /** "The cable is in."
+   *
+   *  Arriving stopped implying it: a car queueing for a free stall is standing
+   *  at the plug and not charging, and the projection that assumed otherwise
+   *  climbed through the whole wait. This is the only thing that ever knew. */
+  async function doPlugIn() {
+    try {
+      await live.setCharging({ pluggedIn: true })
+      toast.success("Charging from now. The estimate runs on the clock.")
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't start the charge"
+      )
+    }
+  }
+
+  /** "Wake me at 80%." Null hands the stop back to the plan's own figure. */
+  async function doLeaveAt(target: number | null) {
+    try {
+      const next = await live.setCharging({ leaveAtSoc: target })
+      const cost = next?.charging?.to_leave_min
+      toast.success(
+        target == null
+          ? "Back to the plan's figure."
+          : cost != null
+            ? `Staying for ${Math.round(target)}% — about ${fmtDuration(cost)} more.`
+            : `Staying for ${Math.round(target)}%.`
+      )
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't set that target"
+      )
+    }
+  }
+
   /** "I'm leaving on this much." Ends the stop, anchors the battery on the
    *  driver's own figure, and offers the re-plan — because the number they
    *  actually left on is exactly what the rest of the drive should be computed
@@ -684,6 +719,8 @@ export default function LiveView({
             busy={live.busy}
             onCorrect={(soc) => void doCorrect(soc)}
             onLeave={(soc) => void doLeave(soc)}
+            onPlugIn={() => void doPlugIn()}
+            onLeaveAt={(target) => void doLeaveAt(target)}
           />
         )}
 
@@ -695,6 +732,7 @@ export default function LiveView({
           <NextStopCard
             stop={focused}
             here={focused != null && focused.charger_id === atChargerId}
+            charging={state.charging != null}
             distM={distM}
             destLabel={trip.request.dest.label.split(",")[0]}
             vehicle={trip.result.vehicle}

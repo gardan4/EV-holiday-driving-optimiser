@@ -22,6 +22,7 @@ from app.services.live import (
     needs_replan,
     new_state,
     plan_soc_at,
+    plug_in,
     plan_window_at,
     rebase,
     reroute_due,
@@ -33,6 +34,24 @@ from tests.fixtures import BORN_58, flat_motorway, nl_to_austria_route
 
 SEGMENTS = flat_motorway(600, freeflow=125, country="DE")
 PARAMS = SimParams(autobahn_open_share=0.3)
+
+
+def _plug(state, *, offset_m, at_min, kw_site=150.0, charger_id="c", **kw):
+    """Pull in, then plug in — which are now two separate things.
+
+    `advance` used to anchor the charge on the first ping that found the car
+    stopped near a plug, so arriving WAS charging. It no longer does: a car
+    queueing for a free stall is standing at the charger and not charging, and
+    the projection that assumed otherwise climbed through the whole wait. Every
+    test below is about the charge MODEL rather than about how it starts, so
+    they take the two steps and go on asserting what they always did.
+    """
+    st = _ping(
+        state, offset_m=offset_m, at_min=at_min, moving_s=0.0,
+        stationary_s=kw.pop("stationary_s", 60.0),
+        stop_power_kw=kw_site, at_charger_id=charger_id, **kw,
+    )
+    return plug_in(st, soc=current_soc(st, 58.0), at_min=at_min, kw=kw_site)
 
 
 def _ping(state, *, offset_m, at_min, moving_s, stationary_s=0.0, **kw):
@@ -128,17 +147,16 @@ def _soc(st, at_min=None):
 class TestChargingInference:
     def test_parked_at_a_charger_the_battery_climbs(self):
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        st = _ping(
-            st, offset_m=100_000.0, at_min=80.0, moving_s=0.0, stationary_s=1200.0,
-            stop_power_kw=150.0, at_charger_id="chg-3",
+        st = _plug(
+            st, offset_m=100_000.0, at_min=80.0, stationary_s=1200.0,
+            charger_id="chg-3",
         )
         assert _soc(st, 100.0) > 15.0
         assert st["at_charger_id"] == "chg-3"
 
     def test_longer_plugged_in_means_more_charge(self):
         base = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        st = _ping(base, offset_m=100_000.0, at_min=70.0, moving_s=0.0,
-                   stationary_s=600.0, stop_power_kw=150.0, at_charger_id="c")
+        st = _plug(base, offset_m=100_000.0, at_min=70.0, stationary_s=600.0)
         assert _soc(st, 100.0) > _soc(st, 80.0)
 
     def test_the_charge_keeps_climbing_with_no_pings_at_all(self):
@@ -151,16 +169,14 @@ class TestChargingInference:
         exist for.
         """
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
-                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        st = _plug(st, offset_m=100_000.0, at_min=61.0)
         # Not one further ping — just time passing.
         assert _soc(st, 61.0) == pytest.approx(15.0, abs=0.5)
         assert _soc(st, 81.0) > _soc(st, 71.0) > _soc(st, 61.0)
 
     def test_driving_away_banks_the_charge_that_happened(self):
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
-                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        st = _plug(st, offset_m=100_000.0, at_min=61.0)
         at_plug = _soc(st, 91.0)
         gone = _ping(st, offset_m=110_000.0, at_min=96.0, moving_s=300.0)
         assert gone.get("charge_anchor_soc") is None
@@ -175,8 +191,7 @@ class TestChargingInference:
         with half an hour of charging it did on the autobahn.
         """
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        st = _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
-                   stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        st = _plug(st, offset_m=100_000.0, at_min=61.0)
         # Same wake-up time, same distance; one reports it drove the whole gap.
         drove = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=2400.0)
         dawdled = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=1200.0,
@@ -188,19 +203,68 @@ class TestChargingInference:
         which is what drivers actually observe."""
         cold = SimParams(autobahn_open_share=0.3, aux_kw=4.0)
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        plugged = _ping(st, offset_m=100_000.0, at_min=80.0, moving_s=0.0,
-                        stationary_s=1200.0, stop_power_kw=150.0,
-                        at_charger_id="c", p=cold)
+        plugged = _plug(st, offset_m=100_000.0, at_min=80.0,
+                        stationary_s=1200.0, p=cold)
         idle = _ping(st, offset_m=100_000.0, at_min=80.0, moving_s=0.0,
                      stationary_s=1200.0, p=cold)
         assert charging_soc(plugged, BORN_58, cold, 80.0) > current_soc(idle, 58.0)
 
 
+class TestPullingInIsNotPluggingIn:
+    """Arriving used to start the charge, and it is the wrong moment.
+
+    The first ping that found the car stopped beside a plug anchored the
+    projection, so the battery climbed through the queue for a free stall, the
+    walk to the screen, and the post that turned out to be dead. Wrong
+    silently, and upwards — the direction that costs somebody a leg they
+    thought they could make.
+    """
+
+    def _parked(self):
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        return _ping(
+            st, offset_m=100_000.0, at_min=61.0, moving_s=0.0, stationary_s=60.0,
+            stop_power_kw=150.0, at_charger_id="c",
+        )
+
+    def test_standing_at_a_charger_does_not_start_the_charge(self):
+        st = self._parked()
+        assert st["at_charger_id"] == "c"
+        assert st.get("charge_anchor_soc") is None
+        # Half an hour of waiting buys nothing, which is the whole point.
+        assert _soc(st, 91.0) == pytest.approx(15.0, abs=0.01)
+
+    def test_saying_the_cable_is_in_starts_it(self):
+        st = self._parked()
+        st = plug_in(st, soc=current_soc(st, 58.0), at_min=61.0, kw=150.0)
+        assert _soc(st, 91.0) > 15.0
+
+    def test_a_wait_before_plugging_in_is_not_charged_for(self):
+        """The queue is the reason this split exists: twenty minutes standing
+        there must leave the same battery as twenty minutes anywhere else."""
+        st = self._parked()
+        waited = plug_in(st, soc=current_soc(st, 58.0), at_min=81.0, kw=150.0)
+        straight = plug_in(st, soc=current_soc(st, 58.0), at_min=61.0, kw=150.0)
+        # Same wall-clock moment, twenty minutes of it spent queueing.
+        assert _soc(waited, 91.0) < _soc(straight, 91.0)
+
+    def test_a_drifting_fix_still_cannot_end_a_stop(self):
+        """The wider radius used to be keyed on the charge anchor, which no
+        longer exists for a car that has merely pulled in. Keyed on being AT
+        the charger now, or this change would have quietly reintroduced the
+        bug it was written for."""
+        st = self._parked()
+        drifted = _ping(
+            st, offset_m=100_000.0 + 300.0, at_min=63.0, moving_s=0.0,
+            stationary_s=120.0,
+        )
+        assert drifted["at_charger_id"] == "c"
+
+
 class TestLeavingACharger:
     def _plugged(self):
         st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
-        return _ping(st, offset_m=100_000.0, at_min=61.0, moving_s=0.0,
-                     stationary_s=60.0, stop_power_kw=150.0, at_charger_id="c")
+        return _plug(st, offset_m=100_000.0, at_min=61.0)
 
     def test_a_reading_at_the_plug_restarts_the_projection_from_it(self):
         st = self._plugged()
@@ -328,6 +392,46 @@ class TestAgainstThePlan:
         stop = plan.stops[0]
         lo, _ = plan_window_at(plan.timeline, stop.offset_m)
         assert schedule_delta_min(plan.timeline, stop.offset_m, lo - 9.0) == pytest.approx(-9.0)
+
+    def test_a_charge_running_long_shows_up_before_it_overruns(self):
+        """The bug the driver reported, at its root.
+
+        Standing at a plug read as "on time" for the whole window whatever the
+        battery said, so the arrival clock did not move until the car had
+        ALREADY overrun the planned departure — by which point the delay had
+        happened. Priced on the projected departure instead, a charge that is
+        going to take four minutes longer says so four minutes before it does.
+        """
+        plan = self._plan()
+        stop = plan.stops[0]
+        lo, hi = plan_window_at(plan.timeline, stop.offset_m)
+        mid = (lo + hi) / 2.0
+        # Still inside the window, so the old rule said 0.0 whatever happened.
+        assert schedule_delta_min(plan.timeline, stop.offset_m, mid) == 0.0
+        late = schedule_delta_min(
+            plan.timeline, stop.offset_m, mid, leaving_in_min=(hi - mid) + 4.0
+        )
+        assert late == pytest.approx(4.0)
+
+    def test_a_charge_going_to_plan_is_the_answer_it_always_was(self):
+        """The check that this is a generalisation and not a second rule: hand
+        it the minutes the plan itself allowed and it must still say zero."""
+        plan = self._plan()
+        stop = plan.stops[0]
+        lo, hi = plan_window_at(plan.timeline, stop.offset_m)
+        for t in (lo, (lo + hi) / 2.0, hi):
+            assert schedule_delta_min(
+                plan.timeline, stop.offset_m, t, leaving_in_min=hi - t
+            ) == pytest.approx(0.0, abs=1e-9)
+
+    def test_a_charge_finishing_early_reads_as_ahead(self):
+        plan = self._plan()
+        stop = plan.stops[0]
+        lo, hi = plan_window_at(plan.timeline, stop.offset_m)
+        mid = (lo + hi) / 2.0
+        assert schedule_delta_min(
+            plan.timeline, stop.offset_m, mid, leaving_in_min=(hi - mid) - 6.0
+        ) == pytest.approx(-6.0)
 
     def test_mid_leg_is_a_single_instant(self):
         plan = self._plan()
@@ -550,3 +654,30 @@ class TestInferenceAgainstThePlanItCameFrom:
         # ~1% is the honest bar: samples are minutes apart and the profile
         # lerps between segment boundaries.
         assert worst < 1.0
+
+
+class TestTheLeaveTargetIsAboutOneStop:
+    """"Wake me at 80%" is a decision about the coffee, the queue and the
+    mountains after THIS charger. Carrying it on would sit somebody through it
+    again four hours later."""
+
+    def _at_a_charger(self):
+        st = new_state(offset_m=100_000.0, soc=15.0, lat=50.0, lon=8.0, at_min=60.0)
+        return _ping(
+            st, offset_m=100_000.0, at_min=61.0, moving_s=0.0, stationary_s=60.0,
+            stop_power_kw=150.0, at_charger_id="c",
+        )
+
+    def test_driving_away_drops_it(self):
+        st = {**self._at_a_charger(), "leave_at_soc": 80.0}
+        st = plug_in(st, soc=current_soc(st, 58.0), at_min=61.0, kw=150.0)
+        gone = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=2400.0)
+        assert "leave_at_soc" not in gone
+
+    def test_it_is_dropped_even_if_the_cable_never_went_in(self):
+        """`bank_charge` is what drops it, and it returns early with no anchor
+        — so a target set at a plug that turned out to be dead used to ride
+        along to the next charger untouched."""
+        st = {**self._at_a_charger(), "leave_at_soc": 80.0}
+        gone = _ping(st, offset_m=140_000.0, at_min=101.0, moving_s=2400.0)
+        assert "leave_at_soc" not in gone

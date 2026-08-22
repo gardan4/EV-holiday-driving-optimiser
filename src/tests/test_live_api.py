@@ -2665,6 +2665,16 @@ class TestAStopEndsWhenTheDriverSaysSo:
             )
         ).json()
         assert st["at_charger_id"] == node.charger_id
+        # Pulling in is not plugging in any more, so the cable goes in by hand.
+        # What this class is about — a drifting fix must not end the stop — is
+        # unchanged by that, and the radius that protects it is now keyed on
+        # being AT the charger rather than on the anchor.
+        assert st["charging"] is None
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+            )
+        ).json()
         assert st["charging"] is not None
         return node, frac, st
 
@@ -2751,3 +2761,216 @@ class TestAStopEndsWhenTheDriverSaysSo:
         assert out["at_charger_id"] is None
         assert out["charging"] is None
         assert out["soc"] == pytest.approx(68.0, abs=0.05)
+
+
+class TestTheCableGoesInByHand:
+    """Arriving at a charger is not plugging into it.
+
+    The ping that found the car stopped beside a plug used to anchor the
+    charge, so the battery climbed through the queue for a free stall, the walk
+    to the screen, and the post that turned out to be dead. `POST /charging` is
+    where that claim is made now — by the only party that ever knew.
+    """
+
+    async def _at_a_charger(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = speed["stops"][0]
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        return trip, run, stop, st
+
+    async def test_a_ping_that_parks_at_a_charger_does_not_start_charging(
+        self, client
+    ):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        state = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        segments, nodes = nl_to_austria_route()
+        total = sum(x.dist_m for x in segments)
+        node = next(n for n in nodes if n.offset_m > state["offset_m"] + 30_000)
+        frac = node.offset_m / total
+        await client.post(
+            f"/api/runs/{run['run_id']}/ping", json={**along(frac), "moving_s": 1800.0}
+        )
+        st = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/ping",
+                json={**along(frac), "moving_s": 0.0, "stationary_s": 120.0},
+            )
+        ).json()
+        assert st["at_charger_id"] == node.charger_id, "still knows where it is"
+        assert st["charging"] is None, "and does not claim the cable is in"
+
+    async def test_saying_so_starts_it(self, client):
+        trip, run, stop, st = await self._at_a_charger(client)
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+            )
+        ).json()
+        assert out["charging"] is not None
+        assert out["charging"]["power_kw"] > 0
+
+    async def test_unplugging_while_still_parked_ends_it(self, client):
+        """Done charging, staying for lunch. The battery must stop climbing
+        without the car having to drive off for the app to notice."""
+        trip, run, stop, st = await self._at_a_charger(client)
+        await client.post(
+            f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+        )
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"plugged_in": False}
+            )
+        ).json()
+        assert out["charging"] is None
+        assert out["at_charger_id"] is not None, "still standing here"
+
+    async def test_it_refuses_when_we_do_not_have_you_at_a_charger(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        r = await client.post(
+            f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+        )
+        assert r.status_code == 409
+        assert "charger" in r.json()["detail"].lower()
+
+    async def test_a_leave_target_survives_plugging_in(self, client):
+        """Absent means leave alone. Two taps ten seconds apart must not
+        undo each other."""
+        trip, run, stop, st = await self._at_a_charger(client)
+        await client.post(
+            f"/api/runs/{run['run_id']}/charging", json={"leave_at_soc": 82.0}
+        )
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+            )
+        ).json()
+        assert out["charging"]["leave_at_soc"] == pytest.approx(82.0)
+        assert out["charging"]["to_leave_min"] > 0
+
+    async def test_an_explicit_null_clears_the_leave_target(self, client):
+        trip, run, stop, st = await self._at_a_charger(client)
+        await client.post(
+            f"/api/runs/{run['run_id']}/charging",
+            json={"plugged_in": True, "leave_at_soc": 82.0},
+        )
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"leave_at_soc": None}
+            )
+        ).json()
+        assert out["charging"]["leave_at_soc"] is None
+
+    async def test_the_target_does_not_follow_the_car_to_the_next_plug(self, client):
+        """It was a decision about this stop — about the coffee, the queue, the
+        mountains after it. Carrying it on would sit somebody through it again
+        four hours later."""
+        trip, run, stop, st = await self._at_a_charger(client)
+        await client.post(
+            f"/api/runs/{run['run_id']}/charging",
+            json={"plugged_in": True, "leave_at_soc": 82.0},
+        )
+        out = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc", json={"soc": 60.0, "leaving": True}
+            )
+        ).json()
+        assert out["charging"] is None
+        # And a later plug-in starts with no target of its own.
+        st2 = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/arrive",
+                json={"charger_id": stop["charger_id"]},
+            )
+        ).json()["state"]
+        assert st2["charging"] is None or st2["charging"]["leave_at_soc"] is None
+
+
+class TestTheArrivalTimeFollowsTheCharge:
+    """The other half of the same report: the arrival clock did not move when
+    the battery was corrected at a plug.
+
+    `ahead_behind_min` is what the drive screen adds to the plan's total, and
+    it read the SCHEDULE alone — where am I, and what time is it — so for the
+    whole of a charge stop it answered "on time" however far the real battery
+    was from what the plan assumed. Meanwhile the card directly above it, from
+    the same response, was correctly reporting the stop four minutes longer.
+    """
+
+    async def _plugged_in(self, client):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        speed = next(
+            s
+            for s in trip["result"]["speeds"]
+            if s["speed_kph"] == trip["result"]["optimum_speed"]
+        )
+        stop = speed["stops"][0]
+        await client.post(
+            f"/api/runs/{run['run_id']}/arrive",
+            json={"charger_id": stop["charger_id"]},
+        )
+        return trip, run, stop
+
+    async def test_a_lower_battery_at_the_plug_pushes_the_arrival_out(self, client):
+        trip, run, stop = await self._plugged_in(client)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc",
+                json={"soc": max(3.0, before["soc"] - 10.0)},
+            )
+        ).json()
+        assert after["ahead_behind_min"] > before["ahead_behind_min"] + 0.5
+        # …and by the same minutes the card is showing for the longer charge.
+        grew = after["charging"]["to_target_min"] - before["charging"]["to_target_min"]
+        assert after["ahead_behind_min"] - before["ahead_behind_min"] == pytest.approx(
+            grew, abs=0.2
+        )
+
+    async def test_a_higher_battery_pulls_it_back_in(self, client):
+        trip, run, stop = await self._plugged_in(client)
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/soc",
+                json={"soc": min(95.0, before["soc"] + 15.0)},
+            )
+        ).json()
+        assert after["ahead_behind_min"] < before["ahead_behind_min"] - 0.5
+
+    async def test_asking_to_leave_higher_costs_what_it_costs(self, client):
+        """A driver who sets 90% is choosing to stay longer, and the arrival
+        time has to say so — otherwise the choice is free on screen and paid
+        for on the road."""
+        trip, run, stop = await self._plugged_in(client)
+        before = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"plugged_in": True}
+            )
+        ).json()
+        after = (
+            await client.post(
+                f"/api/runs/{run['run_id']}/charging", json={"leave_at_soc": 90.0}
+            )
+        ).json()
+        assert after["charging"]["to_leave_min"] > (
+            before["charging"]["to_target_min"] or 0.0
+        )
+        assert after["ahead_behind_min"] > before["ahead_behind_min"] + 0.5

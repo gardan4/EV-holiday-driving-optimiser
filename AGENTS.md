@@ -719,6 +719,63 @@ the pipeline is green before infra exists. Infra deploy is manual
   and a live projection holds zero there, so the arrival reading would have
   been scored against half a picture. And **it is labelled an estimate**,
   because it assumes the cable is still in.
+- **Pulling in is not plugging in** (`live.plug_in`, `POST /runs/{id}/charging`).
+  The first ping that found the car stopped beside a plug used to ANCHOR the
+  charge, so arriving WAS charging — and the several minutes at the front of a
+  real stop are exactly the ones where that is false: the queue for a free
+  stall, the walk over to read the screen, the post that turns out to be dead.
+  The battery climbed through all of them, silently, and upwards, which is the
+  direction that costs somebody a leg they thought they could make. `advance`
+  still sets `at_charger_id` — the position is a thing it genuinely knows — and
+  no longer touches the anchor; the claim is made by the only party that ever
+  knew, and the card says in words that nothing is being counted until it is,
+  because a projection that has quietly stopped is worse than one that never
+  started. Four things come with it. **One function sets the anchor**
+  (`live.plug_in`), because `charging_soc` reads three keys together and an
+  anchor set three ways ends up meaning three things. **`/arrive` still
+  anchors**: that button says "I'm plugged in here now", which is the driver's
+  own claim — what stopped anchoring is the ping that merely finds the car
+  nearby. **The wider "has it left" radius moved off the anchor and onto
+  `at_charger_id`** (`LEFT_CHARGER_M`), or the change would have quietly
+  reintroduced the drifting-fix bug for every car that had pulled in and not
+  yet plugged in — that radius was always about STANDING there, and a car
+  waiting for a stall is as stationary as one charging. And **the countdown
+  goes with it**: `NextStopCard` takes `charging` separately from `here`, since
+  "~16 min plugged in" under a car that is not plugged in is the number a
+  driver walks away from the screen trusting.
+- **A third target, and it is the driver's own** (`ChargingOut.leave_at_soc`).
+  The stop card had two — the floor the road needs and the plan's own figure —
+  and neither is "I'll sit for another ten minutes, the next hundred kilometres
+  are through the Alps". Kept on the run (`run.state["leave_at_soc"]`) so the
+  standing "Re-plan" button and the next ping cannot quietly revert it, the
+  same rule the exclusions and the held speed follow, and DROPPED when the car
+  leaves — by `bank_charge` when the cable comes out, and by `advance` when it
+  never went in at all, because that early return is how a target set at a dead
+  post would have ridden along to the next charger. Absent, a number and an
+  explicit null are three different requests, separated by `model_fields_set`,
+  or "I've plugged in" would clear a target set ten seconds earlier. It is
+  CHIPS and not a stepper: this card's own note says why a second stepper would
+  be wrong, and nobody sits at a plug deciding to leave on 73%.
+- **The arrival time is priced on when the stop ENDS, not on what the clock
+  says** (`live.schedule_delta_min`'s `leaving_in_min`). `ahead_behind_min` is
+  what the drive screen adds to the plan's total, and it read the schedule
+  alone — where am I, what time is it — so `plan_window_at` answered "on time"
+  for the whole of a charge stop however far the real battery was from what the
+  plan assumed. A driver who plugged in eight points low was told by the card
+  in front of them that the stop had just grown by four minutes and looked up
+  at an arrival time that had not moved; it did not start moving until the car
+  had ALREADY overrun the planned departure, by which point the delay had
+  happened. Reported from the road. The projected departure is
+  `elapsed + leaving_in`, and it is late or early against `hi`. Three things.
+  It **degrades exactly to the old answer** when the charge is going to plan —
+  the projected departure is then `hi` and the delta is zero — which is the
+  check that it is a generalisation and not a second rule, and it is a test.
+  **`_leaving_in_min` is the one place that decides WHICH target ends the
+  stop** (the driver's, then the plan's, then the floor), because the card
+  counts down to it and the arrival time is priced off it, and two surfaces
+  answering that differently is the defect this whole entry is about.
+  And it costs nothing: no DP, no upstream, just the projection
+  `_charging_out` already computed, so it stays on the ping path.
 - **A stop ends when the driver says what they are leaving on**
   (`SocReadingRequest.leaving`). Absent it, the only way to end a charge was to
   drive far enough for a ping to notice, so the app followed a car onto the

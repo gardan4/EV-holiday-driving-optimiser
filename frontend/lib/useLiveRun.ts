@@ -22,6 +22,7 @@ import {
   RevisedPlan,
   ArriveResult,
   acceptStretch,
+  setCharging,
   arriveAt,
   finishRun,
   getAlternatives,
@@ -117,6 +118,11 @@ export interface LiveHandle {
    *  charge projection rather than restarting it, and takes the car off the
    *  charger. */
   submitSoc: (soc: number, leaving?: boolean) => Promise<LiveState | null>
+  /** "The cable is in", and "wake me at 80%". Omitted fields are left alone. */
+  setCharging: (opts: {
+    pluggedIn?: boolean
+    leaveAtSoc?: number | null
+  }) => Promise<LiveState | null>
   /** `exclude` are chargers the driver has turned down; the server keeps them.
    *  `minArrivalSoc` accepts arriving under the reserve on the leg being
    *  driven, to reach a charger further on. */
@@ -479,6 +485,21 @@ export function useLiveRun(
     }
   }, [runId])
 
+  const setChargingState = useCallback(
+    async (opts: { pluggedIn?: boolean; leaveAtSoc?: number | null }) => {
+      if (!runId) return null
+      setBusy(true)
+      try {
+        const st = await setCharging(runId, opts)
+        setState(st)
+        return st
+      } finally {
+        setBusy(false)
+      }
+    },
+    [runId]
+  )
+
   const keepStopAnyway = useCallback(async () => {
     if (!runId) return null
     setBusy(true)
@@ -610,6 +631,7 @@ export function useLiveRun(
     sharing,
     toggleSharing,
     submitSoc,
+    setCharging: setChargingState,
     requestReplan,
     findAlternatives,
     markArrived,

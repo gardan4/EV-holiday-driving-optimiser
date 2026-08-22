@@ -190,6 +190,35 @@ def charging_soc(
     return charge_forward(veh, float(anchor), minutes, kw, p.charge_power_factor)
 
 
+def plug_in(state: dict, *, soc: float, at_min: float, kw: float) -> dict:
+    """The cable went in. Anchor the projection here.
+
+    One function because three callers reach it — the driver tapping "I'm
+    plugged in", the same tap arriving as "I'm plugged in HERE now" with a
+    position attached, and the tests — and an anchor set three ways is an
+    anchor that ends up meaning three things. `charging_soc` reads all three
+    keys together; setting two of them is a charge with no clock.
+
+    Deliberately NOT called by `advance` any more. Being stopped beside a
+    charger is evidence about where the car is and none at all about whether
+    the cable is in, and the difference is the several minutes at the front of
+    a real stop: the queue for a free stall, the walk to the screen, the post
+    that turns out to be dead. Inferring it there meant the battery climbed
+    through all of them, silently and upwards, which is the direction that
+    costs somebody a leg they thought they could make.
+    """
+    return {
+        **state,
+        "charge_anchor_soc": float(soc),
+        "charge_anchor_min": float(at_min),
+        "charge_kw": float(kw),
+        # The projection is the model's, not the driver's — even when the
+        # figure it starts from was typed in, the moment it starts moving it
+        # is an estimate again.
+        "soc_is_measured": False,
+    }
+
+
 def bank_charge(
     state: dict, veh: VehicleParams, p: SimParams, until_min: float
 ) -> dict:
@@ -211,6 +240,10 @@ def bank_charge(
     anchor = out.pop("charge_anchor_soc", None)
     anchor_min = out.pop("charge_anchor_min", None)
     kw = out.pop("charge_kw", None)
+    # "Leave at 80%" is about the stop being left, exactly like the accepted
+    # first-leg floor: carrying it to the next plug would sit a driver through
+    # somebody else's decision four hours later.
+    out.pop("leave_at_soc", None)
     if anchor is None:
         return out
     # `anchor_min is None`, not `or` — the anchor minute is a POSITION on the
@@ -478,36 +511,49 @@ def advance(
     # still wins when there is one — moving from one plug to another is a real
     # thing to do, and it is the position that knows.
     held = state.get("at_charger_id")
-    still = dx < (
-        LEFT_CHARGER_M if state.get("charge_anchor_soc") is not None else AT_CHARGER_M
-    )
+    # Keyed on being AT the charger rather than on the cable being in, because
+    # standing here and charging here stopped being the same thing — a car
+    # waiting for a free stall is just as stationary as one plugged into it,
+    # and it is the standing that this radius is about.
+    still = dx < (LEFT_CHARGER_M if held is not None else AT_CHARGER_M)
     here = at_charger_id if at_charger_id is not None else (held if still else None)
     parked = here is not None and still
     # Power for the site we are actually at: this fix's when it matched one,
     # otherwise the power the session was anchored with.
     kw = stop_power_kw if at_charger_id is not None else state.get("charge_kw")
-    if parked and kw:
-        # Plugged in. The charge is not integrated here — see `charging_soc`:
-        # a ping-driven integral stops the moment the phone sleeps, which is
-        # the whole of the time this matters. What happens instead is that the
-        # first ping at a charger ANCHORS the charge, and the clock does the
-        # rest.
-        if out.get("charge_anchor_soc") is None:
-            out["charge_anchor_soc"] = current_soc(out, veh.usable_kwh)
-            out["charge_anchor_min"] = at_min
-            out["charge_kw"] = kw
+    if parked:
+        # Standing at a charger. Whether the CABLE IS IN is a different
+        # question and this cannot answer it — arriving used to imply it, so
+        # the battery started climbing while the driver was still queueing for
+        # a free stall, walking to the building, or finding the post dead. The
+        # projection now waits to be told (`POST /runs/{id}/charging`), which
+        # is the only source that ever actually knew.
         out["at_charger_id"] = here
-        # No aux draw: at a DC charger the cabin is served by the charger, not
-        # the pack, which is what drivers actually observe.
-        out["soc_is_measured"] = False
+        if out.get("charge_anchor_soc") is not None:
+            # Already plugged in. The charge is not integrated here — see
+            # `charging_soc`: a ping-driven integral stops the moment the phone
+            # sleeps, which is the whole of the time this matters. The anchor
+            # plus the clock does it instead.
+            if kw:
+                out["charge_kw"] = kw
+            # No aux draw: at a DC charger the cabin is served by the charger,
+            # not the pack, which is what drivers actually observe.
+            out["soc_is_measured"] = False
         return out
 
-    if not parked and out.get("charge_anchor_soc") is not None:
-        # Driving away. Charging stopped when the car pulled out, and the
-        # minutes this ping spent MOVING are the ones it cannot have been
-        # plugged in for — a phone that only wakes up on the motorway would
-        # otherwise bank the whole gap as charge.
-        out = bank_charge(out, veh, p, at_min - dt_move_h * 60.0)
+    if not parked:
+        if out.get("charge_anchor_soc") is not None:
+            # Driving away. Charging stopped when the car pulled out, and the
+            # minutes this ping spent MOVING are the ones it cannot have been
+            # plugged in for — a phone that only wakes up on the motorway would
+            # otherwise bank the whole gap as charge.
+            out = bank_charge(out, veh, p, at_min - dt_move_h * 60.0)
+        else:
+            # `bank_charge` drops the leave target too, and it returns early
+            # when there is no anchor — so a target set at a plug the driver
+            # then never used would have ridden along to the next one and sat
+            # somebody through a decision they made about a different stop.
+            out.pop("leave_at_soc", None)
 
     out["at_charger_id"] = here if parked else None
 
@@ -670,10 +716,37 @@ def plan_soc_at(timeline: list, offset_m: float) -> float:
     return best
 
 
-def schedule_delta_min(timeline: list, offset_m: float, elapsed_min: float) -> float:
+def schedule_delta_min(
+    timeline: list,
+    offset_m: float,
+    elapsed_min: float,
+    *,
+    leaving_in_min: float | None = None,
+) -> float:
     """Minutes behind the plan; negative is ahead. Zero while inside the
-    window a stop occupies."""
+    window a stop occupies.
+
+    `leaving_in_min` is what makes this true AT A PLUG, and without it the
+    arrival time was blind to the one number that decides how long a charge
+    stop takes. The window a stop occupies is [lo, hi] — planned arrival to
+    planned departure — and inside it this answered "on schedule" whatever the
+    battery said. So a driver who plugged in eight points below plan, was told
+    by the card in front of them that the stop had just grown by four minutes,
+    and looked up at an arrival time that had not moved: two numbers on one
+    screen, derived from different things, and only one of them answering the
+    question. It did not start moving until the car OVERRAN the planned
+    departure, by which time the delay had already happened.
+
+    Given the minutes still to go on the charge, the stop is priced on when it
+    will END rather than on what the clock says now: `elapsed + leaving_in` is
+    the projected departure, and it is late or early against `hi`. Note this
+    degrades exactly to the old answer when the charge is going to plan — the
+    projected departure is then `hi` and the delta is zero — which is the check
+    that it is a generalisation and not a different rule.
+    """
     lo, hi = plan_window_at(timeline, offset_m)
+    if leaving_in_min is not None:
+        return (elapsed_min + max(0.0, leaving_in_min)) - hi
     if lo - 1e-9 <= elapsed_min <= hi + 1e-9:
         return 0.0
     return elapsed_min - hi if elapsed_min > hi else elapsed_min - lo
