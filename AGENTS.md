@@ -726,6 +726,39 @@ the pipeline is green before infra exists. Infra deploy is manual
   offset comes from the PLAN's stop when it has one, not the snapshot node —
   the two axes differ by a few hundred metres over a long route, and landing
   anywhere else leaves the car "0 km away" and still not there.
+- **A phone that wakes up resumes the drive by itself** (`useLiveRun.resume`).
+  Everything on the drive screen stands on two things — a fix from the phone
+  and the state from the server — and a backgrounded page loses both: the GPS
+  watch is suspended and can come back dead, with no fixes and no error to say
+  so, and the interval that posts is throttled to nothing. Unlocking the phone
+  therefore left the numbers exactly where they froze, and the only ways out
+  were to type a battery reading (which takes a fix of its own) and reload the
+  page (which builds a new watch). Reported from the road in those words, and
+  neither is a step anybody should have to know. Waking now does all three by
+  itself — re-arm the watch, take the server's truth, put a fresh fix up — off
+  every event a wake produces, because no single one is reliable across
+  browsers (`pageshow` for a page out of the back/forward cache,
+  `visibilitychange` for an unlock, `focus` for a tab, `online` for a tunnel),
+  de-duplicated on the clock rather than by trusting one of them. Watchers
+  resume too: their poll is an interval, and an interval in a frozen tab is
+  exactly as stopped as a GPS watch. Three things hold it up. **A fix older
+  than `FIX_MAX_AGE_MS` is never posted** — the accumulator still holds the
+  last one the dead watch saw, and sending it reports the car where it stood
+  twenty minutes ago, which reads as live and is frozen; one is fetched
+  instead, and when none can be had the drive says nothing rather than
+  something false, which leaves the server's own "no update from the driving
+  phone" clock telling the truth. That check runs on the ordinary cadence as
+  well, so a watch that dies mid-drive heals without any wake at all. **The
+  quiet window is billed, not dropped**: gaps over `QUIET_AFTER_S` used to be
+  discarded as implausible, so the road driven while the screen was off cost
+  nothing and handed back a battery that never paid for it — they are kept
+  aside and attributed from the ground the car turns out to have covered
+  (moved, so it was driving; did not, so it was standing), capped at an hour,
+  which is the same treatment `/arrive` gives the gap it charges as driving.
+  **And whatever the server has already priced is dropped** (`settleWindow`):
+  `/soc`, `/replan`, `/arrive` and `/reroute` all resync from a fix of their
+  own, so the window this device was accumulating has been billed once, and
+  the next ping must not charge those minutes twice.
 - **A stop ends when the car MOVES or the driver says so — never because a fix
   stopped matching** (`live.advance`, `LEFT_CHARGER_M`). `parked` was decided
   from what `nearest_charger` matched on the CURRENT ping, so a fix drifting

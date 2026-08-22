@@ -51,6 +51,29 @@ const REROUTE_COOLDOWN_MS = 5 * 60_000
 /** Below this, the car is standing still — its time is billed to the heater,
  *  not to aerodynamic drag. */
 const MOVING_KPH = 4
+/** A fix older than this is history rather than "where the car is now".
+ *
+ *  It is the whole difference between a drive that comes back on its own and
+ *  one that needs a reload: a suspended GPS watch leaves the last fix it saw
+ *  sitting in the accumulator, and posting that says the car is still where it
+ *  stood before the phone went to sleep — which looks live and is frozen. */
+const FIX_MAX_AGE_MS = 60_000
+/** A fix-to-fix gap longer than this is not slow driving that went unmeasured,
+ *  it is a phone that stopped reporting. */
+const QUIET_AFTER_S = 300
+/** …and at most an hour of one is ever billed, the same cap `/arrive` puts on
+ *  the window it charges as driving. A phone left on overnight must not wake
+ *  up and bill the night. */
+const QUIET_BILL_MAX_S = 3600
+/** How far the car has to have moved across a quiet window for it to have been
+ *  driving, rather than standing somewhere with the screen off. */
+const QUIET_MOVED_M = 500
+/** Waking a phone fires several of these events at once — `pageshow`,
+ *  `visibilitychange`, `focus` — and one resume between them is enough. Ten
+ *  seconds also keeps a driver flicking between this and their nav app inside
+ *  the server's 12 pings a minute, which the fixed cadence already spends a
+ *  fifth of. */
+const RESUME_EVERY_MS = 10_000
 
 export function tokenKey(tripId: string) {
   return `evtrip:run:${tripId}`
@@ -165,16 +188,31 @@ export interface LiveHandle {
 /** One fix, quickly or not at all. A driver standing at a charger should not
  *  watch a spinner while the phone hunts for satellites — the button has a
  *  charger id to fall back on. */
-function currentPosition(): Promise<{ lat: number; lon: number }> {
+function currentPosition({
+  maxAgeMs = 30_000,
+  timeoutMs = 6000,
+}: { maxAgeMs?: number; timeoutMs?: number } = {}): Promise<{
+  lat: number
+  lon: number
+  /** Carried so a coarse fix goes up AS a coarse one: the server declines to
+   *  move the car for a vague position, and the fix a phone gives the moment
+   *  it wakes is regularly the network's guess rather than the satellites'. */
+  accuracy?: number
+}> {
   return new Promise((resolve, reject) => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       reject(new Error("no geolocation"))
       return
     }
     navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      (p) =>
+        resolve({
+          lat: p.coords.latitude,
+          lon: p.coords.longitude,
+          accuracy: p.coords.accuracy,
+        }),
       reject,
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30_000 }
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: maxAgeMs }
     )
   })
 }
@@ -197,6 +235,10 @@ export function useLiveRun(
   const [sharing, setSharing] = useState(true)
   const [route, setRoute] = useState<LiveRoute | null>(null)
   const [rerouting, setRerouting] = useState(false)
+  // Bumped to rebuild the GPS watch — see the watch effect. A suspended watch
+  // that never delivers again is indistinguishable, from here, from a car that
+  // has stopped moving.
+  const [watchGen, setWatchGen] = useState(0)
   // Whichever road the car is on. Projecting a fix onto the trip's original
   // polyline after a re-route reports it as permanently off-route on a road it
   // is driving perfectly.
@@ -213,17 +255,43 @@ export function useLiveRun(
   // the wrong toggle state.
   useEffect(() => setSharing(readSharing(tripId)), [tripId])
 
+  // Whichever road the fixes are snapped to, reachable from a callback that is
+  // not rebuilt when it changes: `absorbFix` runs from the GPS watch and from
+  // the one-shot taken on waking, and neither should re-subscribe merely
+  // because a re-route replaced the polyline.
+  const routeIndexRef = useRef<RouteIndex | null>(null)
+  useEffect(() => {
+    routeIndexRef.current = routeIndex
+  }, [routeIndex])
+
   // Kinematics accumulated between posts. Kept in a ref: these update on every
   // GPS fix and must not re-render anything.
   const acc = useRef({
     movingS: 0,
     stationaryS: 0,
+    /** Wall-clock seconds the phone reported nothing for. Which of them were
+     *  spent driving is decided when the fix goes up, from the ground the car
+     *  turns out to have covered. */
+    quietS: 0,
     lastFixAt: 0,
     lat: 0,
     lon: 0,
     accuracy: undefined as number | undefined,
     have: false,
+    /** Where the last fix snapped to, and where the last one the server
+     *  accepted did. The difference between them is what says whether a quiet
+     *  window was driven through. Null off the route, where there is no honest
+     *  answer to either. */
+    offsetM: null as number | null,
+    sentOffsetM: null as number | null,
   })
+  /** One post at a time. Waking fires the resume and the interval close
+   *  together, and asking for a fix can take seconds — two overlapping posts
+   *  would split one window's drag between them. */
+  const posting = useRef(false)
+  /** Location refused outright. There is no point asking again every 25
+   *  seconds, and the watch has already said so on screen. */
+  const denied = useRef(false)
   const finished = run?.status === "finished"
 
   useEffect(() => {
@@ -232,6 +300,140 @@ export function useLiveRun(
 
   const isDriver = runId !== null && !finished
   const broadcasting = isDriver && sharing
+
+  /** Fold one fix into the accumulator, wherever it came from.
+   *
+   *  One place computes the kinematics, because there are two sources now: the
+   *  GPS watch, and the one-shot fix taken when the page comes back. Two copies
+   *  would each measure their window from their own last fix and bill the same
+   *  minutes twice.
+   *
+   *  A gap longer than `QUIET_AFTER_S` is not slow driving that went
+   *  unmeasured — it is a phone that stopped reporting — and it used to be
+   *  dropped outright. That hands back a battery which never paid for the road
+   *  driven while the screen was off, so it is kept aside instead and
+   *  attributed when the fix goes up.
+   */
+  const absorbFix = useCallback(
+    (lat: number, lon: number, accuracy?: number, speedMps?: number | null) => {
+      const a = acc.current
+      const idx = routeIndexRef.current
+      const now = Date.now()
+      const dt = a.have ? (now - a.lastFixAt) / 1000 : 0
+      const proj = idx ? project(idx, lat, lon) : null
+      // Prefer the device's own speed; fall back to distance over time.
+      let kph = speedMps != null ? speedMps * 3.6 : 0
+      if (speedMps == null && idx && proj && a.have && dt > 0) {
+        const prev = project(idx, a.lat, a.lon)
+        kph = (Math.abs(proj.offsetM - prev.offsetM) / 1000) * (3600 / dt)
+      }
+      if (dt > 0 && dt < QUIET_AFTER_S) {
+        if (kph >= MOVING_KPH) a.movingS += dt
+        else a.stationaryS += dt
+      } else if (dt >= QUIET_AFTER_S) {
+        a.quietS += dt
+      }
+      a.lastFixAt = now
+      a.lat = lat
+      a.lon = lon
+      a.accuracy = accuracy
+      a.have = true
+
+      const onRoute = proj !== null && proj.offRouteM <= 500
+      a.offsetM = onRoute ? proj!.offsetM : null
+      setLocalOffsetM(onRoute ? proj!.offsetM : null)
+    },
+    []
+  )
+
+  /** The server has just been handed a position of its own and priced the gap
+   *  itself — `/soc`, `/replan` and `/arrive` all resync — so the window this
+   *  device was accumulating has been billed once already. Drop it, or the next
+   *  ping charges the same minutes a second time. */
+  const settleWindow = useCallback(
+    (
+      here?: { lat: number; lon: number; accuracy?: number } | null,
+      sameRoad = true
+    ) => {
+      const a = acc.current
+      if (here) absorbFix(here.lat, here.lon, here.accuracy)
+      a.movingS = 0
+      a.stationaryS = 0
+      a.quietS = 0
+      // `offset_m` is measured along whichever road the drive is on, so after a
+      // re-route the two ends of that subtraction sit on different axes. There
+      // is nothing to compare until a fix lands on the new one.
+      a.offsetM = sameRoad ? a.offsetM : null
+      a.sentOffsetM = sameRoad ? a.offsetM : null
+    },
+    [absorbFix]
+  )
+
+  /** Put the car's position up, with the window it took to get there.
+   *
+   *  It insists on a RECENT fix, and takes one itself when the watch has not
+   *  produced any. A watch suspended while the phone slept leaves the last fix
+   *  it saw sitting in the accumulator, and posting that reports the car where
+   *  it stood twenty minutes ago: the drive then reads as live and is frozen,
+   *  which is the state that used to need a reload to escape.
+   */
+  const postFix = useCallback(async () => {
+    if (!runId || posting.current) return
+    posting.current = true
+    try {
+      const a = acc.current
+      const stale = () => !a.have || Date.now() - a.lastFixAt > FIX_MAX_AGE_MS
+      if (stale() && !denied.current) {
+        const here = await currentPosition({
+          maxAgeMs: 5_000,
+          timeoutMs: 12_000,
+        }).catch(() => null)
+        if (here) absorbFix(here.lat, here.lon, here.accuracy)
+      }
+      // Still nothing current: say nothing rather than something false. The
+      // server's own "no update from the driving phone" clock is then telling
+      // the truth, which a stale position would have hidden.
+      if (stale()) return
+
+      const movingS = a.movingS
+      const stationaryS = a.stationaryS
+      const quietS = Math.min(a.quietS, QUIET_BILL_MAX_S)
+      // How the quiet window was spent, decided by the ground covered across
+      // it: a car that moved was driving, a car that did not was standing
+      // somewhere with the screen off. The server then prices those minutes
+      // exactly as it prices the ones `/arrive` hands it.
+      const moved =
+        a.offsetM !== null && a.sentOffsetM !== null
+          ? a.offsetM - a.sentOffsetM
+          : 0
+      const drove = quietS > 0 && moved > QUIET_MOVED_M
+      a.movingS = 0
+      a.stationaryS = 0
+      a.quietS = 0
+      try {
+        const st = await pingRun(runId, {
+          lat: a.lat,
+          lon: a.lon,
+          moving_s: Math.min(movingS + (drove ? quietS : 0), 3600),
+          stationary_s: Math.min(stationaryS + (drove ? 0 : quietS), 3600),
+          accuracy_m: a.accuracy,
+        })
+        a.sentOffsetM = a.offsetM ?? a.sentOffsetM
+        setState(st)
+        // This phone has just reported, so "no update from the driving phone"
+        // must stop counting from whenever the page happened to load.
+        setRun((r) => (r ? { ...r, seconds_since_ping: 0 } : r))
+      } catch {
+        // Put the time back so a dropped ping doesn't lose the drag it stood
+        // for — the next one bills the whole window.
+        a.movingS += movingS
+        a.stationaryS += stationaryS
+        a.quietS += quietS
+      }
+    } finally {
+      posting.current = false
+    }
+  }, [runId, absorbFix])
 
   // --- watcher: poll the read-only view -----------------------------------
   useEffect(() => {
@@ -256,6 +458,11 @@ export function useLiveRun(
   }, [tripId, isDriver, finished])
 
   // --- driver: watch GPS ---------------------------------------------------
+  //
+  // `watchGen` is what allows the watch to be re-armed. A watch suspended while
+  // the phone slept can come back dead — no fixes, no error, nothing on the
+  // page to say so — and the position simply stops moving. That is why
+  // reloading was the only way back, and re-subscribing on waking is the fix.
   useEffect(() => {
     if (!broadcasting || !routeIndex) return
     if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -265,33 +472,19 @@ export function useLiveRun(
 
     const id = navigator.geolocation.watchPosition(
       (pos) => {
+        denied.current = false
         setGpsError(null)
-        const now = Date.now()
-        const a = acc.current
-        const dt = a.have ? (now - a.lastFixAt) / 1000 : 0
-        // Prefer the device's own speed; fall back to distance over time.
-        let kph = pos.coords.speed != null ? pos.coords.speed * 3.6 : 0
-        if (pos.coords.speed == null && a.have && dt > 0) {
-          const p = project(routeIndex, pos.coords.latitude, pos.coords.longitude)
-          const prev = project(routeIndex, a.lat, a.lon)
-          kph = (Math.abs(p.offsetM - prev.offsetM) / 1000) * (3600 / dt)
-        }
-        if (dt > 0 && dt < 300) {
-          if (kph >= MOVING_KPH) a.movingS += dt
-          else a.stationaryS += dt
-        }
-        a.lastFixAt = now
-        a.lat = pos.coords.latitude
-        a.lon = pos.coords.longitude
-        a.accuracy = pos.coords.accuracy
-        a.have = true
-
-        const proj = project(routeIndex, pos.coords.latitude, pos.coords.longitude)
-        setLocalOffsetM(proj.offRouteM > 500 ? null : proj.offsetM)
+        absorbFix(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          pos.coords.accuracy,
+          pos.coords.speed
+        )
       },
       (err) => {
+        denied.current = err.code === err.PERMISSION_DENIED
         setGpsError(
-          err.code === err.PERMISSION_DENIED
+          denied.current
             ? "Location is blocked. Allow it to follow the drive automatically."
             : "Can't get a location fix right now."
         )
@@ -299,52 +492,70 @@ export function useLiveRun(
       { enableHighAccuracy: true, maximumAge: 5_000, timeout: 20_000 }
     )
     return () => navigator.geolocation.clearWatch(id)
-  }, [broadcasting, routeIndex])
+  }, [broadcasting, routeIndex, watchGen, absorbFix])
 
   // --- driver: post a fix on a fixed cadence -------------------------------
   useEffect(() => {
     if (!broadcasting || !runId) return
-    let alive = true
-    const send = async () => {
-      const a = acc.current
-      if (!a.have) return
-      const movingS = a.movingS
-      const stationaryS = a.stationaryS
-      a.movingS = 0
-      a.stationaryS = 0
-      try {
-        const st = await pingRun(runId, {
-          lat: a.lat,
-          lon: a.lon,
-          moving_s: Math.min(movingS, 3600),
-          stationary_s: Math.min(stationaryS, 3600),
-          accuracy_m: a.accuracy,
-        })
-        if (alive) setState(st)
-      } catch {
-        // Put the time back so a dropped ping doesn't lose the drag it stood
-        // for — the next one bills the whole window.
-        a.movingS += movingS
-        a.stationaryS += stationaryS
-      }
+    const h = setInterval(() => void postFix(), PING_EVERY_MS)
+    return () => clearInterval(h)
+  }, [broadcasting, runId, postFix])
+
+  /** Come back from a phone that was asleep, in one go.
+   *
+   *  Everything on this screen stands on two things — a fix from the phone and
+   *  the state from the server — and a backgrounded page loses both: the GPS
+   *  watch is suspended and may not restart, and the interval that posts is
+   *  throttled to nothing. So unlocking the phone left the drive frozen until
+   *  the driver typed a battery reading (which takes a fix of its own) and
+   *  reloaded the page (which builds a new watch). Reported from the road in
+   *  those words, and neither of those steps is a thing anybody should have to
+   *  know.
+   *
+   *  Waking therefore does all three by itself: re-arm the watch, take the
+   *  server's truth, and put a fresh fix up. It is fired by every event a wake
+   *  produces, because no single one of them is reliable across browsers —
+   *  `pageshow` for a page restored from the back/forward cache,
+   *  `visibilitychange` for an unlock, `focus` for a tab, `online` for a
+   *  tunnel — and de-duplicated on the clock rather than by trusting one.
+   *
+   *  Watchers resume too. Their poll is an interval, and an interval in a
+   *  frozen tab is exactly as stopped as a GPS watch.
+   */
+  const lastResumeAt = useRef(0)
+  const resume = useCallback(async () => {
+    if (finished) return
+    const now = Date.now()
+    if (now - lastResumeAt.current < RESUME_EVERY_MS) return
+    lastResumeAt.current = now
+    setWatchGen((g) => g + 1)
+    try {
+      const r = await getLiveRun(tripId)
+      setRun(r)
+      setState(r.state)
+    } catch {
+      /* offline; the fix below, or the next beat, carries it */
     }
-    const h = setInterval(send, PING_EVERY_MS)
-    // …and the moment the page is looked at again. A phone that was locked
-    // has been reporting nothing, so the first thing the driver sees on
-    // unlocking is a position from before the gap — and the interval would
-    // make them watch it for another 25 seconds. `watchPosition` resumes on
-    // its own, so by the time this fires there is usually a fresh fix; when
-    // there is not, `send` bails on `a.have` and the interval covers it.
+    if (broadcasting) await postFix()
+  }, [tripId, finished, broadcasting, postFix])
+
+  useEffect(() => {
+    if (finished) return
     const onVisible = () => {
-      if (document.visibilityState === "visible") void send()
+      if (document.visibilityState === "visible") void resume()
     }
+    const onWake = () => void resume()
     document.addEventListener("visibilitychange", onVisible)
+    window.addEventListener("focus", onVisible)
+    window.addEventListener("pageshow", onWake)
+    window.addEventListener("online", onWake)
     return () => {
-      alive = false
-      clearInterval(h)
       document.removeEventListener("visibilitychange", onVisible)
+      window.removeEventListener("focus", onVisible)
+      window.removeEventListener("pageshow", onWake)
+      window.removeEventListener("online", onWake)
     }
-  }, [broadcasting, runId])
+  }, [resume, finished])
 
   // Keep the screen awake — a locked phone suspends `watchPosition` and the
   // drive silently stops being followed.
@@ -390,13 +601,14 @@ export function useLiveRun(
         const here = await currentPosition().catch(() => null)
         const st = await recordSoc(runId, soc, here, leaving)
         setState(st)
+        settleWindow(here)
         setLocalOffsetM(null)
         return st
       } finally {
         setBusy(false)
       }
     },
-    [runId]
+    [runId, settleWindow]
   )
 
   const requestReplan = useCallback(
@@ -426,12 +638,13 @@ export function useLiveRun(
           here
         )
         setRun((r) => (r ? { ...r, plan } : r))
+        settleWindow(here)
         return plan
       } finally {
         setBusy(false)
       }
     },
-    [runId]
+    [runId, settleWindow]
   )
 
   const findAlternatives = useCallback(
@@ -459,6 +672,7 @@ export function useLiveRun(
         const here = await currentPosition().catch(() => null)
         const res = await arriveAt(runId, chargerId, here)
         setState(res.state)
+        settleWindow(here)
         // The car has moved; the locally snapped offset is from before the
         // jump and would drag the scene back until the next fix.
         setLocalOffsetM(null)
@@ -467,7 +681,7 @@ export function useLiveRun(
         setBusy(false)
       }
     },
-    [runId]
+    [runId, settleWindow]
   )
 
   const undoArrive = useCallback(async () => {
@@ -539,6 +753,7 @@ export function useLiveRun(
         setState(out.state)
         setRoute(out.route)
         setRun((r) => (r ? { ...r, plan: out.plan, route_version: out.route.version } : r))
+        settleWindow(here, false)
         // The snapped offset is against the OLD polyline. Dropping it hands
         // the screen back to the server's position until the next fix lands on
         // the new road.
@@ -548,7 +763,7 @@ export function useLiveRun(
         setRerouting(false)
       }
     },
-    [runId]
+    [runId, settleWindow]
   )
 
   // The road, once it stops being the trip's own. Fetched on the version
