@@ -40,6 +40,7 @@ PLAN_FAILURE_REASONS = frozenset(
         "no_route",          # ORS can't drive between these two points
         "no_chargers",       # no feasible plan at any speed
         "route_too_short",   # …but on a hop with no room to put a stop in
+        "networks_excluded",  # …and it was the driver's own network exclusions
         "corridor_cold",     # charger tiles still being gathered — retryable
         # Us
         "not_configured",    # ORS/OCM key missing

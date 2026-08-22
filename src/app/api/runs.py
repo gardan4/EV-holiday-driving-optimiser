@@ -62,7 +62,7 @@ from app.core.rate_limit import limiter, run_key
 from app.models import Trip, TripEvent, TripRun, Vehicle
 from app.services import amenities
 from app.services import chargers as chargers_svc
-from app.services import live, routing
+from app.services import live, networks, routing
 from app.services.geo import haversine_m, polyline_encode
 from app.services.simulator import (
     RouteProfile,
@@ -486,10 +486,26 @@ def _planned_next_stop_id(run: TripRun, trip: Trip, st: dict) -> str | None:
     return ahead[0] if ahead else None
 
 
-def _remaining_slice(snapshot: dict, offset_m: float, exclude: set[str]):
-    chargers = [
-        c for c in live.snapshot_chargers(snapshot) if c.charger_id not in exclude
-    ]
+def _remaining_slice(
+    snapshot: dict, offset_m: float, exclude: set[str], *, networks_off: list[str]
+):
+    """The road still ahead and the chargers a plan may stop at on it.
+
+    The single choke point for every DP the live path runs — replan, reroute
+    and each pass of the alternatives panel — which is why the network
+    exclusions are applied HERE and why the argument is keyword-only and
+    required. A new caller that forgets it is a TypeError; a new caller that
+    forgets an optional one silently offers a driver the brand they ruled out,
+    and nothing on the screen would say why.
+
+    The snapshot itself keeps every charger. Excluding a network is about where
+    the plan sends you, not about what the app can recognise: `nearest_charger`
+    and "I'm plugged in here now" still have to know a site whatever its badge.
+    """
+    chargers = networks.usable(
+        [c for c in live.snapshot_chargers(snapshot) if c.charger_id not in exclude],
+        networks_off,
+    )
     return slice_route(live.snapshot_segments(snapshot), chargers, offset_m)
 
 
@@ -1350,7 +1366,9 @@ async def _plan_remaining(
     pressed. It used to be one copy inside `replan`, which is the shape that
     drifts the moment a second caller appears.
     """
-    sl = _remaining_slice(snapshot, st["offset_m"], excluded)
+    sl = _remaining_slice(
+        snapshot, st["offset_m"], excluded, networks_off=plan_req.exclude_networks
+    )
     if not sl.segments:
         raise HTTPException(status_code=409, detail="You're already there.")
 
@@ -1891,7 +1909,9 @@ async def alternatives(
         return min(best.stops, key=lambda s: abs(s.offset_m - target_offset))
 
     async def _next_best(exclude: set[str], p: SimParams):
-        sl = _remaining_slice(snapshot, st["offset_m"], exclude)
+        sl = _remaining_slice(
+            snapshot, st["offset_m"], exclude, networks_off=plan_req.exclude_networks
+        )
         if not sl.segments:
             return None
         results = await asyncio.to_thread(sweep_slice, sl, veh, [speed], p)
@@ -1963,7 +1983,9 @@ async def alternatives(
         ) + float(node.detour_min or 0.0)
 
         # …and the rest, re-optimised from that stop exactly as a swap would be.
-        tail = _remaining_slice(snapshot, stop_at, already)
+        tail = _remaining_slice(
+            snapshot, stop_at, already, networks_off=plan_req.exclude_networks
+        )
         tail_min = 0.0
         if tail.segments:
             tail_p = replace(

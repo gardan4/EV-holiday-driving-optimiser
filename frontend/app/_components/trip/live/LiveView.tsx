@@ -302,7 +302,17 @@ export default function LiveView({
         setAltsAtM(distM)
       }
       if (found && found.alternatives.length === 0) {
-        toast.message("Nothing else on this stretch reaches the destination.")
+        // Say WHY it is empty when we know. "Nothing else on this stretch" is
+        // an absence claim, and it stops being true the moment the driver has
+        // ruled a network out: there may be plenty out there, all of it wearing
+        // a badge they told us to skip. That is a sentence they can act on and
+        // the other one is not.
+        const off = trip.request.exclude_networks ?? []
+        toast.message(
+          off.length > 0
+            ? "Nothing else on this stretch reaches the destination — except the networks you're avoiding."
+            : "Nothing else on this stretch reaches the destination."
+        )
       }
     } catch (err) {
       toast.error(

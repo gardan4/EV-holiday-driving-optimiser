@@ -31,7 +31,7 @@ from app.core.rate_limit import limiter
 from app.core.visitor import request_client_id, request_owner_hash, request_visitor
 from app.models import AppEvent, Profile, Trip, TripEvent, TripRun, TripStat, Vehicle
 from app.services import chargers as chargers_svc
-from app.services import routing
+from app.services import networks, routing
 from app.services.geo import polyline_encode
 from app.services.simulator import (
     aux_kw_for_temp,
@@ -264,7 +264,12 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
             f"That route is {route.total_dist_m / 1000:.0f} km. This plans "
             f"trips up to {MAX_ROUTE_M / 1000:.0f} km.",
         )
-    charger_nodes = await chargers_svc.chargers_for_route(db, route)
+    corridor = await chargers_svc.chargers_for_route(db, route)
+    # Networks the driver has ruled out. Filtered HERE, on the DP's candidates,
+    # and deliberately not inside `chargers_for_route` — the tile cache is
+    # shared between everyone planning the same corridor, and a per-request
+    # preference has no business narrowing what lands in it.
+    charger_nodes = networks.usable(corridor, plan.exclude_networks)
 
     veh = VehicleParams.from_vehicle(vehicle)
     params = sim_params_for(plan)
@@ -311,6 +316,21 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
                 f"works starting from {plan.depart_soc:.0f}%. On a hop this short "
                 "there is no room to charge on the way, so you would need to set "
                 "off with more.",
+            )
+        # An exclusion the driver made themselves is the one cause of failure
+        # they can undo in a second, so it is named and counted apart from the
+        # charging gaps below. Only when it actually bit: the same route may
+        # well have been impossible anyway, and blaming a preference for a
+        # charging desert would send people to turn a toggle off that was
+        # never the problem.
+        if plan.exclude_networks and len(charger_nodes) < len(corridor):
+            names = ", ".join(networks.labels(plan.exclude_networks))
+            raise PlanError(
+                "networks_excluded",
+                422,
+                f"No feasible plan at any speed while avoiding {names}. "
+                "The chargers left on this route are too far apart for this "
+                "car at this starting charge.",
             )
         # Same reason either way (both are a charging gap, and splitting them
         # would split the number that measures it), but not the same sentence:

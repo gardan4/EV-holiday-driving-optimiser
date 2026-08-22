@@ -25,7 +25,7 @@ every visit, so the record has to exist regardless of how small the project is.
 | Purpose | Compute a cruise speed and charging plan, and keep it available at its share link |
 | Legal basis | Art 6(1)(b), necessary to provide the service the visitor asked for |
 | Data subjects | Anyone who plans a trip |
-| Categories | Exact origin and destination coordinates and the place names typed, departure time, vehicle choice, state of charge settings, the computed route and plan |
+| Categories | Exact origin and destination coordinates and the place names typed, departure time, vehicle choice, state of charge settings, driving and charging preferences (including which charging networks to avoid), the computed route and plan |
 | Table | `trips` (`request` and `result` JSON) |
 | Retention | 24 months from creation, enforced by `scripts/purge_old_trips.py` on `main._purge_loop` |
 | Recipients | OpenRouteService (routing and reverse geocoding), OpenChargeMap (charger search), Microsoft Azure (hosting), Cloudflare (edge) |

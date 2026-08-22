@@ -331,6 +331,45 @@ the pipeline is green before infra exists. Infra deploy is manual
   `PlanRequest` is classified as reaching the simulator directly, reaching it
   transformed, or not being a simulator setting — because that decision being
   implicit is what the bug was.
+- **A driver can rule out a charging NETWORK, and that changes the plan and
+  not what the app can see** (`services/networks.py`). "Not Ionity" is an
+  ordinary sentence and the plan had no way to hear it: the reasons are real
+  and none of them is in the data — a subscription that halves the price at one
+  network, a card that has never once worked at another, a bad night at a site
+  still on the corridor, a company somebody would rather not pay. The DP
+  optimises minutes, so it proposed the same stop for ever, and the only lever
+  was to reject that ONE charger and be handed the next one from the same
+  network twenty kilometres later. Six things hold it up. **The route snapshot
+  keeps every charger** — only the DP's candidates are filtered, because
+  `live.nearest_charger` and "I'm plugged in here now" have to recognise a site
+  whatever its badge, and a driver who takes the only free stall in town has
+  not stopped being at a charger; exactly the split that "arriving anywhere is
+  noticed" already draws. **`_remaining_slice` is the choke point and its
+  `networks_off` argument is keyword-only and REQUIRED**, so a new DP caller on
+  the live path is a TypeError rather than a silent offer of the brand the
+  driver ruled out. **A slug, never free text**: `NETWORKS` is closed and the
+  request is validated against it — this body is stored whole into
+  `Trip.request` from an unauthenticated endpoint — and an unknown slug is
+  REFUSED rather than dropped, because silently ignoring a network somebody
+  asked to avoid routes them straight to it with nothing on screen to explain
+  why. **The operator AND the name, which is the opposite call from
+  `amenities`**: that module reads the name and refuses the operator, because
+  "Shell Recharge" is a network that puts posts in car parks; here the question
+  IS the network, so the operator is authoritative and the name is needed
+  because OCM's operator is missing on a large minority of sites while the
+  title says "Tesla Supercharger Geiselwind" in plain sight. **No needle that
+  is a word in a language** — `mer` is a real network and the French for sea,
+  `total` is a common noun, `bp` is two letters — because a filter that quietly
+  drops the chargers on a French coastal corridor is worse than one that has
+  never heard of Mer, and nothing on the screen would say so. And **failing
+  because of it is its own reason** (`networks_excluded`), named in the message
+  and counted apart from the charging gaps, but only when the exclusion
+  actually bit: blaming a preference for a charging desert sends people to turn
+  off a toggle that was never the problem. The list is served from
+  `GET /api/networks` rather than copied into the browser, same rule as the
+  dashboard reading the modelled country caps from the server — a copy would go
+  on offering a network the matcher had renamed, and the toggle would do
+  nothing with no error anywhere.
 - **A stop can be wrong for reasons the model cannot see, so the driver can
   turn one down — ANY of them** (`runs.alternatives`). The DP optimises minutes, and the
   quickest charger on a corridor is regularly a lay-by behind a warehouse with

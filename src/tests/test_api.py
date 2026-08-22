@@ -12,6 +12,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models import Vehicle
 from app.services.geo import RouteGeometry
+from app.services.networks import network_of
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode
 from tests.fixtures import nl_to_austria_route
@@ -267,6 +268,150 @@ class TestPlanTrip:
             "/api/trips", json=plan_body(vid, depart_soc=20.0, target_soc=50.0)
         )
         assert resp.status_code == 422
+
+
+class TestExcludingNetworks:
+    """"Not Ionity" is an ordinary sentence and the plan had no way to hear it.
+
+    The corridor fixture names its chargers "Ionity kmNNN", "Fastned kmNNN" and
+    "Raststätte kmNNN", which is exactly the mix a real motorway gives: two
+    identifiable networks and a third of the sites carrying no brand at all.
+    """
+
+    async def test_the_catalog_is_served_rather_than_hardcoded(self, client):
+        resp = await client.get("/api/networks")
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        assert {"slug", "label"} <= set(rows[0])
+        assert "ionity" in {r["slug"] for r in rows}
+        # Changes on deploy only, like the vehicle catalog.
+        assert "max-age" in (resp.headers.get("cache-control") or "")
+
+    async def test_an_excluded_network_is_not_in_the_plan(self, client):
+        vid = await vehicle_id(client)
+        plain = await client.post("/api/trips", json=plan_body(vid))
+        assert plain.status_code == 200, plain.text
+        # Whichever network this corridor's optimum actually uses — asserting
+        # about a hardcoded one only tests the fixture. The Born is a 120 kW
+        # car, so the DP has no use for the 300 kW sites and the answer is not
+        # the one you would guess.
+        target = _a_used_network(plain.json())
+        assert target, _stop_names(plain.json())
+
+        resp = await client.post(
+            "/api/trips", json=plan_body(vid, exclude_networks=[target])
+        )
+        assert resp.status_code == 200, resp.text
+        after = _stop_names(resp.json())
+        assert after, "excluding one network must not empty the plan"
+        assert target not in _networks_used(resp.json()), after
+
+    async def test_it_applies_to_every_speed_and_not_just_the_optimum(self, client):
+        """The sweep is the product: a reader who dials the speed down gets a
+        different itinerary, and it has to honour the same exclusion."""
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips", json=plan_body(vid, exclude_networks=["fastned"])
+        )
+        assert resp.status_code == 200, resp.text
+        for speed in resp.json()["result"]["speeds"]:
+            for stop in speed["stops"]:
+                assert network_of(stop.get("operator"), stop["name"]) != "fastned", (
+                    speed["speed_kph"],
+                    stop["name"],
+                )
+
+    async def test_an_unknown_network_is_refused_not_ignored(self, client):
+        """Silently dropping a network somebody asked to avoid is the one
+        failure this feature cannot have: they would be routed straight to it
+        and never told why."""
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips", json=plan_body(vid, exclude_networks=["ionity", "shell"])
+        )
+        assert resp.status_code == 422
+        assert "shell" in resp.text
+
+    async def test_the_stored_request_does_not_depend_on_list_order(self, client):
+        """`Trip.request` is what a re-plan replays and what gets counted, so
+        the same intention has to store the same row."""
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips",
+            json=plan_body(vid, exclude_networks=["tesla", "ionity", "ionity"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["request"]["exclude_networks"] == ["ionity", "tesla"]
+
+    async def test_omitting_it_plans_exactly_as_before(self, client):
+        """Old permalinks replan to the same answer — the field defaults to
+        empty and `usable` returns the list untouched."""
+        vid = await vehicle_id(client)
+        a = await client.post("/api/trips", json=plan_body(vid))
+        b = await client.post("/api/trips", json=plan_body(vid, exclude_networks=[]))
+        assert a.json()["result"]["optimum_speed"] == b.json()["result"]["optimum_speed"]
+        assert _stop_names(a.json()) == _stop_names(b.json())
+
+    async def test_ruling_out_too_much_says_so_and_names_them(self, client):
+        """A preference the driver set themselves is the one cause of failure
+        they can undo in a second, so it is named rather than reported as a
+        charging desert."""
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips",
+            json=plan_body(
+                vid,
+                depart_soc=40.0,
+                target_soc=30.0,
+                exclude_networks=["ionity", "fastned"],
+            ),
+        )
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert "IONITY" in detail and "Fastned" in detail, detail
+
+    async def test_a_route_that_was_impossible_anyway_is_not_blamed_on_them(
+        self, client
+    ):
+        """Excluding a network the corridor never had must not turn an ordinary
+        charging gap into "it's your toggles" — that sends people to switch off
+        something that was never the problem."""
+        vid = await vehicle_id(client)
+        resp = await client.post(
+            "/api/trips",
+            json=plan_body(
+                vid, depart_soc=12.0, target_soc=10.0, exclude_networks=["evgo"]
+            ),
+        )
+        assert resp.status_code == 422, resp.text
+        assert "EVgo" not in resp.json()["detail"]
+
+
+def _optimum(trip: dict) -> dict:
+    return next(
+        s
+        for s in trip["result"]["speeds"]
+        if s["speed_kph"] == trip["result"]["optimum_speed"]
+    )
+
+
+def _stop_names(trip: dict) -> list[str]:
+    return [s["name"] for s in _optimum(trip)["stops"]]
+
+
+def _networks_used(trip: dict) -> set[str]:
+    return {
+        n
+        for n in (
+            network_of(s.get("operator"), s["name"]) for s in _optimum(trip)["stops"]
+        )
+        if n
+    }
+
+
+def _a_used_network(trip: dict) -> str | None:
+    used = _networks_used(trip)
+    return sorted(used)[0] if used else None
 
 
 class TestTripNotFound:

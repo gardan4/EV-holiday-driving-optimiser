@@ -9,6 +9,7 @@ import { freeflowFactorFor } from "@/lib/driving"
 import { auxKwForTemp, consumptionFactorForTemp, describeTemp } from "@/lib/weather"
 import { describePayload, extraWhPerKm, payloadExtraKg } from "@/lib/payload"
 import { listFieldNames, NumberField, revealField, useNumberFieldValidity } from "./fields"
+import NetworkPicker from "./NetworkPicker"
 
 /**
  * Everything the answer rests on, in one place: what we assume about the car,
@@ -283,6 +284,12 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                     ? "breaks are covered by time already spent at chargers"
                     : "no breaks modelled"
                 }
+              />
+            </div>
+            <div className="col-span-2">
+              <NetworkPicker
+                value={r.exclude_networks ?? []}
+                onChange={(slugs) => set("exclude_networks", slugs)}
               />
             </div>
           </div>

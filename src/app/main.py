@@ -337,10 +337,20 @@ def create_app() -> FastAPI:
     # API routers: web/all only. The worker (PROCESS_ROLE=worker) serves only /
     # and /health below, so health probes pass without exposing the API surface.
     if _serves_api():
-        from app.api import events, feedback, geocode, runs, trips, users, vehicles
+        from app.api import (
+            events,
+            feedback,
+            geocode,
+            networks,
+            runs,
+            trips,
+            users,
+            vehicles,
+        )
 
         app.include_router(vehicles.router, prefix="/api/vehicles", tags=["vehicles"])
         app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
+        app.include_router(networks.router, prefix="/api/networks", tags=["networks"])
         app.include_router(trips.router, prefix="/api/trips", tags=["trips"])
         app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
         app.include_router(events.router, prefix="/api/events", tags=["events"])

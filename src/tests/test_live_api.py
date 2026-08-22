@@ -27,6 +27,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models import TripEvent, TripRun, Vehicle
 from app.services.geo import RouteGeometry
+from app.services.networks import network_of
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode, SimParams
 from tests.fixtures import nl_to_austria_route
@@ -1801,6 +1802,92 @@ class TestTurningDownAStop:
         assert resp.status_code == 404
 
 
+class TestExcludingNetworks:
+    """The drive has to honour the exclusions its plan was made with.
+
+    `TestPlanParity` cannot see this one. `exclude_networks` is correctly
+    classified as NOT a simulator setting — it narrows the candidate chargers,
+    which `SimParams` knows nothing about — so the guard that catches a
+    planning field missing from the live path does not apply, and the failure
+    would be silent in exactly the same way: both halves run, the drive just
+    sends the driver to the brand they ruled out.
+    """
+
+    async def test_the_drive_honours_them_too(self, client):
+        trip = await make_trip(client, exclude_networks=["fastned"])
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+        plan = await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        assert plan.status_code == 200, plan.text
+        stops = plan.json()["remaining"]["stops"]
+        assert stops, "excluding one network must not empty the plan"
+        assert all(
+            network_of(s.get("operator"), s["name"]) != "fastned" for s in stops
+        ), [s["name"] for s in stops]
+
+    async def test_the_alternatives_panel_does_not_offer_them_back(self, client):
+        """"Somewhere else to charge" ranks by minutes, and the quickest other
+        charger on a corridor is regularly the network the driver just ruled
+        out — handing it back is the feature undoing itself."""
+        trip = await make_trip(client, exclude_networks=["fastned"])
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+        resp = await client.post(f"/api/runs/{run['run_id']}/alternatives", json={})
+        assert resp.status_code == 200, resp.text
+        for alt in resp.json()["alternatives"]:
+            assert network_of(alt.get("operator"), alt["name"]) != "fastned", alt["name"]
+
+    async def test_a_reroute_honours_them(self, client, live_router, db_session):
+        trip = await make_trip(client, exclude_networks=["fastned"])
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+
+        out = await client.post(
+            f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD
+        )
+        assert out.status_code == 200, out.text
+        stops = out.json()["plan"]["remaining"]["stops"]
+        assert all(
+            network_of(s.get("operator"), s["name"]) != "fastned" for s in stops
+        ), [s["name"] for s in stops]
+
+    async def test_stopping_at_an_excluded_one_anyway_is_still_recognised(
+        self, client, db_session
+    ):
+        """Excluding a network changes where the plan SENDS you, never what the
+        app can SEE. The only free stall in town is still a charger, and a
+        snapshot filtered down to the permitted brands would put the driver
+        back in the hole "arriving anywhere is noticed" was dug out of: parked
+        and plugged in, with the screen counting down to somewhere else.
+        """
+        trip = await make_trip(client, exclude_networks=["fastned"])
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+
+        stored = (await db_session.execute(select(TripRun))).scalars().all()[-1]
+        excluded = [
+            c
+            for c in stored.route_snapshot["chargers"]
+            if network_of(c.get("operator"), c["name"]) == "fastned"
+        ]
+        assert excluded, "the snapshot must keep the whole corridor"
+
+        ahead = next(
+            c for c in excluded if c["offset_m"] > run["state"]["offset_m"] + 20_000
+        )
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/arrive",
+            json={"lat": ahead["lat"], "lon": ahead["lon"]},
+        )
+        assert resp.status_code == 200, resp.text
+        at = resp.json()["state"]["at_charger"]
+        assert at is not None and at["charger_id"] == ahead["charger_id"]
+        # …and it is correctly reported as somewhere the plan never chose.
+        assert at["planned"] is False
+
+
 class TestPlanParity:
     """A drive must be simulated under the assumptions its plan was made with.
 
@@ -1847,6 +1934,14 @@ class TestPlanParity:
 
     # Not simulator settings: they choose the route, the car, or which speeds
     # to sweep, none of which a `SimParams` carries.
+    #
+    # `exclude_networks` is the one that needs reading twice. It is not a
+    # simulator setting — it narrows the CANDIDATE CHARGERS handed to the DP,
+    # which `SimParams` knows nothing about — but it absolutely does have to
+    # reach the drive, and this test cannot see whether it did. That is what
+    # `TestExcludingNetworks::test_the_drive_honours_them_too` is for. Anything
+    # else landing here that a drive has to honour needs its own guard the same
+    # way; "not a SimParams field" is not the same as "the drive can ignore it".
     NOT_SIM = {
         "origin",
         "dest",
@@ -1855,6 +1950,7 @@ class TestPlanParity:
         "speed_min",
         "speed_max",
         "speed_step",
+        "exclude_networks",
     }
 
     # Every direct field, set to something that is NOT the simulator's own

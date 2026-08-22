@@ -44,6 +44,16 @@ export interface PlacePoint {
   lon: number
 }
 
+/** A charging network a plan can be told to avoid.
+ *
+ *  Fetched rather than hardcoded: the list the toggles are drawn from and the
+ *  list the server matches on have to be one list, or a renamed slug leaves a
+ *  toggle that does nothing and reports nothing. */
+export interface Network {
+  slug: string
+  label: string
+}
+
 export interface PlanRequest {
   origin: PlacePoint
   dest: PlacePoint
@@ -81,6 +91,11 @@ export interface PlanRequest {
   occupants?: number
   /** Luggage in the boot. Defaults to 30 kg. */
   luggage_kg?: number
+  /** Charging networks the plan may not stop at — slugs from
+   *  `GET /api/networks`. The server rejects anything else rather than
+   *  ignoring it: silently dropping a network somebody asked to avoid would
+   *  route them straight to it with nothing on screen to explain why. */
+  exclude_networks?: string[]
 }
 
 export interface Stop {
@@ -161,6 +176,10 @@ async function unwrap<T>(res: Response): Promise<T> {
 
 export async function getVehicles(): Promise<Vehicle[]> {
   return unwrap<Vehicle[]>(await apiFetch("/api/vehicles"))
+}
+
+export async function getNetworks(): Promise<Network[]> {
+  return unwrap<Network[]>(await apiFetch("/api/networks"))
 }
 
 export async function geocode(q: string): Promise<GeocodeHit[]> {

@@ -19,6 +19,7 @@ import {
 } from "./fields"
 import DepartureField from "./DepartureField"
 import GeocodeInput from "./GeocodeInput"
+import NetworkPicker from "./NetworkPicker"
 import VehiclePicker from "./VehiclePicker"
 import { useTrips } from "../trips/TripsContext"
 
@@ -48,6 +49,7 @@ export default function TripForm() {
   const [price, setPrice] = useState(0.59)
   const [occupants, setOccupants] = useState(2)
   const [luggageKg, setLuggageKg] = useState(30)
+  const [excludeNetworks, setExcludeNetworks] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   // A half-typed or emptied box must not be silently replaced by a default —
   // it blocks the submit and shows red until it holds a real number.
@@ -131,6 +133,7 @@ export default function TripForm() {
         price_per_kwh: price,
         occupants,
         luggage_kg: luggageKg,
+        exclude_networks: excludeNetworks,
       })
       track("trip_planned")
       // The badge on the header button, kept honest without a fetch. Under a
@@ -476,6 +479,11 @@ export default function TripForm() {
               explain="What you pay at a public fast charger, about €0.59 on most European networks without a subscription. Priced at the plug, so it already includes charging losses."
             />
           </div>
+
+          {/* Below the price, because it is the same question asked the other
+              way round: what a stop costs, and whose stops you are willing to
+              make. */}
+          <NetworkPicker value={excludeNetworks} onChange={setExcludeNetworks} />
         </div>
       </details>
 

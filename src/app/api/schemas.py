@@ -3,9 +3,11 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.services.amenities import food_hint as _food_hint
+from app.services.networks import MAX_EXCLUDED as NETWORK_MAX_EXCLUDED
+from app.services.networks import SLUGS as NETWORK_SLUGS
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +68,13 @@ class PlacePoint(BaseModel):
     lon: float = Field(ge=-180.0, le=180.0)
 
 
+class NetworkOut(BaseModel):
+    """One charging network the planner can be told to avoid."""
+
+    slug: str
+    label: str
+
+
 class PlanRequest(BaseModel):
     origin: PlacePoint
     dest: PlacePoint
@@ -122,6 +131,31 @@ class PlanRequest(BaseModel):
     # purpose: they are fitted for a season, not for the afternoon's weather,
     # so a mild day on winter rubber still pays for them.
     winter_tyres: bool = False
+    # Charging networks the plan may not stop at. Slugs from
+    # `services/networks.NETWORKS` and nothing else — this body is stored whole
+    # into `Trip.request` from an unauthenticated endpoint, so free text here
+    # would be free storage, and a breakdown of "which networks do people
+    # avoid" built on typed strings would have as many answers as spellings.
+    #
+    # It filters the DP's candidates and never the route snapshot: a driver who
+    # takes the only free stall in town has not stopped being at a charger
+    # because they excluded that brand. See the module note.
+    exclude_networks: list[str] = Field(
+        default_factory=list, max_length=NETWORK_MAX_EXCLUDED
+    )
+
+    @field_validator("exclude_networks")
+    @classmethod
+    def _known_networks(cls, v: list[str]) -> list[str]:
+        # Rejected, not dropped. Silently ignoring a network somebody asked to
+        # avoid is the one failure mode this feature cannot have — they would
+        # be routed to it and never told why.
+        unknown = [s for s in v if s not in NETWORK_SLUGS]
+        if unknown:
+            raise ValueError(f"Unknown charging network: {', '.join(sorted(unknown))}")
+        # Order and repeats carry no meaning, and the stored row should not
+        # depend on how a client happened to build the list.
+        return sorted(set(v))
 
 
 class StopOut(BaseModel):
