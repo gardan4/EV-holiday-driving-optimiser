@@ -272,10 +272,10 @@ class TestChargerNodeTrimming:
         """`sorted(by -power)[:60]` kept only the 350 kW belt and left the rest
         of the route empty, which surfaced as "no feasible plan at any speed"
         on every long trip."""
-        from app.services.chargers import _trim_nodes
+        from app.services.chargers import _trim_nodes, dedupe_locations
 
         total_m = 4_000_000.0
-        kept = _trim_nodes(self._nodes(), total_m)
+        kept = _trim_nodes(dedupe_locations(self._nodes()), total_m)
 
         assert kept == sorted(kept, key=lambda n: n.offset_m), "route order preserved"
         # The half of the route beyond the cluster must still be reachable.
@@ -287,7 +287,7 @@ class TestChargerNodeTrimming:
         assert widest < 200_000, f"{widest / 1000:.0f} km gap between candidates"
 
     def test_short_route_is_left_alone(self):
-        from app.services.chargers import _trim_nodes
+        from app.services.chargers import _trim_nodes, dedupe_locations
 
         nodes = self._nodes()[:30]
-        assert _trim_nodes(nodes, 500_000.0) == nodes
+        assert _trim_nodes(dedupe_locations(nodes), 500_000.0) == nodes

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models import Charger, OcmTile
-from app.services import quota
+from app.services import networks, quota
 from app.services.geo import country_at, geohash_bbox, geohash_encode
 from app.services.routing import RouteData
 from app.services.simulator import ChargerNode
@@ -173,13 +173,23 @@ def stop_window(total_m: float) -> tuple[float, float]:
     end = total_m - min(END_MARGIN_M, total_m * END_FRACTION)
     return start, end
 DEDUP_RADIUS_M = 500.0
-# Candidate chargers handed to the DP. A flat 60 is generous over 500 km and
+# Candidate LOCATIONS handed to the DP. A flat 60 is generous over 500 km and
 # starvation over 4000, so it scales with the route — the DP is bounded by this
 # number, not by distance, and 17 speeds over 4400 km measured at well under a
 # second with ~110 nodes.
 MIN_NODES = 60
 MAX_NODES = 160
 NODE_SPACING_M = 40_000.0
+# Rows the trim may spend, over the location budget, on the second brand at a
+# place it already kept (see `location_variants`). It has to be its own
+# allowance rather than coming out of the budget: on any route long enough to
+# trim there are more locations than the budget, so variants ranked against
+# locations lose every time — which is the state this whole grouping exists to
+# get out of, restored one step further down the pipeline. Half again, and not
+# "keep them all", because the DP is O(nodes²·buckets): a corridor where every
+# single location is two excludable brands does not exist, and one where a
+# third of them are already costs the DP ~1.8× the work.
+VARIANT_ROOM = 0.5
 
 # Upstream tile fetches allowed in one request. Each is sequential with a 20 s
 # timeout, so this bounds both worst-case latency and how much of the day's
@@ -319,7 +329,65 @@ async def _persist_tile(db: AsyncSession, tile_key: str, pois: list[dict] | None
     logger.info("OCM tile %s: %d POIs (%d new)", tile_key, len(pois), n_new)
 
 
-def _trim_nodes(nodes: list[ChargerNode], total_m: float) -> list[ChargerNode]:
+def location_variants(group: list[ChargerNode]) -> list[ChargerNode]:
+    """The rows worth keeping out of one co-located cluster of chargers.
+
+    A motorway services is several rows in OpenChargeMap — one per operator, a
+    hundred metres apart — and this used to keep the most powerful of them and
+    throw the rest away. That is right up until a driver rules a network out,
+    because the exclusion runs on the DP's candidates long AFTER this: a
+    cluster whose strongest row was "Tesla Supercharger Geiselwind" then
+    disappeared entirely when Tesla was excluded, taking the EnBW posts on the
+    same forecourt with it. The site was still there on the road, still fast,
+    and the plan drove past it — which reads as the toggle deleting chargers
+    rather than avoiding a brand, and nothing on the screen said otherwise.
+
+    So the strongest row of each NETWORK survives, in power order, up to and
+    including the first row whose network we cannot identify. Nothing weaker
+    than that one adds anything: an unrecognised operator can never be
+    excluded, so whatever the driver rules out, this location keeps an option
+    at least as good as the rows below it. That stop condition is what keeps
+    the node count near where it was — a cluster only grows when its brands are
+    genuinely all excludable.
+    """
+    kept: list[ChargerNode] = []
+    seen: set[str] = set()
+    for n in sorted(group, key=lambda n: -n.power_kw):
+        slug = networks.network_of(n.operator, n.name)
+        if slug is None:
+            kept.append(n)
+            break
+        if slug in seen:
+            continue
+        seen.add(slug)
+        kept.append(n)
+    return kept
+
+
+def dedupe_locations(nodes: list[ChargerNode]) -> list[list[ChargerNode]]:
+    """Near-identical locations, grouped and reduced to their variants.
+
+    One group is one place a driver would pull into; `location_variants`
+    decides how many badges of it the plan needs to be able to see. Groups come
+    back in offset order, each ordered strongest first.
+    """
+    ordered = sorted(nodes, key=lambda n: (n.offset_m, -n.power_kw))
+    groups: list[list[ChargerNode]] = []
+    for n in ordered:
+        if groups and abs(n.offset_m - groups[-1][0].offset_m) < DEDUP_RADIUS_M:
+            groups[-1].append(n)
+            continue
+        groups.append([n])
+    return [location_variants(g) for g in groups]
+
+
+def _flatten(groups: list[list[ChargerNode]]) -> list[ChargerNode]:
+    return sorted(
+        (n for g in groups for n in g), key=lambda n: (n.offset_m, -n.power_kw)
+    )
+
+
+def _trim_nodes(groups: list[list[ChargerNode]], total_m: float) -> list[ChargerNode]:
     """Cap the candidate list, keeping the strongest chargers WITHOUT leaving a
     hole in the route.
 
@@ -329,31 +397,47 @@ def _trim_nodes(nodes: list[ChargerNode], total_m: float) -> list[ChargerNode]:
     back as "no feasible plan at any speed". Bucketing by distance first
     guarantees the route stays covered; power decides who wins each bucket, and
     any spare slots then go to the strongest of whoever is left.
+
+    It picks LOCATIONS — that part is unchanged, and it is still coverage
+    first — and then spends `VARIANT_ROOM` on the strongest second brands among
+    the locations it kept. Both halves matter. Ranking variants against
+    locations would drop every one of them on any route long enough to trim
+    (there are always more places than the budget), putting back exactly the
+    hole `location_variants` closes, one step further down. And letting them in
+    for free would hand the DP twice the nodes and four times the work on the
+    longest corridors, for a preference most drivers never set.
     """
     budget = int(min(MAX_NODES, max(MIN_NODES, total_m / NODE_SPACING_M)))
-    if len(nodes) <= budget:
-        return nodes
+    ceiling = budget + int(budget * VARIANT_ROOM)
+    n_in = sum(len(g) for g in groups)
+    if len(groups) <= budget and n_in <= ceiling:
+        return _flatten(groups)
 
-    buckets: dict[int, list[ChargerNode]] = {}
-    for n in nodes:
-        i = min(budget - 1, int(n.offset_m / total_m * budget)) if total_m > 0 else 0
-        buckets.setdefault(i, []).append(n)
+    buckets: dict[int, list[list[ChargerNode]]] = {}
+    for g in groups:
+        i = min(budget - 1, int(g[0].offset_m / total_m * budget)) if total_m > 0 else 0
+        buckets.setdefault(i, []).append(g)
 
-    kept, spare = [], []
+    kept: list[list[ChargerNode]] = []
+    spare: list[list[ChargerNode]] = []
     for i in sorted(buckets):
-        best, *rest = sorted(buckets[i], key=lambda n: -n.power_kw)
+        best, *rest = sorted(buckets[i], key=lambda g: -g[0].power_kw)
         kept.append(best)
         spare.extend(rest)
 
     room = budget - len(kept)
     if room > 0:
-        kept.extend(sorted(spare, key=lambda n: -n.power_kw)[:room])
-    kept.sort(key=lambda n: n.offset_m)
+        kept.extend(sorted(spare, key=lambda g: -g[0].power_kw)[:room])
+
+    out = [g[0] for g in kept]
+    extras = sorted((n for g in kept for n in g[1:]), key=lambda n: -n.power_kw)
+    out.extend(extras[: max(0, ceiling - len(out))])
+    out.sort(key=lambda n: (n.offset_m, -n.power_kw))
     logger.info(
-        "trimming charger nodes %d → %d over %.0f km (%d distance buckets)",
-        len(nodes), len(kept), total_m / 1000, len(buckets),
+        "trimming charger nodes %d → %d over %.0f km (%d locations, %d buckets)",
+        n_in, len(out), total_m / 1000, len(kept), len(buckets),
     )
-    return kept
+    return out
 
 
 async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[ChargerNode]:
@@ -488,11 +572,12 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
                 continue
             if offset_m < window_start or offset_m > window_end:
                 continue
-            # Dropped BEFORE the dedup below, which keeps the most powerful
-            # site within 500 m of an offset. A services pair straddling a
-            # motorway is two rows at nearly the same offset, so filtering
-            # afterwards would let a 350 kW site on the far carriageway evict
-            # the 150 kW one you can actually pull into.
+            # Dropped BEFORE the grouping below, which reduces the rows
+            # within 500 m of an offset to one per network. A services pair
+            # straddling a motorway is two rows at nearly the same offset, so
+            # filtering afterwards would let a 350 kW site on the far
+            # carriageway stand in for the 150 kW one you can actually pull
+            # into — same brand, wrong carriageway.
             if needs_u_turn(route, offset_m, perp_m, side):
                 skipped_u_turn.append(c.name)
                 continue
@@ -520,18 +605,12 @@ async def chargers_for_route(db: AsyncSession, route: RouteData) -> list[Charger
             ", ".join(skipped_u_turn[:5]),
         )
 
-    # 4. Dedup near-identical locations (keep the most powerful site).
-    candidates.sort(key=lambda n: (n.offset_m, -n.power_kw))
-    deduped: list[ChargerNode] = []
-    for n in candidates:
-        if deduped and abs(n.offset_m - deduped[-1].offset_m) < DEDUP_RADIUS_M:
-            if n.power_kw > deduped[-1].power_kw:
-                deduped[-1] = n
-            continue
-        deduped.append(n)
+    # 4. Group near-identical locations, keeping per location the brands an
+    #    exclusion cannot all take away (see `location_variants`).
+    groups = dedupe_locations(candidates)
 
     # 5. Cap the node count — by power, but never at the cost of coverage.
-    deduped = _trim_nodes(deduped, geom.total_m)
+    deduped = _trim_nodes(groups, geom.total_m)
 
     logger.info("corridor chargers: %d candidates → %d nodes", len(candidates), len(deduped))
     return deduped

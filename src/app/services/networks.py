@@ -9,7 +9,7 @@ it will keep proposing the same stop for ever, and the only lever the driver had
 was to reject that ONE charger and be handed the next one from the same network
 twenty kilometres later.
 
-Four rules keep this honest.
+Five rules keep this honest.
 
 **Excluding a network changes the PLAN, never what the app can see.** The route
 snapshot keeps every charger on the corridor, because `live.nearest_charger`
@@ -34,6 +34,13 @@ says "Tesla Supercharger Geiselwind" in plain sight. The two failure modes are
 not symmetric: a missed match sends somebody to a charger they told us to
 avoid, which is the feature not working, while a wrong match costs one stop out
 of hundreds on the corridor.
+
+**One place, several badges.** This filter can only remove what the corridor
+search handed it, and a motorway services is several rows in OpenChargeMap —
+one per operator, a hundred metres apart. Keeping the most powerful of them and
+dropping the rest made excluding a network delete whole forecourts rather than
+one brand on them; `chargers.location_variants` is what keeps the other badges
+alive that far down, and this module is the reason it has to.
 
 **Needles that are words, and no needle that is a word in a language.** `mer`
 is a real Norwegian network and also the French for sea, `total` is a common

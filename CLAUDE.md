@@ -339,12 +339,27 @@ the pipeline is green before infra exists. Infra deploy is manual
   still on the corridor, a company somebody would rather not pay. The DP
   optimises minutes, so it proposed the same stop for ever, and the only lever
   was to reject that ONE charger and be handed the next one from the same
-  network twenty kilometres later. Six things hold it up. **The route snapshot
+  network twenty kilometres later. Seven things hold it up. **The route snapshot
   keeps every charger** — only the DP's candidates are filtered, because
   `live.nearest_charger` and "I'm plugged in here now" have to recognise a site
   whatever its badge, and a driver who takes the only free stall in town has
   not stopped being at a charger; exactly the split that "arriving anywhere is
-  noticed" already draws. **`_remaining_slice` is the choke point and its
+  noticed" already draws. **And a place with two brands on it is two
+  candidates** (`chargers.location_variants`): a motorway services is several
+  rows in OpenChargeMap, one per operator a hundred metres apart, and the
+  corridor search kept the most powerful of them and dropped the rest — so
+  ruling out Tesla deleted the WHOLE forecourt, the EnBW posts on it included,
+  and the plan drove past a site it could have used. On screen that reads as
+  the toggle deleting chargers rather than avoiding a brand, which is the one
+  thing it must never look like. The strongest row of each network at a
+  location now survives, up to and including the first row whose operator we
+  cannot identify — nothing weaker than that one adds anything, because an
+  unrecognised operator can never be excluded. The cap is where this is easiest
+  to lose again: `_trim_nodes` picks LOCATIONS first, exactly as it did, and
+  the second brands come out of their own allowance (`VARIANT_ROOM`). Ranked
+  against locations they would lose on every route long enough to trim — there
+  are always more places than budget — which puts the same hole back one step
+  further down the pipeline, where nothing would point at it. **`_remaining_slice` is the choke point and its
   `networks_off` argument is keyword-only and REQUIRED**, so a new DP caller on
   the live path is a TypeError rather than a silent offer of the brand the
   driver ruled out. **A slug, never free text**: `NETWORKS` is closed and the
