@@ -29,7 +29,7 @@ import {
   Undo2,
 } from "lucide-react"
 import { LiveHeroState } from "../JourneyHero"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAtMs, fmtDuration, fmtKm } from "@/lib/format"
 
 export default function LiveHud({
   live,
@@ -37,7 +37,7 @@ export default function LiveHud({
   browseAheadM,
   onLookAhead,
   onBackToNow,
-  clockIso,
+  clockBaseMs,
   onCorrectBattery,
 }: {
   live: LiveHeroState
@@ -45,7 +45,10 @@ export default function LiveHud({
   browseAheadM: number
   onLookAhead: () => void
   onBackToNow: () => void
-  clockIso: string
+  /** When the clock counts from, as an epoch. A timestamp string
+   *  cannot say whether it is local or UTC, and this one is fed by both
+   *  a live drive and a planned departure — see JourneyHero. */
+  clockBaseMs: number
   /** Driver only. The battery readout is where a driver looks when they want
    *  to fix the battery, so it is what they get to press — the check itself
    *  lives below a full-bleed scene, which on a phone means below the fold. */
@@ -94,7 +97,7 @@ export default function LiveHud({
         <Readout
           icon={<Clock className="h-3 w-3" />}
           label="arriving"
-          value={clockAt(clockIso, live.etaMin)}
+          value={clockAtMs(clockBaseMs, live.etaMin)}
           sub={
             Math.abs(live.aheadBehindMin) < 1
               ? "on time"

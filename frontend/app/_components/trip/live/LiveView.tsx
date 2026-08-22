@@ -22,7 +22,7 @@ import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
+import { clockSince, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
 import { projectedSoc } from "@/lib/liveSoc"
 import { remainingRouteLegs } from "@/lib/maps"
 import { useLiveRun } from "@/lib/useLiveRun"
@@ -357,7 +357,7 @@ export default function LiveView({
         toast.success(
           speedKph == null
             ? `Back to the fastest — hold ${plan.optimum_speed?.toFixed(0)} km/h.`
-            : `Holding ${speedKph} km/h, arriving ${clockAt(
+            : `Holding ${speedKph} km/h, arriving ${clockSince(
                 run!.started_at,
                 plan.benchmark.live_total_min
               )}.`
@@ -629,7 +629,7 @@ export default function LiveView({
             focusedId={focused?.charger_id ?? null}
             onFocus={setFocusId}
             destLabel={trip.request.dest.label.split(",")[0]}
-            destArrivalClock={clockAt(run.started_at, etaMin)}
+            destArrivalClock={clockSince(run.started_at, etaMin)}
             onSwap={
               isDriver ? (id) => void loadAlternatives(id) : undefined
             }
@@ -904,11 +904,11 @@ function RevisedPanel({
         />
         <Stat
           label="Arriving"
-          value={clockAt(startedAtIso, b.live_total_min)}
+          value={clockSince(startedAtIso, b.live_total_min)}
           sub={
             Math.abs(b.delta_min) < 1
               ? "as promised"
-              : `${clockAt(startedAtIso, b.original_total_min)} promised`
+              : `${clockSince(startedAtIso, b.original_total_min)} promised`
           }
           tone={worse ? "warn" : "brand"}
         />

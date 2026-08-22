@@ -13,7 +13,7 @@
 
 import Link from "next/link"
 import { LiveRun } from "@/lib/client"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockSince, fmtDuration, fmtKm } from "@/lib/format"
 
 export default function DriveBanner({
   tripId,
@@ -43,7 +43,7 @@ export default function DriveBanner({
           {Math.abs(behind) < 1
             ? "on time"
             : `${fmtDuration(Math.abs(behind))} ${behind > 0 ? "behind" : "ahead"}`}{" "}
-          · arriving {clockAt(live.started_at, arrivalMin(live))}
+          · arriving {clockSince(live.started_at, arrivalMin(live))}
         </span>
         <span className="shrink-0 text-sm font-semibold text-red-900 underline underline-offset-2">
           Follow the drive

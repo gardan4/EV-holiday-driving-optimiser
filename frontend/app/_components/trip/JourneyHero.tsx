@@ -14,7 +14,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { BatteryCharging, Flag, MapPin, Moon, Pause, Play, Sun, Swords, X } from "lucide-react"
 import { SpeedResult, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import {
+  clockAt,
+  clockAtMs,
+  fmtDuration,
+  fmtKm,
+  parseLocalIso,
+  parseServerTime,
+} from "@/lib/format"
 import { isCharging, sampleTimeline, timeAtDist } from "@/lib/playback"
 import type { JourneyWorldRef } from "./scene/JourneyScene"
 import LiveHud from "./live/LiveHud"
@@ -437,7 +444,14 @@ export default function JourneyHero({
   // for Friday 22:00 and driven on Saturday morning would otherwise show every
   // time on the screen — including the arrival everyone is watching — many
   // hours out.
-  const clockIso = live?.startedAtIso ?? departIso
+  // An EPOCH, not a string, because this one variable held both conventions:
+  // a live drive's `started_at` (naive UTC, recorded by the server) and the
+  // planned `departure_iso` (naive local, typed by a person). They are the same
+  // shape as text, so `clockAt` could only guess — and guessed local, which put
+  // every clock on a live drive out by the viewer's UTC offset.
+  const clockBaseMs = live
+    ? parseServerTime(live.startedAtIso)
+    : parseLocalIso(departIso).getTime()
   const arriveSoc = result.timeline.length
     ? result.timeline[result.timeline.length - 1].soc
     : 0
@@ -567,7 +581,7 @@ export default function JourneyHero({
         aria-valuetext={
           followLocked
             ? undefined
-            : `${clockAt(clockIso, hud.min)}, ${Math.round(shownSoc)} percent battery`
+            : `${clockAtMs(clockBaseMs, hud.min)}, ${Math.round(shownSoc)} percent battery`
         }
         className={`absolute inset-0 z-10 overflow-y-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-4 focus-visible:outline-brand-400 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
           // Locked: horizontal scroll off entirely, and `pan-y` so a vertical
@@ -589,7 +603,7 @@ export default function JourneyHero({
             browseAheadM={browseAheadM}
             onLookAhead={startBrowsing}
             onBackToNow={() => setBrowsing(false)}
-            clockIso={clockIso}
+            clockBaseMs={clockBaseMs}
             onCorrectBattery={onCorrectBattery}
           />
         )}

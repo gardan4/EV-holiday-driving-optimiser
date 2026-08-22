@@ -19,13 +19,36 @@ export function fmtDuration(minutes: number): string {
 
 const pad2 = (n: number) => String(n).padStart(2, "0")
 
-/** Clock time `minutes` after the departure timestamp → "23:41".
+/** Clock time `minutes` after an instant → "23:41".
+ *
  * Formatted by hand: toLocaleTimeString differs between Node and browsers
- * (24:12 vs 00:12 at midnight) and breaks hydration. */
-export function clockAt(departureIso: string, minutes: number): string {
-  const d = new Date(departureIso)
+ * (24:12 vs 00:12 at midnight) and breaks hydration.
+ *
+ * Takes an epoch, not a string, and that is the whole point. There are two
+ * kinds of naive timestamp in this app and they are indistinguishable as text
+ * — `departure_iso` is naive LOCAL because a person typed it, `started_at` is
+ * naive UTC because `datetime.utcnow()` recorded it. A single `clockAt(iso)`
+ * had to guess, guessed local, and every clock on the drive screen was
+ * therefore wrong by the viewer's UTC offset: two hours early in CEST, five
+ * hours late in New York, and exactly right on the UTC machines the tests run
+ * on. Forcing the caller through `parseLocalIso` or `parseServerTime` puts the
+ * choice where the answer is actually known.
+ */
+export function clockAtMs(atMs: number, minutes: number): string {
+  const d = new Date(atMs)
   d.setMinutes(d.getMinutes() + Math.round(minutes))
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}
+
+/** Clock time `minutes` after a departure the USER typed (naive local). */
+export function clockAt(departureIso: string, minutes: number): string {
+  return clockAtMs(parseLocalIso(departureIso).getTime(), minutes)
+}
+
+/** Clock time `minutes` after an instant the SERVER recorded (naive UTC).
+ *  Every clock on a live drive counts from `run.started_at` and belongs here. */
+export function clockSince(serverIso: string, minutes: number): string {
+  return clockAtMs(parseServerTime(serverIso), minutes)
 }
 
 export const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]

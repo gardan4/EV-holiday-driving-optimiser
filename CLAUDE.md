@@ -1280,6 +1280,20 @@ docker compose -f docker-compose.local-db.yml up -d
   padding, since an expanded box would overlap the row above and hand the tap
   to the wrong network. Toast actions are set once in `providers.tsx`, so no
   call site can ship a target the others have grown out of.
+- **A clock needs an EPOCH, not a timestamp string** (`lib/format.clockAtMs`).
+  This app has two kinds of naive timestamp and they are identical as text:
+  `departure_iso` is naive LOCAL because a person typed it, `started_at` is
+  naive UTC because `datetime.utcnow()` recorded it. `clockAt(iso, minutes)`
+  had to guess and guessed local, so EVERY clock on the drive screen — the
+  arrival on the plan list, the HUD, the revised panel, the hold-speed preview,
+  the watcher's banner — was out by the viewer's UTC offset: two hours early in
+  CEST, four late in New York, and exactly right on the UTC machines that run
+  the tests and the container that renders the page. Reported from the road as
+  "the arrival time is wrong". `clockAt` now takes only a departure the user
+  typed, `clockSince` only an instant the server recorded, and anything holding
+  both (`JourneyHero`'s clock base) carries an epoch so there is nothing left
+  to guess. `parseServerTime` already existed and already said all this; what
+  was missing was making the choice impossible to skip.
 - **Clock strings are hand-formatted** (`lib/format.ts`) — `toLocaleTimeString`
   differs between Node and browsers and breaks hydration.
 - **Scripts that mutate the DB must guard against prod**: refuse to run unless

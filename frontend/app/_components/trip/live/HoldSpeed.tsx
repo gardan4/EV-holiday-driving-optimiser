@@ -28,7 +28,7 @@
 import { useState } from "react"
 import { Check, Gauge, Loader2 } from "lucide-react"
 import { RevisedPlan } from "@/lib/client"
-import { clockAt, fmtDuration } from "@/lib/format"
+import { clockSince, fmtDuration } from "@/lib/format"
 
 export default function HoldSpeed({
   plan,
@@ -97,7 +97,7 @@ export default function HoldSpeed({
           </div>
           {current?.total_min != null && (
             <div className="mt-0.5 text-xs text-ink-500">
-              arrive {clockAt(startedAtIso, plan.elapsed_min + current.total_min)}
+              arrive {clockSince(startedAtIso, plan.elapsed_min + current.total_min)}
               {" · "}
               {current.n_stops} {current.n_stops === 1 ? "stop" : "stops"} left
             </div>
