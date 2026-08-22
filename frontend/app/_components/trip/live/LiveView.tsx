@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Flag, Loader2, RefreshCw } from "lucide-react"
+import { AlertTriangle, Flag, Loader2, MapPin, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
 import { clockSince, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
@@ -591,6 +591,78 @@ export default function LiveView({
           {isDriver ? " · you're driving" : " · you're watching"}
         </p>
 
+        {/* The two things that are true of THIS PHONE, at the top and in one
+            card. They used to sit two thirds of the way down, under the plan
+            and the navigation button, as two separate one-line containers —
+            which put the control the app's whole accuracy depends on below the
+            fold on every phone, and spent two borders and two margins on two
+            lines of text. The battery card owns the chrome and takes the
+            sharing line as its footer, so they read as one status strip. */}
+        {!finished && (
+          <div ref={batteryRef} className="scroll-mt-4">
+            <BatteryCheck
+              state={state}
+              isDriver={isDriver}
+              busy={live.busy}
+              stopName={nextStop?.name ?? null}
+              onSubmit={live.submitSoc}
+              onReplan={() => void doReplan()}
+              openSignal={socPrompt}
+              footer={
+                isDriver ? (
+                  <div className="flex min-h-11 items-center gap-1.5 px-3 text-xs text-ink-500">
+                    {/* The STATE, not just the label. "Sharing this phone's
+                        location" read the same whether it was on or off — the
+                        only tell was the button saying "Resume" instead of
+                        "Stop", which is the state hidden inside the control
+                        for changing it. */}
+                    <MapPin
+                      className={`h-4 w-4 shrink-0 ${
+                        live.sharing ? "text-brand-600" : "text-ink-300"
+                      }`}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {live.sharing ? "Sharing" : "Not sharing"}
+                    </span>
+                    <button
+                      onClick={live.toggleSharing}
+                      aria-label={
+                        live.sharing
+                          ? "Stop sharing this phone's location"
+                          : "Resume sharing this phone's location"
+                      }
+                      className="-mr-1.5 inline-flex min-h-11 shrink-0 items-center px-2 font-semibold text-brand-700 underline underline-offset-2"
+                    >
+                      {live.sharing ? "Stop" : "Resume"}
+                    </button>
+                  </div>
+                ) : null
+              }
+            />
+          </div>
+        )}
+
+        {/* Directly under the battery card, because it is the consequence of
+            the figure just typed there — and above the "reality has drifted"
+            panel, which the server now stops raising once this is answered. */}
+        {!finished && (
+          <ReserveCheck
+            risk={state.next_stop_risk}
+            acceptedSoc={state.stretch_soc}
+            isDriver={isDriver}
+            busy={live.busy}
+            onKeep={() => void doKeepStop()}
+            onUndo={() => void doUndoKeepStop()}
+            onFindCloser={() => void loadAlternatives()}
+          />
+        )}
+
+        {live.gpsError && (
+          <p className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {live.gpsError}
+          </p>
+        )}
+
         {/* Where the car actually IS. Above the next stop, because a driver
             standing at a plug is not asking about a charger 69 km up the road
             — and for EVERY charger, planned or not: at a planned stop the card
@@ -711,26 +783,6 @@ export default function LiveView({
           </div>
         )}
 
-        {isDriver && !finished && (
-          <p className="mt-2 flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
-            <span className="min-w-0 truncate">
-              Sharing this phone&apos;s location
-            </span>
-            <button
-              onClick={live.toggleSharing}
-              className="shrink-0 font-semibold text-brand-700 underline underline-offset-2"
-            >
-              {live.sharing ? "Stop sharing" : "Resume sharing"}
-            </button>
-          </p>
-        )}
-
-        {live.gpsError && (
-          <p className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {live.gpsError}
-          </p>
-        )}
-
         {/* Off the route.
             "Rejoin the route and they'll pick up again" was the whole answer
             here, which is right for the thirty seconds it takes to drive round
@@ -773,35 +825,6 @@ export default function LiveView({
               </button>
             )}
           </div>
-        )}
-
-        {!finished && (
-          <div ref={batteryRef} className="scroll-mt-4">
-            <BatteryCheck
-              state={state}
-              isDriver={isDriver}
-              busy={live.busy}
-              stopName={nextStop?.name ?? null}
-              onSubmit={live.submitSoc}
-              onReplan={() => void doReplan()}
-              openSignal={socPrompt}
-            />
-          </div>
-        )}
-
-        {/* Directly under the battery row, because it is the consequence of
-            the figure just typed there — and above the "reality has drifted"
-            panel, which the server now stops raising once this is answered. */}
-        {!finished && (
-          <ReserveCheck
-            risk={state.next_stop_risk}
-            acceptedSoc={state.stretch_soc}
-            isDriver={isDriver}
-            busy={live.busy}
-            onKeep={() => void doKeepStop()}
-            onUndo={() => void doUndoKeepStop()}
-            onFindCloser={() => void loadAlternatives()}
-          />
         )}
 
         {/* --- diverged? offer to re-plan ---------------------------------

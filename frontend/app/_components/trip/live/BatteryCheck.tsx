@@ -29,8 +29,8 @@
  * the capability being withheld from them, writing it is.
  */
 
-import { useEffect, useRef, useState } from "react"
-import { BatteryMedium, Check, PlugZap } from "lucide-react"
+import { ReactNode, useEffect, useRef, useState } from "react"
+import { BatteryMedium, Check, Pencil, PlugZap } from "lucide-react"
 import { toast } from "sonner"
 import { LiveState } from "@/lib/client"
 import { fmtDuration, socLabel } from "@/lib/format"
@@ -53,6 +53,7 @@ export default function BatteryCheck({
   onSubmit,
   onReplan,
   openSignal = 0,
+  footer,
 }: {
   state: LiveState
   isDriver: boolean
@@ -67,6 +68,11 @@ export default function BatteryCheck({
   /** Bumped when the driver asks for this from somewhere else on the screen —
    *  the battery readout in the HUD, which is where they are already looking. */
   openSignal?: number
+  /** A line to hang off the bottom of this card, inside its border. The drive
+   *  screen passes the location-sharing row: two facts about the same phone,
+   *  both one quiet line, and as separate cards they cost two borders and two
+   *  margins for it on the screen with the least room to spare. */
+  footer?: ReactNode
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(Math.round(state.soc))
@@ -118,27 +124,29 @@ export default function BatteryCheck({
   // them. Same helper the HUD uses, so the two cannot disagree.
   if (!isDriver) {
     return (
-      <div className="mt-2 flex items-center gap-1.5 rounded-2xl border border-ink-200 bg-white px-3 py-2 text-xs text-ink-500">
-        <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
-        <span className="min-w-0 truncate">
-          Battery{" "}
-          <strong className="text-ink-700">
-            {socLabel(
-              state.soc,
-              state.soc_is_measured,
-              state.soc_uncertainty_pct
-            )}
-          </strong>
-          {state.soc_is_measured && state.anchor_age_min < 1
-            ? " · just confirmed"
-            : state.soc_is_measured
-              ? ` · confirmed ${fmtDuration(state.anchor_age_min)} ago`
-              : " · estimated"}
-        </span>
-        <span className="ml-auto hidden shrink-0 text-ink-400 sm:inline">
-          the driving phone confirms it
-        </span>
-      </div>
+      <Shell footer={footer}>
+        <div className="flex items-center gap-1.5 px-3 py-2 text-xs text-ink-500">
+          <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
+          <span className="min-w-0 truncate">
+            Battery{" "}
+            <strong className="text-ink-700">
+              {socLabel(
+                state.soc,
+                state.soc_is_measured,
+                state.soc_uncertainty_pct
+              )}
+            </strong>
+            {state.soc_is_measured && state.anchor_age_min < 1
+              ? " · just confirmed"
+              : state.soc_is_measured
+                ? ` · confirmed ${fmtDuration(state.anchor_age_min)} ago`
+                : " · estimated"}
+          </span>
+          <span className="ml-auto hidden shrink-0 text-ink-400 sm:inline">
+            the driving phone confirms it
+          </span>
+        </div>
+      </Shell>
     )
   }
 
@@ -151,30 +159,46 @@ export default function BatteryCheck({
   // line, no prompt, no nagging.
   if (!editing && !atCharger && !nudging) {
     return (
-      // One row, and it stays one row: on a phone a wrapping label used to
-      // push the button onto its own line and cost twice the height for the
-      // quietest thing on the page.
-      <div className="mt-2 flex items-center justify-between gap-2 rounded-2xl border border-ink-200 bg-white py-1.5 pl-3 pr-1.5">
-        <p className="flex min-w-0 items-center gap-1.5 text-xs text-ink-500">
+      <Shell footer={footer} footerBeside>
+        {/* The WHOLE row is the button, which is what lets this sit in half a
+            card next to the sharing line and still clear 44 px: a status line
+            with a small button beside it needs the label's width twice over,
+            once to read and once to press. The icon carries the word
+            "Battery" — at this size the sentence was most of the row. */}
+        <button
+          onClick={openEditor}
+          aria-label="Correct the battery reading"
+          className="flex min-h-11 w-full items-center gap-1.5 px-3 text-left text-xs text-ink-500"
+        >
           <BatteryMedium className="h-4 w-4 shrink-0 text-ink-400" />
-          <span className="truncate">
-            Battery <strong className="text-ink-700">{Math.round(state.soc)}%</strong>
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="text-ink-700">{Math.round(state.soc)}%</strong>
             {state.soc_is_measured && state.anchor_age_min < 1
               ? " · just confirmed"
               : state.soc_is_measured
                 ? ` · confirmed ${fmtDuration(state.anchor_age_min)} ago`
                 : " · estimated"}
           </span>
-        </p>
-        <button
-          onClick={openEditor}
-          className="shrink-0 rounded-xl border border-ink-300 px-3 py-2 text-sm font-semibold text-ink-700"
-        >
-          Correct it
+          {/* The pencil is the affordance at every width; the word joins it
+              when there is room. At 320 px the two together pushed the
+              freshness suffix out of the row — and "65% · …" drops the one
+              word saying whether that number was measured or guessed, which
+              is worth more here than a label on a row that is itself the
+              button. */}
+          <span className="flex shrink-0 items-center gap-1 font-semibold text-brand-700">
+            <Pencil className="h-3.5 w-3.5" />
+            <span className="hidden underline underline-offset-2 min-[360px]:inline">
+              Correct
+            </span>
+          </span>
         </button>
-      </div>
+      </Shell>
     )
   }
+
+  // Whether the driver has moved the stepper off the estimate. It is what the
+  // one primary button says, and nothing is disabled by it.
+  const untouched = draft === Math.round(state.soc)
 
   async function send(value: number) {
     try {
@@ -217,12 +241,8 @@ export default function BatteryCheck({
   }
 
   return (
-    <div
-      className={`mt-4 rounded-2xl border p-4 ${
-        atCharger ? "border-brand-300 bg-brand-50" : "border-ink-200 bg-white"
-      }`}
-    >
-      <div className="flex items-start gap-2">
+    <Shell accent={atCharger} footer={footer}>
+      <div className="flex items-start gap-2 p-3.5">
         {atCharger ? (
           <PlugZap className="mt-0.5 h-5 w-5 shrink-0 text-brand-700" />
         ) : (
@@ -245,38 +265,44 @@ export default function BatteryCheck({
                 )} since you last confirmed it. No car tells a web page its battery.`}
           </p>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => void send(Math.round(state.soc))}
-              disabled={busy}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              <Check className="h-4 w-4" />
-              Spot on
-            </button>
+          {/* Stepper across the full width, then ONE button under it — the
+              layout `ChargingHere` already uses for the same question, and the
+              reason this one did not survive a phone. Three controls in a
+              wrapping row need about 400 px; on a 390 px screen they broke
+              into three lines — a green "Spot on" alone, a bare stepper, and a
+              greyed-out "It's 26%" — which reads as a broken form rather than
+              as one question with a number in it. */}
+          <div className="mt-3 flex items-center gap-1 rounded-xl border border-ink-200 bg-white p-1">
+            <Stepper label="−5" onClick={() => setDraft((d) => clamp(d - 5))} />
+            <Stepper label="−1" onClick={() => setDraft((d) => clamp(d - 1))} />
+            <span className="min-w-14 flex-1 text-center font-mono text-lg font-bold tabular-nums text-ink-900">
+              {draft}%
+            </span>
+            <Stepper label="+1" onClick={() => setDraft((d) => clamp(d + 1))} />
+            <Stepper label="+5" onClick={() => setDraft((d) => clamp(d + 5))} />
+          </div>
 
-            <div className="flex items-center gap-1 rounded-xl border border-ink-200 bg-white px-1 py-1">
-              <Stepper label="−5" onClick={() => setDraft((d) => clamp(d - 5))} />
-              <Stepper label="−1" onClick={() => setDraft((d) => clamp(d - 1))} />
-              <span className="w-14 text-center font-mono text-base font-bold tabular-nums text-ink-900">
-                {draft}%
-              </span>
-              <Stepper label="+1" onClick={() => setDraft((d) => clamp(d + 1))} />
-              <Stepper label="+5" onClick={() => setDraft((d) => clamp(d + 5))} />
-            </div>
-
+          {/* One button, not two. "Spot on" and "It's 26%" sent the SAME
+              reading whenever the stepper had not been touched — so the panel
+              opened with its confirm button greyed out beside a green one that
+              did the identical thing, which is the "always greyed out" shape
+              this app has been bitten by before. Agreeing with the estimate
+              still costs exactly one tap, which is the whole point of "Spot
+              on"; it is now the same tap as correcting it. */}
+          <div className="mt-2 flex items-center gap-2">
             <button
               onClick={() => void send(draft)}
-              disabled={busy || draft === Math.round(state.soc)}
-              className="rounded-xl border border-ink-300 px-3 py-2 text-sm font-semibold text-ink-700 disabled:opacity-40"
+              disabled={busy}
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-600 px-3 text-sm font-semibold text-white transition-transform active:scale-[0.99] disabled:opacity-50"
             >
-              It&apos;s {draft}%
+              <Check className="h-4 w-4 shrink-0" />
+              {untouched ? "Spot on" : `It's ${draft}%`}
             </button>
 
             {!atCharger && (
               <button
                 onClick={() => setEditing(false)}
-                className="px-2 py-2 text-sm text-ink-500 underline underline-offset-2"
+                className="min-h-11 shrink-0 px-3 text-sm text-ink-500 underline underline-offset-2"
               >
                 Later
               </button>
@@ -284,6 +310,55 @@ export default function BatteryCheck({
           </div>
         </div>
       </div>
+    </Shell>
+  )
+}
+
+/** The card, and anything that shares its chrome.
+ *
+ * `footer` is how the drive screen puts the location-sharing line INSIDE this
+ * card rather than in a second container below it. Both are one quiet line
+ * about the same phone, and as separate cards they spent two borders, two
+ * margins and a gap saying so — on the screen with the least room to spare.
+ */
+function Shell({
+  accent = false,
+  footer,
+  footerBeside = false,
+  children,
+}: {
+  accent?: boolean
+  footer?: ReactNode
+  /** Side by side rather than stacked. Only the one-line state can do this,
+   *  and it is where the height actually goes: two 44 px rows stacked is a
+   *  band of a phone screen spent on two short sentences, and side by side it
+   *  is one. The open editor is a panel, so it stacks. */
+  footerBeside?: boolean
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`mt-2 overflow-hidden rounded-2xl border ${
+        accent ? "border-brand-300 bg-brand-50" : "border-ink-200 bg-white"
+      }`}
+    >
+      {footer && footerBeside ? (
+        <div className="flex items-stretch divide-x divide-ink-100">
+          <div className="min-w-0 flex-1">{children}</div>
+          {/* Sized to its content rather than to half, because the two halves
+              do not carry the same amount: "Sharing · Stop" is fixed and short
+              while the battery side has to fit a percentage AND how old it is,
+              and an even split clipped that to "65% · …" on a 320 px phone —
+              dropping the one word that says whether the number is a
+              measurement or a guess. */}
+          <div className="shrink-0">{footer}</div>
+        </div>
+      ) : (
+        <>
+          {children}
+          {footer && <div className="border-t border-ink-100">{footer}</div>}
+        </>
+      )}
     </div>
   )
 }
@@ -293,7 +368,7 @@ function Stepper({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       onClick={onClick}
       // 44px targets: this is operated in a car, sometimes in gloves.
-      className="grid h-10 min-w-[44px] place-items-center rounded-lg font-mono text-sm font-bold text-ink-600 transition-colors hover:bg-ink-100 active:bg-ink-200"
+      className="grid h-11 min-w-[44px] place-items-center rounded-lg font-mono text-sm font-bold text-ink-600 transition-colors hover:bg-ink-100 active:bg-ink-200"
     >
       {label}
     </button>

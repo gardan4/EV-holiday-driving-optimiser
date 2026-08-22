@@ -1330,6 +1330,38 @@ docker compose -f docker-compose.local-db.yml up -d
   padding, since an expanded box would overlap the row above and hand the tap
   to the wrong network. Toast actions are set once in `providers.tsx`, so no
   call site can ship a target the others have grown out of.
+- **Two controls that submit the same value are one control** (`BatteryCheck`).
+  The battery panel opened with a green "Spot on" beside a greyed-out "It's
+  26%" — and until the stepper was touched those two buttons sent the identical
+  reading, so a form that was ready to submit showed a disabled primary action
+  anyway. That is the same shape as the planner's "always greyed out" button
+  and here it had no cause at all: the field could not be invalid, there was
+  nothing to say. One button now, reading "Spot on" until the stepper moves and
+  "It's 24%" after, never disabled — agreeing with the estimate still costs one
+  tap, which was the whole point of "Spot on". Layout was the other half: three
+  controls in a wrapping row want about 400 px, so on a 390 px phone they broke
+  into three lines — a green button alone, a bare stepper, a greyed-out twin —
+  which reads as a broken form rather than as one question with a number in it.
+  Stepper across the full width, one button under it, which is what
+  `ChargingHere` already did for the same question.
+- **The drive screen's one-line facts belong at the top, and side by side**
+  (`LiveView`, `BatteryCheck.Shell`). The battery row and the location-sharing
+  row sat two thirds of the way down, under the plan and the navigation card,
+  as two separate containers — which put the control the app's whole accuracy
+  depends on below the fold on every phone. They are two facts about the SAME
+  PHONE, so they are one card now, directly under the header, and the halves
+  sit BESIDE each other: two 44 px rows stacked is a band of a phone screen
+  spent on two short sentences, and the targets cannot shrink to buy it back.
+  `BatteryCheck` owns the chrome and takes the sharing line as a `footer`,
+  because only it knows which shape it is in — a one-line row goes beside, an
+  open editor is a panel and stacks. Three details hold it up. The split is
+  NOT even: the sharing side is fixed and short while the battery side carries
+  a percentage AND how old it is, and half each clipped that to "65% · …" at
+  320 px — dropping the one word that says whether the number was measured or
+  guessed. The whole battery half is the button, because a status line with a
+  small button beside it needs the label's width twice over, once to read and
+  once to press. And the word "Correct" gives way to its pencil below 360 px
+  while the pencil never does, so there is an affordance at every width.
 - **Anything that depends on the READER's clock or timezone must resolve after
   mount** (`lib/mounted.useMounted`). The rule already existed for "today" in
   `DepartureField`; the drive screen's clocks are the same rule one step

@@ -316,7 +316,7 @@ function Step({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       onClick={onClick}
       // 44px targets: this is operated in a car park, sometimes in gloves.
-      className="grid h-10 min-w-[44px] place-items-center rounded-lg font-mono text-sm font-bold text-ink-600 transition-colors hover:bg-ink-100 active:bg-ink-200"
+      className="grid h-11 min-w-[44px] place-items-center rounded-lg font-mono text-sm font-bold text-ink-600 transition-colors hover:bg-ink-100 active:bg-ink-200"
     >
       {label}
     </button>
