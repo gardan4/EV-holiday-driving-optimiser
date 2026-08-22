@@ -303,6 +303,28 @@ class ReplanRequest(BaseModel):
     lon: Optional[float] = Field(default=None, ge=-180.0, le=180.0)
 
 
+class RerouteRequest(BaseModel):
+    """"Plan me a road from where I actually am."
+
+    Unlike a re-plan, the fix is REQUIRED. A re-plan slices the road the car is
+    already on and can fall back to the last known position; this one asks the
+    router for a road that does not exist yet, and the only position worth
+    building it from is the one the phone can see right now.
+    """
+
+    lat: float = Field(ge=-90.0, le=90.0)
+    lon: float = Field(ge=-180.0, le=180.0)
+    accuracy_m: Optional[float] = Field(default=None, ge=0.0)
+    # Re-route even though the fix is still on the planned route. Off by
+    # default: on the route, `POST /replan` is the cheaper and better answer —
+    # it re-optimises without spending a directions call — so the button that
+    # costs upstream quota should not be the one a driver reaches by accident.
+    force: bool = False
+    # As on a re-plan: the speed to hold from here, kept on the run. Omitted
+    # means "leave my choice alone".
+    hold_speed_kph: Optional[float] = Field(default=None, ge=60.0, le=220.0)
+
+
 class AlternativeOut(BaseModel):
     """One other charger the drive could stop at instead, and what it costs.
 
@@ -484,6 +506,19 @@ class LiveStateOut(BaseModel):
     # The session at the plug, while there is one. Null the moment the driver
     # says they are leaving, or the car moves off.
     charging: Optional[ChargingOut] = None
+    # Which road this drive is on. 0 is the trip's own route; every re-route
+    # bumps it. `offset_m` above is measured along THAT road, so a client
+    # holding the wrong polyline is projecting onto a road the car has left —
+    # which is why this is on the cheap poll and the geometry is not.
+    route_version: int = 0
+    # Road driven on EARLIER routes. `offset_m + distance_before_m` is how far
+    # the car has come in total; `offset_m` alone is where it is on the current
+    # one. Only the second can be compared with a stop's offset.
+    distance_before_m: float = 0.0
+    # The car has been off the route long enough that waiting for it to rejoin
+    # is no longer the useful answer. The drive screen acts on this — see
+    # `POST /runs/{id}/reroute`.
+    reroute_suggested: bool = False
 
 
 class BenchmarkOut(BaseModel):
@@ -544,11 +579,45 @@ class LiveOut(BaseModel):
     state: LiveStateOut
     plan: Optional[ReplanOut] = None
     trail: list[TimelinePoint] = []
+    # Mirrors `state.route_version` at the top level, so a watcher can notice a
+    # re-route without reaching into the state object. The geometry itself is
+    # fetched separately (`GET /trips/{id}/live/route`) — it is tens of
+    # kilobytes and this response is polled every ten seconds.
+    route_version: int = 0
     # How long since the driving phone last reported. Without this a page whose
     # driver has lost signal or run out of battery shows the same numbers
     # forever under a "live" badge — the worst failure for someone at home
     # waiting on an arrival time.
     seconds_since_ping: float = 0.0
+
+
+class LiveRouteOut(BaseModel):
+    """The road a drive is currently on.
+
+    Its own endpoint rather than a field on `LiveOut`, because a polyline for a
+    900 km route is tens of kilobytes and the live view is polled every ten
+    seconds. Clients fetch this only when `route_version` changes.
+    """
+
+    version: int
+    polyline: str
+    total_dist_m: float
+    # Road driven before this one. A client showing "x of y km" adds it to both
+    # sides; a client projecting a GPS fix must not.
+    distance_before_m: float = 0.0
+
+
+class RerouteOut(BaseModel):
+    """A new road, and the plan for it."""
+
+    state: LiveStateOut
+    plan: ReplanOut
+    route: LiveRouteOut
+    # Straight-line metres between where the car left the old route and where
+    # it rejoined the world. Surfaced because the energy for it is an ESTIMATE
+    # (see `live.rebase`) and the screen says so rather than quietly folding it
+    # into the battery.
+    detour_m: float = 0.0
 
 
 class RunSummaryOut(BaseModel):

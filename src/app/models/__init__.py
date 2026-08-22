@@ -337,9 +337,13 @@ class TripEvent(Base):
     at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow
     )
-    # start | breadcrumb | soc_reading | arrive_stop | charge_start |
-    # charge_end | replan | off_route | finish
+    # start | breadcrumb | soc_reading | arrive | arrive_undo | charge_start |
+    # charge_end | replan | reroute | off_route | finish
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    # Distance driven in TOTAL, across every road this drive has been on — not
+    # the offset along the current one. A re-route replaces the route and
+    # restarts that offset, and a trail that jumps backwards mid-journey is
+    # not a trail. See `runs._travelled_m`.
     offset_m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     lat: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     lon: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

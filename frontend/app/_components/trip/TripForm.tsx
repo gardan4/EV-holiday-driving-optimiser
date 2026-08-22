@@ -159,7 +159,13 @@ export default function TripForm() {
       className="rounded-2xl border border-ink-100 bg-white/90 p-5 shadow-xl shadow-ink-900/5 backdrop-blur sm:p-6"
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <GeocodeInput label="From" placeholder="Utrecht…" value={origin} onChange={setOrigin} />
+        <GeocodeInput
+          label="From"
+          placeholder="Utrecht…"
+          value={origin}
+          onChange={setOrigin}
+          allowHere
+        />
         <GeocodeInput label="To" placeholder="Innsbruck…" value={dest} onChange={setDest} />
       </div>
 

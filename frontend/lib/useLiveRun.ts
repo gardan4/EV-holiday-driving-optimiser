@@ -12,26 +12,39 @@
  * up every 25 seconds, and watchers poll every 10.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alternatives,
+  LiveRoute,
   LiveRun,
   LiveState,
+  RerouteResult,
   RevisedPlan,
   ArriveResult,
   arriveAt,
   finishRun,
   getAlternatives,
+  getLiveRoute,
   getLiveRun,
   pingRun,
   recordSoc,
   replanRun,
+  rerouteRun,
   undoArrival,
 } from "./client"
-import { RouteIndex, project } from "./route"
+import { RouteIndex, buildRouteIndex, project } from "./route"
 
 const PING_EVERY_MS = 25_000
 const POLL_EVERY_MS = 10_000
+/** How long before the automatic re-route may be attempted again.
+ *
+ *  It is tried once and then left alone: the condition that triggered it stays
+ *  true for as long as the car is off the route, so a failing call — no
+ *  signal, a router that is down, the per-run limit — would otherwise be
+ *  retried on every render for the rest of the drive. Five minutes is long
+ *  enough that a genuine outage costs a handful of attempts, short enough that
+ *  a driver who is still lost gets another go without touching anything. */
+const REROUTE_COOLDOWN_MS = 5 * 60_000
 /** Below this, the car is standing still — its time is billed to the heater,
  *  not to aerodynamic drag. */
 const MOVING_KPH = 4
@@ -120,6 +133,19 @@ export interface LiveHandle {
   /** Take back the last arrival. The one tap on this screen that no later fix
    *  can correct, so it needs a way out that is not "end the drive". */
   undoArrive: () => Promise<LiveState | null>
+  /** The road the drive is on, once it is no longer the trip's own. Null until
+   *  something has been re-routed, so an ordinary drive fetches no geometry. */
+  route: LiveRoute | null
+  /** That road, indexed for projection. Whoever draws the journey needs the
+   *  same one the fixes are snapped to. */
+  routeIndex: RouteIndex | null
+  /** Ask for a road from where the car actually is. `force` re-routes even
+   *  from ON the route — otherwise refused, because it is the one call that
+   *  spends upstream quota and `/replan` answers the same question for free. */
+  reroute: (force?: boolean) => Promise<RerouteResult | null>
+  /** True while one is in flight, including the automatic one. The screen
+   *  cannot show "frozen, rejoin the route" while it is fixing exactly that. */
+  rerouting: boolean
   end: () => Promise<void>
 }
 
@@ -142,7 +168,11 @@ function currentPosition(): Promise<{ lat: number; lon: number }> {
 
 export function useLiveRun(
   tripId: string,
-  routeIndex: RouteIndex | null,
+  /** The trip's own road. Used until the drive is re-routed onto another one,
+   *  which this hook is what learns about — so the index is built HERE rather
+   *  than handed in, or the caller would need the answer before asking the
+   *  question. */
+  plannedRoute: { polyline: string; total_dist_m: number },
   initial: LiveRun | null
 ): LiveHandle {
   const [run, setRun] = useState<LiveRun | null>(initial)
@@ -152,6 +182,19 @@ export function useLiveRun(
   const [busy, setBusy] = useState(false)
   const [runId, setRunId] = useState<string | null>(null)
   const [sharing, setSharing] = useState(true)
+  const [route, setRoute] = useState<LiveRoute | null>(null)
+  const [rerouting, setRerouting] = useState(false)
+  // Whichever road the car is on. Projecting a fix onto the trip's original
+  // polyline after a re-route reports it as permanently off-route on a road it
+  // is driving perfectly.
+  const routeIndex: RouteIndex | null = useMemo(
+    () =>
+      buildRouteIndex(
+        route?.polyline ?? plannedRoute.polyline,
+        route?.total_dist_m ?? plannedRoute.total_dist_m
+      ),
+    [route, plannedRoute.polyline, plannedRoute.total_dist_m]
+  )
   // Read on mount rather than as the initial value: localStorage is not
   // available during the server render, and disagreeing with it would hydrate
   // the wrong toggle state.
@@ -429,6 +472,77 @@ export function useLiveRun(
     }
   }, [runId])
 
+  const reroute = useCallback(
+    async (force = false) => {
+      if (!runId) return null
+      setRerouting(true)
+      try {
+        // A fresh fix, and not best-effort like the re-plan's: a re-plan can
+        // fall back to the last known position because it slices the road the
+        // car is already on. This asks for a road that does not exist yet, and
+        // building it from a position twenty minutes stale routes the driver
+        // from somewhere they have left.
+        const here = await currentPosition()
+        const out = await rerouteRun(runId, here, { force })
+        setState(out.state)
+        setRoute(out.route)
+        setRun((r) => (r ? { ...r, plan: out.plan, route_version: out.route.version } : r))
+        // The snapped offset is against the OLD polyline. Dropping it hands
+        // the screen back to the server's position until the next fix lands on
+        // the new road.
+        setLocalOffsetM(null)
+        return out
+      } finally {
+        setRerouting(false)
+      }
+    },
+    [runId]
+  )
+
+  // The road, once it stops being the trip's own. Fetched on the version
+  // moving rather than on a poll, because a polyline is tens of kilobytes and
+  // for most drives this never fires at all. Watchers get here too — a page
+  // following the link has to draw the road the car actually turned onto.
+  const routeVersion = run?.route_version ?? 0
+  useEffect(() => {
+    if (routeVersion === 0 || route?.version === routeVersion) return
+    let alive = true
+    getLiveRoute(tripId)
+      .then((r) => {
+        if (alive) setRoute(r)
+      })
+      .catch(() => {
+        /* the poll will come round again */
+      })
+    return () => {
+      alive = false
+    }
+  }, [tripId, routeVersion, route?.version])
+
+  // --- driver: off the route for long enough, get a new one ----------------
+  //
+  // The drive used to freeze every figure and wait for the car to come back,
+  // which is the right answer for the thirty seconds it takes to drive round a
+  // services and the wrong one for a diversion, a closure, or a nav app that
+  // knows about a jam this route does not. The server decides WHEN (two
+  // sustained minutes, so a single wild fix cannot spend a directions call);
+  // this only carries out the request.
+  //
+  // The cooldown is the other guard. A re-route that fails — no signal, ORS
+  // down, the rate limit — must not be retried on every ping for the rest of
+  // the journey, and the flag that says "you are off the route" stays true the
+  // whole time it is failing.
+  const lastTry = useRef(0)
+  useEffect(() => {
+    if (!broadcasting || !runId || finished) return
+    if (!state?.reroute_suggested || rerouting) return
+    if (Date.now() - lastTry.current < REROUTE_COOLDOWN_MS) return
+    lastTry.current = Date.now()
+    void reroute().catch(() => {
+      /* said on screen by the banner, which is still up */
+    })
+  }, [broadcasting, runId, finished, state?.reroute_suggested, rerouting, reroute])
+
   const end = useCallback(async () => {
     if (!runId) return
     setBusy(true)
@@ -468,6 +582,10 @@ export function useLiveRun(
     requestReplan,
     findAlternatives,
     markArrived,
+    route,
+    routeIndex,
+    reroute,
+    rerouting,
     undoArrive,
     end,
   }

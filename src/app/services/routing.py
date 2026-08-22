@@ -153,6 +153,9 @@ def _lerp_axis(xs: list[float], ys: list[float], x: float) -> float:
 _GEOCODE_TTL_S = 6 * 3600.0
 _GEOCODE_MAX = 4000
 _geocode_cache: dict[tuple[str, int], tuple[float, list[dict]]] = {}
+# Same TTL and cap; a separate map because the keys are coordinates and a
+# miss here must not evict a popular typed prefix.
+_reverse_cache: dict[tuple[float, float], tuple[float, dict | None]] = {}
 
 
 async def geocode(
@@ -239,6 +242,107 @@ async def geocode(
             _geocode_cache.clear()
     _geocode_cache[ck] = (now, hits)
     return hits
+
+
+# How finely a reverse lookup is cached and asked. Five decimal places is
+# ~1 m, which would make every fix its own cache key and every fix its own ORS
+# request; three is ~110 m, which is the same doorstep and the same answer.
+# Rounding is applied to the KEY only — the coordinates that reach the planner
+# are the ones the browser reported.
+_REVERSE_PRECISION = 3
+
+
+async def reverse_geocode(
+    lat: float, lon: float, db: AsyncSession | None = None
+) -> dict | None:
+    """A coordinate → the place it is in, or None when nothing is near.
+
+    Backs "start from where I am". The browser has the coordinates already, so
+    this exists purely to put a NAME on them: a trip whose origin reads
+    "52.09, 5.12" is one nobody can check, share or recognise later in their
+    own list, and the planner's whole first screen is two place names.
+
+    Metered as `geocode`, not as a service of its own — HeiGIT counts Pelias
+    against one allowance whichever endpoint spends it, and a meter split
+    differently from the ceiling it is watching is the failure `quota.SERVICES`
+    exists to prevent.
+    """
+    key = _require_key()
+    ck = (round(lat, _REVERSE_PRECISION), round(lon, _REVERSE_PRECISION))
+    hit = _reverse_cache.get(ck)
+    now = time.monotonic()
+    if hit is not None and now - hit[0] < _GEOCODE_TTL_S:
+        if db is not None:
+            await quota.record(db, provider="ors", kind="geocode", cache_hits=1)
+        return hit[1]
+
+    started = time.monotonic()
+    try:
+        resp = await _http().get(
+            f"{ORS_GEOCODE_BASE}/reverse",
+            # Header rather than a query param, for the same reason as
+            # `geocode`: an httpx error embeds the URL and the warning below
+            # would write the live key into the log.
+            headers={"Authorization": key},
+            params={
+                "point.lat": lat,
+                "point.lon": lon,
+                "size": 1,
+                "layers": "address,street,locality,localadmin,borough",
+            },
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("ORS reverse geocode failed: %s", exc)
+        if db is not None:
+            await quota.record(
+                db,
+                provider="ors",
+                kind="geocode",
+                calls=1,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                ok=False,
+            )
+        raise HTTPException(
+            status_code=503, detail="Geocoding is temporarily unavailable."
+        )
+
+    if db is not None:
+        await quota.record(
+            db,
+            provider="ors",
+            kind="geocode",
+            calls=1,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
+    out: dict | None = None
+    for feat in resp.json().get("features", []):
+        props = feat.get("properties", {})
+        label = props.get("label") or ""
+        if not label:
+            continue
+        out = {
+            "label": label,
+            # The point that comes BACK, not the one that went in. Pelias
+            # answers with the feature it matched — a street, a locality — and
+            # its centroid is a place, where the fix is a car park behind one.
+            # Routing from the named thing is what makes the itinerary match
+            # the label the driver is looking at.
+            "lat": feat["geometry"]["coordinates"][1],
+            "lon": feat["geometry"]["coordinates"][0],
+            "country": (props.get("country_a") or "")[:2] or None,
+        }
+        break
+
+    if len(_reverse_cache) >= _GEOCODE_MAX:
+        for k, (t, _) in list(_reverse_cache.items()):
+            if now - t >= _GEOCODE_TTL_S:
+                _reverse_cache.pop(k, None)
+        if len(_reverse_cache) >= _GEOCODE_MAX:
+            _reverse_cache.clear()
+    _reverse_cache[ck] = (now, out)
+    return out
 
 
 # ---------------------------------------------------------------------------

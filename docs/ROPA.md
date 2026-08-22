@@ -28,10 +28,18 @@ every visit, so the record has to exist regardless of how small the project is.
 | Categories | Exact origin and destination coordinates and the place names typed, departure time, vehicle choice, state of charge settings, the computed route and plan |
 | Table | `trips` (`request` and `result` JSON) |
 | Retention | 24 months from creation, enforced by `scripts/purge_old_trips.py` on `main._purge_loop` |
-| Recipients | OpenRouteService (routing), OpenChargeMap (charger search), Microsoft Azure (hosting), Cloudflare (edge) |
+| Recipients | OpenRouteService (routing and reverse geocoding), OpenChargeMap (charger search), Microsoft Azure (hosting), Cloudflare (edge) |
 
 Note: origin and destination are usually a home address. This is the most
 sensitive thing the app holds outside the live location trail.
+
+Note: the planner's "Here" button sends the device's own GPS position to
+OpenRouteService to be turned into a place name (`GET /api/geocode/reverse`).
+It is Art 6(1)(a) consent, given by pressing it and by the browser's own
+location permission, and it is the only path by which a device position — as
+opposed to a place somebody typed — becomes a trip origin. Nothing about the
+position is stored beyond the resulting origin, which is stored exactly as a
+typed one is.
 
 ### 2. Following a live drive
 
@@ -40,10 +48,16 @@ sensitive thing the app holds outside the live location trail.
 | Purpose | Show a driver, and anyone holding the trip link, where the car is against its plan |
 | Legal basis | Art 6(1)(a) consent, given by starting a drive, withdrawn by stopping sharing, closing the tab or deleting the trip |
 | Data subjects | Anyone who starts a drive |
-| Categories | GPS position roughly every five minutes, state of charge readings entered by hand, timestamps, replans |
+| Categories | GPS position roughly every five minutes, state of charge readings entered by hand, timestamps, replans and reroutes |
 | Tables | `trip_runs`, `trip_events` |
 | Retention | 90 days from the drive starting, enforced by `scripts/purge_old_runs.py` |
-| Recipients | Microsoft Azure, Cloudflare |
+| Recipients | Microsoft Azure, Cloudflare, and OpenRouteService/OpenChargeMap on a reroute only |
+
+Note: a drive that leaves its planned route for more than a couple of minutes
+asks for a road from where the car actually is (`POST /runs/{id}/reroute`),
+which sends that one position to OpenRouteService and the corridor around it to
+OpenChargeMap. It is the only point at which a live position leaves us. It is
+covered by the same consent as the drive itself and stops when sharing does.
 
 ### 3. Usage counting
 

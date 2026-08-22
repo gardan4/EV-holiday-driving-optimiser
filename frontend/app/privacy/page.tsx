@@ -94,6 +94,12 @@ export default function PrivacyPage() {
           </strong>
           You can stop sharing your location at any point during a drive without
           ending it, and closing the tab stops it too.
+          <span className="block pt-2">
+            If the drive leaves the planned route for more than a couple of
+            minutes, it asks OpenRouteService for a road from where the car is,
+            so that one position goes to them as well as to us. Stop sharing and
+            it stops, along with everything else the drive sends.
+          </span>
         </Section>
 
         <Section title="How long it's kept">
@@ -188,7 +194,12 @@ export default function PrivacyPage() {
           <br />
           Your start and destination are sent to OpenRouteService to get a route
           and to OpenChargeMap to find chargers along it, both third-party
-          services with their own terms. To say whether there is anywhere to eat
+          services with their own terms. Two things send a real position rather
+          than a place you typed, and only when you ask for them: pressing{" "}
+          <em>Here</em> on the planner sends your device&apos;s location to
+          OpenRouteService to be turned into a place name, and if a drive leaves
+          the planned route, the car&apos;s position is sent there to get a road
+          from where you actually are. To say whether there is anywhere to eat
           at a charging stop we ask OpenStreetMap what is mapped around it —
           that request carries the charger&apos;s coordinates and nothing of
           yours, not your route and not your position, and the answer is cached

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.runs import _sim_params
+from app.services.live import REROUTE_AFTER_MIN
 from app.api.schemas import PlanRequest
 from app.api.trips import sim_params_for
 from app.core.database import Base, get_db
@@ -1184,6 +1185,281 @@ class TestAReadingIsAboutAPlace:
         st = resp.json()
         assert st["soc"] == pytest.approx(33.0, abs=0.1)
         assert st["offset_m"] == pytest.approx(before["offset_m"], abs=1.0)
+
+
+# Somewhere emphatically not on the stubbed straight line between Utrecht and
+# Innsbruck. Far enough that `project` reports hundreds of kilometres off, which
+# is what "the driver has left the route" looks like to the tracker.
+OFF_THE_ROAD = {"lat": 48.86, "lon": 2.35}
+
+
+def _route_from(origin, dest):
+    """A stubbed straight-line RouteData between two points.
+
+    The fixture's `fake_get_route` ignores its arguments and always answers the
+    same road, which is fine for every other test and useless here: a re-route
+    that hands back the road the car has just left is not a re-route. This
+    builds one that actually starts where it is asked to.
+    """
+    segments, charger_nodes = nl_to_austria_route()
+    geometry = RouteGeometry([origin, dest])
+    total_seg = sum(seg.dist_m for seg in segments)
+    charger_nodes = [
+        replace(
+            c,
+            lat=origin[0] + (dest[0] - origin[0]) * (c.offset_m / total_seg),
+            lon=origin[1] + (dest[1] - origin[1]) * (c.offset_m / total_seg),
+        )
+        for c in charger_nodes
+    ]
+    scale = geometry.total_m / total_seg
+    offsets, acc = [0.0], 0.0
+    for seg in segments:
+        acc += seg.dist_m
+        offsets.append(acc * scale)
+    return RouteData(
+        geometry=geometry,
+        segments=segments,
+        seg_geom_offsets=offsets,
+        total_dist_m=total_seg,
+        total_dur_s=total_seg / 30.0,
+    ), charger_nodes
+
+
+@pytest.fixture
+def live_router(monkeypatch):
+    """Make `get_route` answer about the origin it was actually given."""
+    calls: list[tuple[float, float]] = []
+
+    async def fake_get_route(db, o_lat, o_lon, d_lat, d_lon):
+        calls.append((o_lat, o_lon))
+        route, nodes = _route_from((o_lat, o_lon), (d_lat, d_lon))
+        fake_get_route.nodes = nodes
+        return route
+
+    async def fake_chargers(db, r):
+        return fake_get_route.nodes
+
+    fake_get_route.nodes = []
+    monkeypatch.setattr("app.api.runs.routing.get_route", fake_get_route)
+    monkeypatch.setattr("app.api.runs.chargers_svc.chargers_for_route", fake_chargers)
+    return calls
+
+
+async def _age(db_session, minutes: float) -> None:
+    """Let the drive's clock run.
+
+    `at_min` is wall-clock against `started_at`, and every request a test makes
+    lands in the same millisecond — so anything measured in minutes of driving
+    has to be produced by moving the start backwards. Real elapsed time, not a
+    poked-in number: the next ping recomputes `at_min` from it exactly as it
+    would on the road.
+    """
+    run = (await db_session.execute(select(TripRun))).scalars().all()[-1]
+    run.started_at = run.started_at - timedelta(minutes=minutes)
+    await db_session.commit()
+
+
+async def _go_off_route(client, db_session, run_id, *, off_for=REROUTE_AFTER_MIN + 1.0):
+    """Drive an hour on the route, then leave it and stay off."""
+    await client.post(f"/api/runs/{run_id}/ping", json=FIRST_LEG)
+    await client.post(
+        f"/api/runs/{run_id}/ping", json={**OFF_THE_ROAD, "moving_s": 60.0}
+    )
+    await _age(db_session, off_for)
+    await client.post(
+        f"/api/runs/{run_id}/ping", json={**OFF_THE_ROAD, "moving_s": off_for * 60.0}
+    )
+
+
+class TestRerouting:
+    """Leaving the route is ordinary. Freezing every figure and saying "rejoin
+    the route" is the right answer for thirty seconds and the wrong one for
+    everything else — the plan for the road you are ACTUALLY on is what the
+    driver wants."""
+
+    async def test_going_off_route_asks_for_a_new_road(self, client, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        on = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert on["reroute_suggested"] is False
+
+        await _go_off_route(client, db_session, run["run_id"])
+        st = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert st["stale"] is True
+        assert st["reroute_suggested"] is True
+
+    async def test_one_wild_fix_does_not(self, client):
+        """A directions call is upstream quota. A single bad fix must not spend
+        one."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        await client.post(
+            f"/api/runs/{run['run_id']}/ping", json={**OFF_THE_ROAD, "moving_s": 30.0}
+        )
+        st = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+        assert st["stale"] is True
+        assert st["reroute_suggested"] is False
+
+    async def test_it_plans_the_road_the_car_is_actually_on(self, client, live_router, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        # The router was asked about where the car is, not where it set off.
+        assert live_router[-1] == pytest.approx(
+            (OFF_THE_ROAD["lat"], OFF_THE_ROAD["lon"])
+        )
+        assert out["route"]["version"] == 1
+        assert out["route"]["polyline"]
+        assert out["plan"]["remaining"]["stops"] is not None
+        assert out["state"]["stale"] is False
+        assert out["state"]["route_version"] == 1
+        assert out["state"]["reroute_suggested"] is False
+
+    async def test_on_the_route_it_refuses_and_points_at_replan(self, client, live_router):
+        """The only mid-drive call that spends upstream quota. On the route,
+        `/replan` answers the same question for free."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        spent = len(live_router)
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/reroute", json=along(0.12)
+        )
+        assert resp.status_code == 409
+        assert "re-plan" in resp.json()["detail"].lower()
+        # Refused BEFORE the directions call, or the refusal costs the very
+        # quota it exists to protect.
+        assert len(live_router) == spent
+
+        forced = await client.post(
+            f"/api/runs/{run['run_id']}/reroute",
+            json={**along(0.12), "force": True},
+        )
+        assert forced.status_code == 200, forced.text
+
+    async def test_distance_already_driven_is_not_lost(self, client, live_router, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+        ).json()
+        # On the new road the car is at the start; the old road's kilometres
+        # move into `distance_before_m` rather than evaporating.
+        assert out["state"]["offset_m"] == pytest.approx(0.0, abs=1.0)
+        assert out["state"]["distance_before_m"] == pytest.approx(
+            before["offset_m"], abs=1.0
+        )
+        assert out["route"]["distance_before_m"] == pytest.approx(
+            before["offset_m"], abs=1.0
+        )
+
+    async def test_the_breadcrumb_trail_never_goes_backwards(self, client, live_router, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+        await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+        live = (await client.get(f"/api/trips/{trip['id']}/live")).json()
+        dists = [pt["dist_m"] for pt in live["trail"]]
+        assert dists == sorted(dists), dists
+
+    async def test_the_detour_is_billed_to_the_battery(self, client, live_router, db_session):
+        """Off-route nothing is spent, because the position is unknown. The
+        moment it is known again the energy has to land somewhere."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+        before = (await client.get(f"/api/trips/{trip['id']}/live")).json()["state"]
+
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+        ).json()
+        assert out["detour_m"] > 0
+        assert out["state"]["soc"] < before["soc"]
+        # …and it is an estimate, so the screen can ask for a real figure.
+        assert out["state"]["soc_is_measured"] is False
+
+    async def test_the_new_road_is_served_to_watchers_too(self, client, live_router, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+        ).json()
+
+        live = (await client.get(f"/api/trips/{trip['id']}/live")).json()
+        assert live["route_version"] == 1
+        road = await client.get(f"/api/trips/{trip['id']}/live/route")
+        assert road.status_code == 200, road.text
+        assert road.json()["polyline"] == out["route"]["polyline"]
+        assert road.json()["version"] == 1
+        # A watcher must not be handed a write token by the new endpoints.
+        assert run["run_id"] not in road.text
+        assert run["run_id"] not in (
+            await client.get(f"/api/trips/{trip['id']}/live")
+        ).text
+
+    async def test_a_rejected_charger_stays_rejected_but_a_stretch_does_not(
+        self, client, live_router, db_session
+    ):
+        """A judgement about a site survives a change of road. An accepted risk
+        about one leg does not — that leg no longer exists."""
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/ping", json=FIRST_LEG)
+        first = (
+            await client.post(f"/api/runs/{run['run_id']}/replan", json={})
+        ).json()
+        rejected = first["remaining"]["stops"][0]["charger_id"]
+        await client.post(
+            f"/api/runs/{run['run_id']}/replan",
+            json={"exclude_charger_ids": [rejected], "min_arrival_soc": 5.0},
+        )
+
+        await _go_off_route(client, db_session, run["run_id"])
+        out = (
+            await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+        ).json()
+        assert all(
+            s["charger_id"] != rejected for s in out["plan"]["remaining"]["stops"]
+        )
+
+        runs = await client.get(f"/api/trips/{trip['id']}/runs")
+        assert runs.status_code == 200
+
+    async def test_a_finished_drive_cannot_be_rerouted(self, client, live_router):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await client.post(f"/api/runs/{run['run_id']}/finish", json={})
+        resp = await client.post(
+            f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD
+        )
+        assert resp.status_code == 409
+
+    async def test_the_reroute_is_logged_with_what_it_cost(self, client, live_router, db_session):
+        trip = await make_trip(client)
+        run = await start_run(client, trip)
+        await _go_off_route(client, db_session, run["run_id"])
+        await client.post(f"/api/runs/{run['run_id']}/reroute", json=OFF_THE_ROAD)
+
+        rows = await db_session.execute(
+            select(TripEvent).where(TripEvent.kind == "reroute")
+        )
+        events = rows.scalars().all()
+        assert len(events) == 1
+        assert events[0].payload["route_version"] == 1
+        assert events[0].payload["detour_m"] > 0
 
 
 class TestHoldingASpeed:

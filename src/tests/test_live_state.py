@@ -11,6 +11,8 @@ import pytest
 
 from app.services.live import (
     OFF_ROUTE_M,
+    OFF_ROUTE_WINDING,
+    REROUTE_AFTER_MIN,
     RUN_FACTOR_MAX,
     RUN_FACTOR_MIN,
     advance,
@@ -21,6 +23,8 @@ from app.services.live import (
     new_state,
     plan_soc_at,
     plan_window_at,
+    rebase,
+    reroute_due,
     schedule_delta_min,
     soc_uncertainty,
 )
@@ -369,6 +373,139 @@ class TestReplanTrigger:
         )
         assert not flag
         assert "off the planned route" in reasons[0]
+
+
+class TestGoingOffTheRoute:
+    """Off-route used to freeze the drive and wait. It still freezes — the
+    position genuinely is unknown — but it now also remembers WHEN it lost the
+    road, so the drive can stop waiting and ask for a new one."""
+
+    def test_it_remembers_when_the_route_was_lost(self):
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = _ping(st, offset_m=50_000.0, at_min=25.0, moving_s=1500.0)
+        st = _ping(
+            st, offset_m=50_000.0, at_min=30.0, moving_s=300.0,
+            off_route_m=OFF_ROUTE_M + 1.0,
+        )
+        assert st["stale"]
+        assert st["off_route_since_min"] == 30.0
+
+        # Still off five minutes later: the episode started when it started.
+        st = _ping(
+            st, offset_m=50_000.0, at_min=35.0, moving_s=300.0,
+            off_route_m=OFF_ROUTE_M + 900.0,
+        )
+        assert st["off_route_since_min"] == 30.0
+
+    def test_rejoining_forgets_it(self):
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = _ping(
+            st, offset_m=10_000.0, at_min=5.0, moving_s=300.0,
+            off_route_m=OFF_ROUTE_M + 1.0,
+        )
+        assert st["off_route_since_min"] == 5.0
+        st = _ping(st, offset_m=20_000.0, at_min=15.0, moving_s=600.0)
+        assert st["off_route_since_min"] is None
+        assert not reroute_due(st)
+
+    def test_a_new_road_is_only_wanted_after_a_sustained_absence(self):
+        """A single wild fix must not spend a directions call."""
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = _ping(
+            st, offset_m=10_000.0, at_min=5.0, moving_s=300.0,
+            off_route_m=OFF_ROUTE_M + 1.0,
+        )
+        assert not reroute_due(st)
+        st = _ping(
+            st, offset_m=10_000.0, at_min=5.0 + REROUTE_AFTER_MIN, moving_s=120.0,
+            off_route_m=OFF_ROUTE_M + 1.0,
+        )
+        assert reroute_due(st)
+
+    def test_a_car_on_the_route_never_wants_one(self):
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=600.0)
+        assert not reroute_due(st)
+
+
+class TestRebasingOntoANewRoad:
+    def test_distance_already_driven_is_banked_not_lost(self):
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = _ping(st, offset_m=120_000.0, at_min=60.0, moving_s=3600.0)
+        st = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=70.0,
+            detour_m=0.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        assert st["offset_m"] == 0.0
+        assert st["distance_before_m"] == pytest.approx(120_000.0)
+        # …and it keeps banking across a second one.
+        st = _ping(st, offset_m=30_000.0, at_min=85.0, moving_s=900.0)
+        st = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=52.0, lon=10.0, at_min=90.0,
+            detour_m=0.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        assert st["distance_before_m"] == pytest.approx(150_000.0)
+
+    def test_a_detour_cannot_cost_more_road_than_the_clock_allows(self):
+        """A phone that slept through the whole thing reappears wherever it
+        reappears, and the straight line to it can be hundreds of kilometres.
+        Billing that literally empties the battery and the re-plan then answers
+        "no plan reaches the destination from 0%"."""
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        far = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=3.0,
+            detour_m=500_000.0, speed_kph=130.0, unbilled_min=3.0,
+        )
+        # Three minutes at 130 is ~6.5 km, not 500.
+        capped = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=3.0,
+            detour_m=6_500.0 / OFF_ROUTE_WINDING, speed_kph=130.0, unbilled_min=3.0,
+        )
+        assert current_soc(far, 58.0) == pytest.approx(current_soc(capped, 58.0), abs=0.2)
+        assert current_soc(far, 58.0) > 85.0
+
+    def test_the_detour_is_billed_rather_than_given_away(self):
+        """While off-route nothing is spent, because the position is unknown.
+        The moment it is known again the energy has to land somewhere — an
+        EV estimate that is quietly optimistic is the dangerous kind."""
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = _ping(st, offset_m=100_000.0, at_min=50.0, moving_s=3000.0)
+        before = current_soc(st, 58.0)
+
+        free = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=60.0,
+            detour_m=0.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        strayed = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=60.0,
+            detour_m=20_000.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        assert current_soc(free, 58.0) == pytest.approx(before)
+        assert current_soc(strayed, 58.0) < before - 2.0
+
+    def test_the_battery_becomes_an_estimate_again(self):
+        st = new_state(offset_m=0.0, soc=90.0, lat=50.0, lon=8.0, at_min=0.0)
+        assert st["soc_is_measured"]
+        st = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=10.0,
+            detour_m=5_000.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        assert not st["soc_is_measured"]
+
+    def test_it_lands_on_the_road_and_not_at_a_plug(self):
+        """A charge session is anchored to a plug on the road being left."""
+        st = new_state(offset_m=0.0, soc=40.0, lat=50.0, lon=8.0, at_min=0.0)
+        st = {**st, "at_charger_id": "ocm-1", "charge_anchor_soc": 40.0,
+              "charge_anchor_min": 0.0, "charge_kw": 150.0}
+        st = rebase(
+            st, veh=BORN_58, p=PARAMS, lat=51.0, lon=9.0, at_min=20.0,
+            detour_m=0.0, speed_kph=130.0, unbilled_min=10.0,
+        )
+        assert st["at_charger_id"] is None
+        assert st.get("charge_anchor_soc") is None
+        assert not st["stale"]
+        assert st["off_route_m"] == 0.0
+        # The twenty minutes at the plug are not thrown away.
+        assert st["soc_gained"] > 0.0
 
 
 class TestInferenceAgainstThePlanItCameFrom:

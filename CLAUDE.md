@@ -453,6 +453,56 @@ the pipeline is green before infra exists. Infra deploy is manual
   alternatives. `_planned_stops_ahead` falls through to the original itinerary
   when nothing has been re-planned, or "never offer the stop you are already
   going to" silently stops applying to every drive before its first re-plan.
+- **Off the route, the drive asks for a new road rather than waiting**
+  (`runs.reroute`, `live.rebase`). Leaving the route is ordinary — a diversion,
+  a closed slip road, a supermarket, a nav app that knows about a jam ORS does
+  not — and every one of them got the same answer: freeze every figure and say
+  "rejoin the route". `/replan` refused outright for the same reason, which is
+  correct for what it does (it slices the road the car is on, and the car is
+  not on it) and useless as the only option, because the plan for the road you
+  are ACTUALLY on is the one thing worth having at that moment. Six things hold
+  the fix up. **It fires on sustained absence, not on a fix** — two minutes
+  (`REROUTE_AFTER_MIN`), because it is the only mid-drive call that spends
+  UPSTREAM quota and a single wild GPS reading must not buy a directions
+  request; on the route it refuses outright and points at `/replan`, which
+  answers the same question for free. **The axis moves and the history does
+  not**: `offset_m` is measured along the snapshot being replaced, so the car
+  lands at zero on a road that did not exist a moment ago — `distance_before_m`
+  banks what came before, and each consumer takes the one it means (the profile
+  and charger offsets read `offset_m`, the trail, the review and `drives.py`
+  read `_travelled_m`). **The detour is billed and bounded**: while off-route
+  `advance` spends nothing, which is right while the position is unknown and
+  wrong the moment it is known again, so the crow-flies gap is priced as flat
+  road — capped by what the car could have driven in the unbilled minutes,
+  because a phone that slept through the detour reappears wherever it
+  reappears and billing 500 km literally empties the battery. **It is an
+  estimate and says so**: `soc_is_measured` drops and the toast offers the
+  battery prompt, because there is no geometry for road we were not following.
+  **What the driver chose survives, what the road decided does not** —
+  rejected chargers stay rejected (a judgement about a site, and sites do not
+  move), an accepted stretch below the reserve does not (it was about reaching
+  one plug on a leg that no longer exists). And **the geometry is versioned,
+  not polled**: `route_version` rides the cheap `GET /live`, the polyline sits
+  behind `GET /live/route`, because a client still projecting fixes onto the
+  old polyline reports the car as permanently off-route on a road it is
+  driving perfectly — and a watcher needs the new road too, or their screen
+  shows the car driving through fields.
+- **"Start from where I am" is a NAMING call** (`routing.reverse_geocode`,
+  `GET /api/geocode/reverse`). The browser has the coordinates already; what it
+  cannot do is name them, and a trip whose origin reads "52.09, 5.12" is one
+  nobody can check before planning it or recognise afterwards in their own
+  list. Four things. It goes through `GeocodeInput.select` like a picked
+  suggestion, so "a place is only chosen when it resolves" keeps holding and
+  there is no second way for `origin` to be set. It answers **404 rather than a
+  coordinate label** when Pelias matches nothing — somewhere unnameable is
+  somewhere the router cannot start from either, and a made-up label just moves
+  the failure to the routing call where the message is about roads instead of
+  about the button that was pressed. It returns the point that came BACK, not
+  the one that went in, so the itinerary matches the label on screen. And the
+  cache key is rounded to ~110 m: at five decimal places every GPS reading is
+  its own request against the free tier. **Origin only** — a destination you
+  are already standing at is not a journey. It is metered as `geocode` because
+  HeiGIT counts Pelias against one allowance whichever endpoint spends it.
 - **An accepted stretch is about ONE leg, and ends when that leg does**
   (`runs._clear_first_leg_floor`). `first_leg_reserve_soc` is persisted so the
   standing "Re-plan" button cannot refuse the stop the driver just chose — and
@@ -1025,6 +1075,15 @@ docker compose -f docker-compose.local-db.yml up -d
 
 ## Working norms (load-bearing)
 
+- **A drive's `offset_m` is along the CURRENT road, and re-routing replaces it**
+  (`runs._travelled_m`). Anything that indexes INTO the route — `RouteProfile`,
+  charger offsets, `slice_route`, the plan's `offset_base_m` — wants
+  `offset_m`. Anything that is a HISTORY — the breadcrumb trail, the review,
+  `RunSummaryOut.distance_m`, `drives.achieved_speeds` — wants
+  `offset_m + distance_before_m`, or it draws a journey that jumps backwards
+  the moment a driver goes round a closure. Getting it wrong is silent: both
+  numbers exist, both look plausible, and only a re-routed drive tells them
+  apart.
 - **MSSQL boolean filters**: `.is_(True)` / `.is_(False)` compile to `IS 1` / `IS 0`
   — a T-SQL **syntax error**. Use `Column == True  # noqa: E712`.
 - **You cannot CAST a comparison on MSSQL.** `cast(col == False, Float)` — to

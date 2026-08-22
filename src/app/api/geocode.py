@@ -1,6 +1,6 @@
 """Geocode autocomplete proxy (keeps the ORS key server-side)."""
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import GeocodeHit
@@ -36,3 +36,35 @@ async def geocode_autocomplete(
     # read-only endpoint otherwise, so nothing else would flush them.
     await db.commit()
     return [GeocodeHit(**h) for h in hits]
+
+
+@router.get("/reverse", response_model=GeocodeHit)
+@limiter.limit(settings.RATE_LIMIT_GEOCODE)
+async def geocode_reverse(
+    request: Request,
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    db: AsyncSession = Depends(get_db),
+) -> GeocodeHit:
+    """A coordinate → the place it is in. Backs "start from where I am".
+
+    The browser already knows where it is; what it cannot do is NAME it, and a
+    trip whose origin reads "52.09, 5.12" is one nobody can check before
+    planning it or recognise afterwards in their own list. So this is a naming
+    call, not a positioning one.
+
+    404 rather than a coordinate label when Pelias matches nothing. Somewhere
+    genuinely unnamed — mid-ocean, deep desert, a made-up pair — is a place
+    this app cannot route from anyway, and inventing a label for it would move
+    the failure to the routing call, where the message is about roads instead
+    of about the button that was pressed.
+    """
+    hit = await routing.reverse_geocode(lat, lon, db=db)
+    # As in the autocomplete above: `quota.record` writes but never commits.
+    await db.commit()
+    if hit is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Couldn't name that location. Type where you're starting from.",
+        )
+    return GeocodeHit(**hit)

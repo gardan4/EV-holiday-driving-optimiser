@@ -25,7 +25,6 @@ import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
 import { clockAt, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
 import { projectedSoc } from "@/lib/liveSoc"
 import { remainingRouteLegs } from "@/lib/maps"
-import { buildRouteIndex } from "@/lib/route"
 import { useLiveRun } from "@/lib/useLiveRun"
 import JourneyHero, { LiveHeroState } from "../JourneyHero"
 import MapsRouteButton from "../MapsRouteButton"
@@ -52,13 +51,27 @@ export default function LiveView({
     )
   }, [trip, initial])
 
-  const routeIndex = useMemo(
-    () => buildRouteIndex(trip.result.polyline, trip.result.total_dist_m),
+  // The road the car is on — the trip's own until it is re-routed onto
+  // another. The hook owns it, because the hook is what learns the drive
+  // changed road.
+  const plannedRoute = useMemo(
+    () => ({
+      polyline: trip.result.polyline,
+      total_dist_m: trip.result.total_dist_m,
+    }),
     [trip.result.polyline, trip.result.total_dist_m]
   )
-
-  const live = useLiveRun(trip.id, routeIndex, initial)
+  const live = useLiveRun(trip.id, plannedRoute, initial)
   const { run, isDriver } = live
+  const liveRoute = live.route
+
+  // Kilometres already driven on roads this drive has left. `distM` is
+  // measured along the CURRENT one, so this is what turns it back into "how
+  // far have we come" — and it is added to BOTH sides of that fraction or the
+  // journey appears to shrink at the moment it got longer.
+  const drivenBeforeM = live.state?.distance_before_m ?? 0
+  const totalDistM =
+    (liveRoute?.total_dist_m ?? trip.result.total_dist_m) + drivenBeforeM
 
   // Derived from the server, NOT held locally: a watcher polls `run`, and a
   // re-plan the driver made is the single most important thing to reach them.
@@ -190,10 +203,53 @@ export default function LiveView({
     batteryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
   }, [])
 
+  /** Say the road changed — once per road, whoever caused it.
+   *
+   *  Most re-routes are automatic, and a plan that swaps itself out silently
+   *  is the thing this screen must never do: the itinerary, the next stop and
+   *  the arrival time all change at once. Watchers get it too, because their
+   *  screen has just started drawing a different road.
+   *
+   *  It offers the battery prompt rather than just reporting, because the
+   *  energy spent off-route is an ESTIMATE — there is no geometry for road we
+   *  were not following — and a typed figure is the only thing that fixes it.
+   */
+  const announcedRoute = useRef<number | null>(null)
+  const announceReroute = useCallback(
+    (version: number, detail = "") => {
+      if (announcedRoute.current !== null && version <= announcedRoute.current) return
+      announcedRoute.current = version
+      toast.success(`New plan from where you are${detail}.`, {
+        duration: 10_000,
+        action: { label: "Battery?", onClick: askForBattery },
+      })
+    },
+    [askForBattery]
+  )
+  useEffect(() => {
+    // Read off `run`, which carries the version on the very first payload —
+    // not off the geometry, which is fetched a beat later and would therefore
+    // always look like it had just moved from 0.
+    if (!run) return
+    const v = run.route_version ?? 0
+    // Whatever road a page finds the drive on when it opens is not news; it is
+    // how the drive already was. Only a version that MOVES under an open page.
+    if (announcedRoute.current === null) {
+      announcedRoute.current = v
+      return
+    }
+    if (v > announcedRoute.current) announceReroute(v)
+  }, [run, announceReroute])
+
   const heroLive: LiveHeroState | null = useMemo(() => {
     if (!state || !run) return null
     return {
-      distM,
+      // The hero draws the journey as PLANNED, with the car on it, so the car
+      // belongs on that axis: distance from the origin. `distM` is measured
+      // along whatever road is current, which after a re-route restarts near
+      // zero and would walk the car back to the start of the diorama. Before
+      // any re-route the two are the same number.
+      distM: distM + drivenBeforeM,
       soc: state.soc,
       socLabel: socLabel(state.soc, state.soc_is_measured, state.soc_uncertainty_pct),
       startedAtIso: run.started_at,
@@ -204,7 +260,7 @@ export default function LiveView({
       secondsSincePing: run.seconds_since_ping ?? 0,
       nextStop,
     }
-  }, [state, run, distM, etaMin, revised, nextStop])
+  }, [state, run, distM, drivenBeforeM, etaMin, revised, nextStop])
 
   if (!state || !run || !heroLive) {
     return (
@@ -341,6 +397,30 @@ export default function LiveView({
     }
   }
 
+  /** "Plan from where I am." Fires automatically two minutes after the route
+   *  is lost (the server decides when); this is the same thing on demand, for
+   *  a driver who is not going to wait or who already knows the road ahead is
+   *  shut.
+   *
+   *  The toast names the detour because the energy for it is an ESTIMATE — the
+   *  app has no geometry for road it was not following — and the honest answer
+   *  to that is to ask for a real figure rather than fold a guess into the
+   *  battery and say nothing. */
+  async function doReroute(force = false) {
+    try {
+      const out = await live.reroute(force)
+      if (!out) return
+      // Whatever was on offer was on offer about a road we are no longer on.
+      setAlts(null)
+      announceReroute(
+        out.route.version,
+        out.detour_m > 500 ? ` — ${fmtKm(out.detour_m)} off route` : ""
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not find a new route")
+    }
+  }
+
   async function doReplan() {
     try {
       const plan = await live.requestReplan()
@@ -463,8 +543,8 @@ export default function LiveView({
         </div>
         <p className="mt-0.5 text-sm text-ink-500">
           {trip.request.origin.label.split(",")[0]} →{" "}
-          {trip.request.dest.label.split(",")[0]} · {fmtKm(distM)} of{" "}
-          {fmtKm(trip.result.total_dist_m)}
+          {trip.request.dest.label.split(",")[0]} · {fmtKm(distM + drivenBeforeM)} of{" "}
+          {fmtKm(totalDistM)}
           {isDriver ? " · you're driving" : " · you're watching"}
         </p>
 
@@ -608,15 +688,48 @@ export default function LiveView({
           </p>
         )}
 
+        {/* Off the route.
+            "Rejoin the route and they'll pick up again" was the whole answer
+            here, which is right for the thirty seconds it takes to drive round
+            a services and useless for a diversion, a closure, or a nav app
+            that knows about a jam this route does not. The figures still
+            freeze — the position genuinely is unknown — but the screen now
+            says what is being done about it, and the driver can ask for a road
+            from here without waiting for the automatic one. */}
         {state.stale && (
-          <p className="mt-3 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>
-              You&apos;re {fmtKm(state.off_route_m)} off the planned route, so the
-              figures are frozen at their last good values rather than guessed.
-              Rejoin the route and they&apos;ll pick up again.
-            </span>
-          </p>
+          <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <p className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                You&apos;re {fmtKm(state.off_route_m)} off the planned route, so the
+                figures are frozen at their last good values rather than guessed.
+                {live.rerouting
+                  ? " Finding a road from where you are…"
+                  : state.reroute_suggested
+                    ? " Getting you a plan for the road you're actually on."
+                    : " They'll pick up again as soon as you're back on it."}
+              </span>
+            </p>
+            {isDriver && !finished && (
+              <button
+                onClick={() => void doReroute()}
+                disabled={live.rerouting || live.busy}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-800 disabled:bg-amber-900/40"
+              >
+                {live.rerouting ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Re-routing…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Plan from where I am
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         )}
 
         {!finished && (
@@ -675,7 +788,11 @@ export default function LiveView({
         )}
 
         {revised && (
-          <RevisedPanel plan={revised} startedAtIso={run.started_at} />
+          <RevisedPanel
+            plan={revised}
+            startedAtIso={run.started_at}
+            drivenBeforeM={drivenBeforeM}
+          />
         )}
 
         {finished && (
@@ -738,9 +855,14 @@ function heroStop(next: Stop | null, distM: number): LiveHeroState["nextStop"] {
 function RevisedPanel({
   plan,
   startedAtIso,
+  drivenBeforeM = 0,
 }: {
   plan: NonNullable<LiveRun["plan"]>
   startedAtIso: string
+  /** Road driven on earlier routes. `offset_base_m` is measured along the
+   *  CURRENT one, so after a re-route it is near zero — and "re-planned 0 km
+   *  in" under a header saying 93 km is the plan disagreeing with the page. */
+  drivenBeforeM?: number
 }) {
   const b = plan.benchmark
   const worse = b.delta_min > 1
@@ -751,7 +873,8 @@ function RevisedPanel({
           Revised plan from here
         </h2>
         <span className="text-xs text-ink-400">
-          re-planned {fmtKm(plan.offset_base_m)} in · version {plan.plan_version}
+          re-planned {fmtKm(plan.offset_base_m + drivenBeforeM)} in · version{" "}
+          {plan.plan_version}
         </span>
       </div>
 

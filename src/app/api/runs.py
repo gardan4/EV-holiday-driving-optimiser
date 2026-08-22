@@ -38,12 +38,15 @@ from app.api.schemas import (
     BenchmarkOut,
     ChargingOut,
     LiveOut,
+    LiveRouteOut,
     LiveStateOut,
     PingRequest,
     PlanRequest,
     PlanResult,
     ReplanOut,
     ReplanRequest,
+    RerouteOut,
+    RerouteRequest,
     ReviewOut,
     ReviewStopOut,
     RunSummaryOut,
@@ -60,10 +63,11 @@ from app.models import Trip, TripEvent, TripRun, Vehicle
 from app.services import amenities
 from app.services import chargers as chargers_svc
 from app.services import live, routing
-from app.services.geo import haversine_m
+from app.services.geo import haversine_m, polyline_encode
 from app.services.simulator import (
     RouteProfile,
     SimParams,
+    SpeedResult,
     VehicleParams,
     charge_minutes,
     optimum,
@@ -269,6 +273,24 @@ ARRIVE_MATCH_M = 1_500.0
 # leg being driven and no other, so one accepted risk cannot become a journey
 # planned on fumes — see `SimParams.first_leg_reserve_soc`.
 STRETCH_FLOOR_SOC = 4.0
+
+
+def _travelled_m(st: dict) -> float:
+    """How far the car has come in total, across every road it has been on.
+
+    `offset_m` is measured along the CURRENT route, and a re-route replaces
+    that road — so on its own it restarts near zero mid-journey. Everything
+    that indexes into the route (the profile, charger offsets, the plan's
+    `offset_base_m`) wants `offset_m`; everything that is a HISTORY — the
+    breadcrumb trail, the review, "how far have you driven" — wants this, or it
+    draws a journey that jumps backwards.
+    """
+    return float(st.get("distance_before_m", 0.0)) + float(st.get("offset_m", 0.0))
+
+
+def _route_version(run: TripRun) -> int:
+    """Which road this drive is on. 0 is the trip's own route."""
+    return int((run.route_snapshot or {}).get("version", 0))
 
 
 def _excluded(st: dict) -> list[str]:
@@ -619,7 +641,7 @@ def _log_charge_edges(
                 run_id=run.id,
                 at=now,
                 kind=kind,
-                offset_m=float(after["offset_m"]),
+                offset_m=_travelled_m(after),
                 lat=after["lat"],
                 lon=after["lon"],
                 soc=round(soc, 1),
@@ -679,6 +701,22 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
         # too.
         can_undo_arrive=bool(st.get("arrive_undo")),
         charging=_charging_out(run, trip, vehicle, soc),
+        route_version=_route_version(run),
+        distance_before_m=round(st.get("distance_before_m", 0.0)),
+        # Off the route long enough that waiting for a rejoin has stopped being
+        # the useful answer. Reported to every reader, acted on only by the
+        # driver's device — a watcher cannot re-route anything.
+        reroute_suggested=live.reroute_due(st),
+    )
+
+
+def _live_route_out(run: TripRun, coords: list) -> LiveRouteOut:
+    snapshot = run.route_snapshot or {}
+    return LiveRouteOut(
+        version=_route_version(run),
+        polyline=polyline_encode([(la, lo) for la, lo in coords]),
+        total_dist_m=round(float(snapshot.get("total_dist_m") or 0.0)),
+        distance_before_m=round(run.state.get("distance_before_m", 0.0)),
     )
 
 
@@ -692,8 +730,17 @@ async def _trip_and_vehicle(db: AsyncSession, run: TripRun) -> tuple[Trip, Vehic
     return trip, vehicle
 
 
-def _snapshot_route(route: routing.RouteData, chargers: list) -> dict:
+def _snapshot_route(
+    route: routing.RouteData, chargers: list, version: int = 0
+) -> dict:
+    """Freeze the road a drive is being followed along.
+
+    `version` is 0 for the trip's own route and increments on every re-route.
+    It is what tells a client holding a polyline that the one it is projecting
+    GPS fixes onto is no longer the road the car is on.
+    """
     return {
+        "version": version,
         "segments": [
             {
                 "dist_m": s.dist_m,
@@ -735,10 +782,28 @@ def _geom_to_segment(snapshot: dict, geom_m: float) -> float:
     seg_offsets = snapshot.get("seg_geom_offsets") or []
     if not seg_offsets:
         return geom_m
+    return routing._lerp_axis(seg_offsets, _seg_cum(snapshot), geom_m)
+
+
+def _segment_to_geom(snapshot: dict, seg_m: float) -> float:
+    """The inverse: a simulator offset back onto the polyline's own axis.
+
+    The two differ by a few hundred metres over a long route, which is nothing
+    while driving and everything when the answer is "where did the car leave
+    the road" — `RouteGeometry.point_at` reads the geometry axis, and handing
+    it a segment offset lands somewhere plausible and wrong.
+    """
+    seg_offsets = snapshot.get("seg_geom_offsets") or []
+    if not seg_offsets:
+        return seg_m
+    return routing._lerp_axis(_seg_cum(snapshot), seg_offsets, seg_m)
+
+
+def _seg_cum(snapshot: dict) -> list[float]:
     cum = [0.0]
     for s in snapshot["segments"]:
         cum.append(cum[-1] + s["dist_m"])
-    return routing._lerp_axis(seg_offsets, cum, geom_m)
+    return cum
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +898,7 @@ async def start_run(
     await db.flush()
     db.add(
         TripEvent(
-            run_id=run.id, at=now, kind="start", offset_m=offset_m,
+            run_id=run.id, at=now, kind="start", offset_m=_travelled_m(state),
             lat=body.lat, lon=body.lon, soc=body.depart_soc,
             payload={"planned_speed_kph": body.planned_speed_kph},
         )
@@ -940,7 +1005,7 @@ async def ping(
         run.state = {**new_st, "last_crumb_min": at_min}
         db.add(
             TripEvent(
-                run_id=run.id, at=now, kind="breadcrumb", offset_m=offset_m,
+                run_id=run.id, at=now, kind="breadcrumb", offset_m=_travelled_m(new_st),
                 lat=body.lat, lon=body.lon,
                 soc=_live_soc(run, trip, vehicle),
             )
@@ -1089,7 +1154,7 @@ async def arrive(
     )
     db.add(
         TripEvent(
-            run_id=run.id, at=now, kind="arrive", offset_m=float(offset_m),
+            run_id=run.id, at=now, kind="arrive", offset_m=_travelled_m(run.state),
             lat=run.state["lat"], lon=run.state["lon"],
             soc=_live_soc(run, trip, vehicle),
             payload={
@@ -1147,7 +1212,7 @@ async def undo_arrive(
     db.add(
         TripEvent(
             run_id=run.id, at=now, kind="arrive_undo",
-            offset_m=float(run.state["offset_m"]),
+            offset_m=_travelled_m(run.state),
             lat=run.state["lat"], lon=run.state["lon"],
             soc=_live_soc(run, trip, vehicle),
             payload={},
@@ -1243,7 +1308,7 @@ async def record_soc(
     db.add(
         TripEvent(
             run_id=run.id, at=now, kind="soc_reading",
-            offset_m=new_st["offset_m"], lat=new_st["lat"], lon=new_st["lon"],
+            offset_m=_travelled_m(new_st), lat=new_st["lat"], lon=new_st["lon"],
             soc=body.soc,
             payload={
                 "estimated": round(before, 1),
@@ -1256,6 +1321,137 @@ async def record_soc(
     _log_charge_edges(db, run, prev_st, new_st, now, body.soc)
     await db.commit()
     return _state_out(run, trip, vehicle)
+
+
+async def _plan_remaining(
+    *,
+    run: TripRun,
+    trip: Trip,
+    veh: VehicleParams,
+    plan_req: PlanRequest,
+    snapshot: dict,
+    st: dict,
+    soc_now: float,
+    excluded: set[str],
+    floor: float | None,
+    hold: float | None,
+    lo: float,
+    hi: float,
+    step: float,
+) -> tuple[ReplanOut, "SpeedResult", dict]:
+    """Sweep the road still ahead and build the plan of record for it.
+
+    Shared by `/replan` and `/reroute`, which differ only in what road they
+    hand over: the first slices the one the car is already on, the second has
+    just fetched a new one. Everything after that — the break debt carried
+    forward, the held speed being IN the sweep, the benchmark against the
+    original promise — has to be identical, or the same drive gets two
+    different answers to "what happens from here" depending on which button was
+    pressed. It used to be one copy inside `replan`, which is the shape that
+    drifts the moment a second caller appears.
+    """
+    sl = _remaining_slice(snapshot, st["offset_m"], excluded)
+    if not sl.segments:
+        raise HTTPException(status_code=409, detail="You're already there.")
+
+    base = _sim_params(plan_req, st.get("run_factor", 1.0))
+    params = SimParams(
+        **{
+            **{f: getattr(base, f) for f in base.__dataclass_fields__},
+            "depart_soc": soc_now,
+            # Carry the break debt: two hours already driven doesn't reset
+            # because the plan did.
+            "prior_drive_min": st["at_min"],
+            "prior_rest_credit_min": st.get("rest_credit_min", 0.0),
+            "first_leg_reserve_soc": floor,
+        }
+    )
+
+    lo = max(60.0, lo)
+    hi = min(hi, veh.top_speed_kph)
+    n = max(1, int((hi - lo) / step) + 1)
+    # `POST /api/trips` caps its sweep; this path did not, so `full_range` with
+    # the minimum step ran ~4x the work per request — on a token the caller
+    # mints for themselves.
+    if n > MAX_SWEEP_POINTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Too many speeds to simulate (max {MAX_SWEEP_POINTS}).",
+        )
+    speeds = [s for s in (lo + i * step for i in range(n)) if s <= hi]
+    if not speeds:
+        speeds = [min(run.planned_speed_kph, veh.top_speed_kph)]
+
+    # A held speed has to be IN the sweep, or the driver's own choice is the
+    # one speed the answer cannot be. Clamped to what the car can do rather
+    # than refused: "hold 200" in a car that stops at 160 is a request for
+    # everything it has.
+    if hold is not None:
+        hold = min(max(hold, 60.0), veh.top_speed_kph)
+        if all(abs(s - hold) > 1e-6 for s in speeds):
+            speeds = sorted([*speeds, hold])
+
+    results = await asyncio.to_thread(sweep_slice, sl, veh, speeds, params)
+    fastest = optimum(results)
+    if fastest is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"No plan reaches the destination from {soc_now:.0f}% here. "
+                "Charge at the nearest available point first."
+            ),
+        )
+
+    # The plan in force is the driver's speed when they have chosen one. It is
+    # reported as `optimum_speed` because that is what every reader treats as
+    # "the speed to hold"; `held_speed_kph` is how they can tell the difference
+    # and `hold_costs_min` is what it costs.
+    best = fastest
+    if hold is not None:
+        picked = next(
+            (r for r in results if r.feasible and abs(r.speed_kph - hold) < 1e-6),
+            None,
+        )
+        if picked is None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"No plan reaches the destination holding {hold:.0f} km/h "
+                    "from here. Try a lower speed."
+                ),
+            )
+        best = picked
+
+    original = _planned_result(trip, run.planned_speed_kph) or {}
+    # Against the distance TRAVELLED, not the offset on the current road: the
+    # original itinerary is measured from the original origin, and after a
+    # re-route `offset_m` restarts — which would count every stop already
+    # passed as still ahead.
+    stops_ahead = [
+        s for s in original.get("stops", []) if s["offset_m"] > _travelled_m(st)
+    ]
+    bench = live.benchmark(
+        original_speed_kph=run.planned_speed_kph,
+        original_total_min=original.get("total_min") or 0.0,
+        elapsed_min=st["at_min"],
+        remaining=best,
+        original_stops_remaining=len(stops_ahead),
+    )
+
+    out = ReplanOut(
+        plan_version=run.plan_version + 1,
+        held_speed_kph=hold,
+        hold_costs_min=round(
+            (best.total_min or 0.0) - (fastest.total_min or 0.0), 1
+        ),
+        offset_base_m=round(st["offset_m"]),
+        elapsed_min=round(st["at_min"], 1),
+        remaining=_result_out(best),
+        speeds=[_result_out(r) for r in results],
+        optimum_speed=best.speed_kph,
+        benchmark=BenchmarkOut(**bench),
+    )
+    return out, best, bench
 
 
 @router.post("/runs/{run_id}/replan", response_model=ReplanOut)
@@ -1339,109 +1535,27 @@ async def replan(
     # walked away from.
     excluded = _merge_exclusions(run, body.exclude_charger_ids)
     floor = _set_first_leg_floor(run, body.min_arrival_soc)
-    sl = _remaining_slice(snapshot, st["offset_m"], excluded)
-    if not sl.segments:
-        raise HTTPException(status_code=409, detail="You're already there.")
-
-    base = _sim_params(plan_req, st.get("run_factor", 1.0))
-    params = SimParams(
-        **{
-            **{f: getattr(base, f) for f in base.__dataclass_fields__},
-            "depart_soc": soc_now,
-            # Carry the break debt: two hours already driven doesn't reset
-            # because the plan did.
-            "prior_drive_min": st["at_min"],
-            "prior_rest_credit_min": st.get("rest_credit_min", 0.0),
-            "first_leg_reserve_soc": floor,
-        }
-    )
-
     centre = run.planned_speed_kph
     if body.full_range:
         lo, hi = plan_req.speed_min, plan_req.speed_max
     else:
         lo, hi = centre - body.speed_span_kph, centre + body.speed_span_kph
-    lo = max(60.0, lo)
-    hi = min(hi, veh.top_speed_kph)
-    n = max(1, int((hi - lo) / body.speed_step) + 1)
-    # `POST /api/trips` caps its sweep; this path did not, so `full_range` with
-    # the minimum step ran ~4x the work per request — on a token the caller
-    # mints for themselves.
-    if n > MAX_SWEEP_POINTS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Too many speeds to simulate (max {MAX_SWEEP_POINTS}).",
-        )
-    speeds = [s for s in (lo + i * body.speed_step for i in range(n)) if s <= hi]
-    if not speeds:
-        speeds = [min(centre, veh.top_speed_kph)]
-
-    # A held speed has to be IN the sweep, or the driver's own choice is the
-    # one speed the answer cannot be. Clamped to what the car can do rather
-    # than refused: "hold 200" in a car that stops at 160 is a request for
-    # everything it has.
-    hold = _resolve_hold_speed(run, body)
-    if hold is not None:
-        hold = min(max(hold, 60.0), veh.top_speed_kph)
-        if all(abs(s - hold) > 1e-6 for s in speeds):
-            speeds = sorted([*speeds, hold])
-
-    results = await asyncio.to_thread(sweep_slice, sl, veh, speeds, params)
-    fastest = optimum(results)
-    if fastest is None:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"No plan reaches the destination from {soc_now:.0f}% here. "
-                "Charge at the nearest available point first."
-            ),
-        )
-
-    # The plan in force is the driver's speed when they have chosen one. It is
-    # reported as `optimum_speed` because that is what every reader treats as
-    # "the speed to hold"; `held_speed_kph` is how they can tell the difference
-    # and `hold_costs_min` is what it costs.
-    best = fastest
-    if hold is not None:
-        picked = next(
-            (r for r in results if r.feasible and abs(r.speed_kph - hold) < 1e-6),
-            None,
-        )
-        if picked is None:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"No plan reaches the destination holding {hold:.0f} km/h "
-                    "from here. Try a lower speed."
-                ),
-            )
-        best = picked
-
-    original = _planned_result(trip, run.planned_speed_kph) or {}
-    stops_ahead = [
-        s for s in original.get("stops", []) if s["offset_m"] > st["offset_m"]
-    ]
-    bench = live.benchmark(
-        original_speed_kph=run.planned_speed_kph,
-        original_total_min=original.get("total_min") or 0.0,
-        elapsed_min=st["at_min"],
-        remaining=best,
-        original_stops_remaining=len(stops_ahead),
+    out, best, bench = await _plan_remaining(
+        run=run,
+        trip=trip,
+        veh=veh,
+        plan_req=plan_req,
+        snapshot=snapshot,
+        st=st,
+        soc_now=soc_now,
+        excluded=excluded,
+        floor=floor,
+        hold=_resolve_hold_speed(run, body),
+        lo=lo,
+        hi=hi,
+        step=body.speed_step,
     )
-
-    out = ReplanOut(
-        plan_version=run.plan_version + 1,
-        held_speed_kph=hold,
-        hold_costs_min=round(
-            (best.total_min or 0.0) - (fastest.total_min or 0.0), 1
-        ),
-        offset_base_m=round(st["offset_m"]),
-        elapsed_min=round(st["at_min"], 1),
-        remaining=_result_out(best),
-        speeds=[_result_out(r) for r in results],
-        optimum_speed=best.speed_kph,
-        benchmark=BenchmarkOut(**bench),
-    )
+    hold = out.held_speed_kph
     run.plan = out.model_dump(mode="json")
     run.plan_version = run.plan_version + 1
     run.n_replans = run.n_replans + 1
@@ -1449,7 +1563,7 @@ async def replan(
     run.last_seen_at = now
     db.add(
         TripEvent(
-            run_id=run.id, at=now, kind="replan", offset_m=st["offset_m"],
+            run_id=run.id, at=now, kind="replan", offset_m=_travelled_m(st),
             lat=st["lat"], lon=st["lon"], soc=soc_now,
             payload={
                 "speed_kph": best.speed_kph,
@@ -1460,6 +1574,211 @@ async def replan(
     )
     await db.commit()
     return out
+
+
+@router.post("/runs/{run_id}/reroute", response_model=RerouteOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_REROUTE, key_func=run_key)
+async def reroute(
+    request: Request,
+    run_id: str,
+    body: RerouteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RerouteOut:
+    """Off the route: fetch a road from where the car actually is, and plan it.
+
+    Leaving the route is ordinary — a diversion, a closed slip road, a
+    supermarket, a nav app that knows about a jam ORS does not — and the drive
+    answered all of it the same way: freeze every figure and say "rejoin the
+    route". `/replan` refused outright for the same reason, which is right for
+    what it does (it slices the road the car is on, and the car is not on it)
+    and useless as the only option. The plan for the road you are ACTUALLY on
+    is the one thing worth having at that moment.
+
+    Four things make it a re-route rather than a second `/replan`.
+
+    **It is the only mid-drive call that spends UPSTREAM quota** — a fresh
+    directions request, plus corridor tiles that may be cold — so on-route it
+    refuses and points at `/replan`, which answers the same question for free.
+    `force` exists for a driver who knows the road ahead is shut; the rate
+    limit is an order of magnitude tighter than the re-plan's either way.
+
+    **The axis moves and the history does not.** `offset_m` is measured along
+    the snapshot, and the snapshot is being replaced — so the car lands at zero
+    on a road that did not exist a moment ago. `live.rebase` banks what came
+    before into `distance_before_m`, and every consumer takes the one it means:
+    the profile and the charger offsets read `offset_m`, the trail and the
+    review read `_travelled_m`.
+
+    **The detour is billed, and labelled.** While off-route `advance` returned
+    early and spent nothing — right while the position is unknown, wrong the
+    moment it is known again. `rebase` prices the crow-flies gap as flat road
+    and drops `soc_is_measured`, so the screen asks for a real figure rather
+    than carrying an estimate flattering by however far the detour ran.
+
+    **What the driver chose survives; what the road decided does not.**
+    Rejected chargers stay rejected — that was a judgement about a site, and
+    sites do not move. An accepted stretch below the reserve does NOT: it was
+    about reaching one particular plug on a leg that no longer exists, and
+    carrying it over would plan a new road on a floor nobody agreed to. Same
+    rule as `_clear_first_leg_floor`, for the same reason.
+    """
+    run = await _load_run(db, run_id)
+    if run.status != "active":
+        raise HTTPException(status_code=409, detail="This drive has finished.")
+    trip, vehicle = await _trip_and_vehicle(db, run)
+
+    plan_req = PlanRequest.model_validate(trip.request)
+    veh = VehicleParams.from_vehicle(vehicle)
+    old_snapshot = run.route_snapshot
+
+    _geom_off, off_route = _geometry(old_snapshot).project(body.lat, body.lon)
+    if off_route <= live.OFF_ROUTE_M and not body.force:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "You're still on the planned route — re-plan from here instead "
+                "of asking for a new road."
+            ),
+        )
+
+    # The battery BEFORE the road changes. `rebase` adds the detour to it, and
+    # reading it afterwards would price the remaining journey off a state that
+    # is halfway through being rewritten.
+    soc_before = _live_soc(run, trip, vehicle)
+    speed = float((run.plan or {}).get("optimum_speed") or run.planned_speed_kph)
+
+    # How far the car strayed, as the crow flies from where it left the road.
+    # NOT from the last fix — while off-route that is wherever it wandered to,
+    # and the drive's own position is the last point on the old route it can
+    # vouch for.
+    left_at = _geometry(old_snapshot).point_at(
+        _segment_to_geom(old_snapshot, run.state["offset_m"])
+    )
+    detour_m = haversine_m(left_at[0], left_at[1], body.lat, body.lon)
+
+    route = await routing.get_route(
+        db, body.lat, body.lon, plan_req.dest.lat, plan_req.dest.lon
+    )
+    charger_nodes = await chargers_svc.chargers_for_route(db, route)
+    snapshot = _snapshot_route(route, charger_nodes, _route_version(run) + 1)
+
+    now = datetime.utcnow()
+    at_min = (now - run.started_at).total_seconds() / 60.0
+    # Minutes nothing was billed for. `advance` stops spending energy the
+    # instant it goes stale, so the window runs from when the route was lost —
+    # not from the last ping, which kept arriving and kept costing nothing.
+    since = run.state.get("off_route_since_min")
+    unbilled_min = at_min - float(since if since is not None else run.state["at_min"])
+    prev_st = run.state
+    new_st = live.rebase(
+        run.state,
+        veh=veh,
+        p=_sim_params(plan_req, run.state.get("run_factor", 1.0)),
+        lat=body.lat,
+        lon=body.lon,
+        at_min=at_min,
+        detour_m=detour_m,
+        speed_kph=speed,
+        unbilled_min=unbilled_min,
+    )
+    # The stretch floor dies with the leg it was about — see the docstring.
+    run.state = _clear_first_leg_floor(new_st)
+    run.route_snapshot = snapshot
+    _log_charge_edges(db, run, prev_st, run.state, now, soc_before)
+
+    st = run.state
+    soc_now = _live_soc(run, trip, vehicle)
+    excluded = _merge_exclusions(run, [])
+
+    # `model_fields_set` is what separates "leave my speed alone" from "you
+    # pick" — the same three-way distinction a re-plan draws, so it goes
+    # through the same resolver rather than a second reading of the rule.
+    hold = _resolve_hold_speed(
+        run,
+        ReplanRequest(
+            **(
+                {"hold_speed_kph": body.hold_speed_kph}
+                if "hold_speed_kph" in body.model_fields_set
+                else {}
+            )
+        ),
+    )
+
+    defaults = ReplanRequest()
+    centre = run.planned_speed_kph
+    out, best, bench = await _plan_remaining(
+        run=run,
+        trip=trip,
+        veh=veh,
+        plan_req=plan_req,
+        snapshot=snapshot,
+        st=st,
+        soc_now=soc_now,
+        excluded=excluded,
+        floor=None,
+        hold=hold,
+        lo=centre - defaults.speed_span_kph,
+        hi=centre + defaults.speed_span_kph,
+        step=defaults.speed_step,
+    )
+
+    run.plan = out.model_dump(mode="json")
+    run.plan_version = run.plan_version + 1
+    # Counted as a re-plan as well: every existing reader of `n_replans` means
+    # "how often did this drive have to be re-thought", and a re-route is the
+    # strongest instance of that. The `reroute` event is the finer-grained one.
+    run.n_replans = run.n_replans + 1
+    run.last_seen_at = now
+    db.add(
+        TripEvent(
+            run_id=run.id, at=now, kind="reroute", offset_m=_travelled_m(st),
+            lat=st["lat"], lon=st["lon"], soc=soc_now,
+            payload={
+                "detour_m": round(detour_m),
+                "off_route_m": round(off_route),
+                "route_version": _route_version(run),
+                "speed_kph": best.speed_kph,
+                "delta_min": round(bench["delta_min"], 1),
+                "n_stops": best.n_stops,
+            },
+        )
+    )
+    await db.commit()
+    logger.info(
+        "live run rerouted ref=%s v=%s detour=%.0fm",
+        run_ref_for(run.id), _route_version(run), detour_m,
+    )
+    return RerouteOut(
+        state=_state_out(run, trip, vehicle),
+        plan=out,
+        route=_live_route_out(run, route.geometry.coords),
+        detour_m=round(detour_m),
+    )
+
+
+@router.get("/trips/{trip_id}/live/route", response_model=LiveRouteOut)
+@limiter.limit(settings.RATE_LIMIT_LIVE_READ)
+async def get_live_route(
+    request: Request,
+    trip_id: str,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> LiveRouteOut:
+    """The road the drive is on now — geometry only.
+
+    Its own endpoint because `GET /live` is polled every ten seconds and a
+    polyline is tens of kilobytes. Clients hold this and refetch only when
+    `route_version` moves, which for most drives is never. Public like every
+    other read on a trip id: a watcher following the link has to see the road
+    the car actually turned onto, or their screen shows it driving through
+    fields.
+    """
+    run = await _latest_run(db, trip_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No live drive for this trip.")
+    response.headers["Cache-Control"] = "no-store"
+    coords = [(la, lo) for la, lo in (run.route_snapshot or {}).get("coords", [])]
+    return _live_route_out(run, coords)
 
 
 @router.post("/runs/{run_id}/alternatives", response_model=AlternativesOut)
@@ -1858,7 +2177,7 @@ async def finish(
         db.add(
             TripEvent(
                 run_id=run.id, at=now, kind="finish",
-                offset_m=run.state["offset_m"], lat=run.state["lat"],
+                offset_m=_travelled_m(run.state), lat=run.state["lat"],
                 lon=run.state["lon"],
                 soc=_live_soc(run, trip, vehicle),
                 payload={"at_min": run.state["at_min"]},
@@ -1925,6 +2244,7 @@ async def get_live(
         state=_state_out(run, trip, vehicle),
         plan=ReplanOut.model_validate(run.plan) if run.plan else None,
         trail=trail,
+        route_version=_route_version(run),
         seconds_since_ping=max(
             0.0, (datetime.utcnow() - run.last_seen_at).total_seconds()
         ),
@@ -1958,7 +2278,7 @@ async def list_runs(
             started_at=r.started_at,
             finished_at=r.finished_at,
             planned_speed_kph=r.planned_speed_kph,
-            distance_m=round(r.state.get("offset_m", 0.0)),
+            distance_m=round(_travelled_m(r.state)),
             n_replans=r.n_replans,
         )
         for r in rows.scalars().all()

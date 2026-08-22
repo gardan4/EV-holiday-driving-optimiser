@@ -139,6 +139,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_RUN_START: str = "6/hour"         # per IP: starting a drive is rare
     RATE_LIMIT_LIVE_PING: str = "12/minute"      # per run: ~25 s cadence + retries
     RATE_LIMIT_LIVE_REPLAN: str = "6/minute"     # per run: a real CPU sweep
+    # Per run. A re-route is the only mid-drive call that spends UPSTREAM quota
+    # — a fresh directions request plus whatever corridor tiles are cold — so
+    # it is metered far tighter than the CPU-only re-plan beside it. Ten an
+    # hour covers a genuinely lost afternoon (the client only asks after two
+    # sustained minutes off-route) without letting one drive eat the day's ORS
+    # allowance.
+    RATE_LIMIT_LIVE_REROUTE: str = "10/hour"
     # Looking at alternatives is BROWSING, not deciding, so it does not share
     # the re-plan budget. Every stop in the plan has a swap button and reading
     # the list for each is the feature working as intended — a six-stop plan

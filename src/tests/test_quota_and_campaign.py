@@ -341,6 +341,100 @@ class TestQuota:
         assert p.cache_hits_today == 1
         routing._geocode_cache.clear()
 
+    async def test_reverse_geocode_names_a_coordinate_and_is_counted(
+        self, client, db_session, monkeypatch
+    ):
+        """"Start from where I am" is a NAMING call.
+
+        The browser already has the coordinates; what it cannot do is put a
+        place on them, and a trip whose origin reads "52.09, 5.12" is one
+        nobody can check before planning it or recognise afterwards. Metered as
+        `geocode` because HeiGIT counts Pelias against one allowance whichever
+        endpoint spends it.
+        """
+        from app.services import routing
+
+        monkeypatch.setattr(settings, "ORS_API_KEY", "test-key")
+        routing._reverse_cache.clear()
+        seen: list[dict] = []
+
+        class _Resp:
+            @staticmethod
+            def raise_for_status() -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return {
+                    "features": [
+                        {
+                            "geometry": {"coordinates": [5.1214, 52.0907]},
+                            "properties": {
+                                "label": "Domplein, Utrecht, Netherlands",
+                                "country_a": "NLD",
+                            },
+                        }
+                    ]
+                }
+
+        async def fake_get(url, **k):
+            seen.append(k.get("params", {}))
+            return _Resp()
+
+        monkeypatch.setattr(routing._http(), "get", fake_get)
+
+        resp = await client.get("/api/geocode/reverse?lat=52.0908&lon=5.1213")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["label"] == "Domplein, Utrecht, Netherlands"
+        # The point that came BACK, not the one that went in: Pelias answers
+        # with the feature it matched, and routing from the named thing is what
+        # makes the itinerary agree with the label on screen.
+        assert body["lat"] == pytest.approx(52.0907)
+        assert seen[0]["point.lat"] == pytest.approx(52.0908)
+
+        p = await _svc(db_session, "ors", "geocode")
+        assert p.calls_today == 1
+
+        # A fix a few metres away is the same doorstep and the same answer.
+        # Without rounding the key, every GPS reading would be its own request.
+        assert (
+            await client.get("/api/geocode/reverse?lat=52.09081&lon=5.12131")
+        ).status_code == 200
+        p = await _svc(db_session, "ors", "geocode")
+        assert p.calls_today == 1, "a nearby fix must not spend a second request"
+
+    async def test_reverse_geocode_404s_rather_than_inventing_a_label(
+        self, client, monkeypatch
+    ):
+        """Somewhere Pelias cannot name is somewhere this app cannot route
+        from. A coordinate label would move the failure to the routing call,
+        where the message is about roads instead of about the button pressed."""
+        from app.services import routing
+
+        monkeypatch.setattr(settings, "ORS_API_KEY", "test-key")
+        routing._reverse_cache.clear()
+
+        class _Resp:
+            @staticmethod
+            def raise_for_status() -> None: ...
+
+            @staticmethod
+            def json() -> dict:
+                return {"features": []}
+
+        async def fake_get(*a, **k):
+            return _Resp()
+
+        monkeypatch.setattr(routing._http(), "get", fake_get)
+        resp = await client.get("/api/geocode/reverse?lat=0.0&lon=-140.0")
+        assert resp.status_code == 404
+        assert "type where" in resp.json()["detail"].lower()
+
+    async def test_reverse_geocode_rejects_a_nonsense_coordinate(self, client):
+        assert (
+            await client.get("/api/geocode/reverse?lat=999&lon=0")
+        ).status_code == 422
+
     async def test_a_two_letter_query_never_reaches_the_provider(self, client, db_session):
         """Autocomplete is the biggest consumer of the free tier and two-letter
         prefixes are its highest-volume, least-useful bucket. Rejecting them at

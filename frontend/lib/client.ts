@@ -167,6 +167,17 @@ export async function geocode(q: string): Promise<GeocodeHit[]> {
   return unwrap<GeocodeHit[]>(await apiFetch(`/api/geocode?q=${encodeURIComponent(q)}`))
 }
 
+/** A coordinate → the place it is in. Backs "start from where I am".
+ *
+ *  The browser has the coordinates already; this exists to NAME them. 404 when
+ *  nothing is near — somewhere unnamed is somewhere the router cannot start
+ *  from either, so the caller falls back to asking the reader to type it. */
+export async function reverseGeocode(lat: number, lon: number): Promise<GeocodeHit> {
+  return unwrap<GeocodeHit>(
+    await apiFetch(`/api/geocode/reverse?lat=${lat}&lon=${lon}`)
+  )
+}
+
 /** Plan a trip and persist its permalink.
  *
  *  Carries both identifiers this app has, and is the ONLY read/write here that
@@ -372,6 +383,16 @@ export interface LiveState {
   can_undo_arrive?: boolean
   /** The session at the plug, while there is one. */
   charging?: ChargingSession | null
+  /** Which road this drive is on: 0 is the trip's own route, every re-route
+   *  bumps it. `offset_m` is measured along THAT road, so a page still holding
+   *  the trip's polyline is projecting onto a road the car has left. */
+  route_version: number
+  /** Road driven on earlier routes. Add it to `offset_m` for "how far have we
+   *  come"; never add it before comparing with a stop's offset. */
+  distance_before_m: number
+  /** Off the route long enough that waiting to rejoin has stopped being the
+   *  useful answer. The driver's device acts on this; a watcher just sees it. */
+  reroute_suggested: boolean
 }
 
 export interface Benchmark {
@@ -462,6 +483,27 @@ export interface LiveRun {
   /** How long since the driving phone last reported. A page whose driver lost
    *  signal must say so rather than show the same numbers under a live badge. */
   seconds_since_ping: number
+  /** Mirrors `state.route_version`. Its geometry is fetched separately — a
+   *  polyline is tens of kilobytes and this response is polled every 10 s. */
+  route_version: number
+}
+
+/** The road a drive is on now. Fetched only when `route_version` moves, which
+ *  for most drives is never. */
+export interface LiveRoute {
+  version: number
+  polyline: string
+  total_dist_m: number
+  distance_before_m: number
+}
+
+export interface RerouteResult {
+  state: LiveState
+  plan: RevisedPlan
+  route: LiveRoute
+  /** How far off the route the car had got, as the crow flies. The energy for
+   *  it is an estimate, so the screen says so rather than folding it in. */
+  detour_m: number
 }
 
 export interface RunSummary {
@@ -577,6 +619,34 @@ export async function recordSoc(
  *  `excludeChargerIds` are stops the driver has turned down; the server merges
  *  them into the set it already holds for this run and keeps them, so a
  *  rejection survives every later re-plan rather than lasting one request. */
+/** "Plan me a road from where I actually am."
+ *
+ *  The fix is REQUIRED, unlike a re-plan: a re-plan slices the road the car is
+ *  already on, this one asks the router for a road that does not exist yet, and
+ *  the only position worth building it from is the one the phone can see now. */
+export async function rerouteRun(
+  runId: string,
+  here: { lat: number; lon: number },
+  opts: { force?: boolean; holdSpeedKph?: number | null } = {}
+): Promise<RerouteResult> {
+  const body: Record<string, unknown> = { lat: here.lat, lon: here.lon }
+  if (opts.force) body.force = true
+  if (opts.holdSpeedKph !== undefined) body.hold_speed_kph = opts.holdSpeedKph
+  return unwrap<RerouteResult>(
+    await apiFetch(`/api/runs/${runId}/reroute`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    })
+  )
+}
+
+/** The road the drive is on now — geometry only, and public like every other
+ *  read on a trip id, so a watcher sees the road the car actually turned onto
+ *  rather than watching it drive through fields. */
+export async function getLiveRoute(tripId: string): Promise<LiveRoute> {
+  return unwrap<LiveRoute>(await apiFetch(`/api/trips/${tripId}/live/route`))
+}
+
 export async function replanRun(
   runId: string,
   excludeChargerIds: string[] = [],

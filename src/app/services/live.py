@@ -43,6 +43,31 @@ from app.services.simulator import (
 # inference stops and says so.
 OFF_ROUTE_M = 500.0
 
+# How long the car has to stay off the route before the drive stops waiting for
+# it to come back and asks for a new road instead.
+#
+# Going off route is ordinary — a diversion, a closed slip road, a supermarket,
+# a nav app that knows something ORS does not — and the drive used to answer all
+# of it the same way: freeze every figure and say "rejoin the route". That is
+# right for the thirty seconds it takes to drive round a services and wrong for
+# everything else, because the one thing the driver wants at that moment is the
+# plan for the road they are ACTUALLY on.
+#
+# Two minutes rather than instantly, because a re-route is a fresh directions
+# call against a free-tier ceiling and a single wild fix must not spend one. Two
+# minutes of sustained divergence is a decision, not a glitch — at any real
+# speed the car is kilometres away by then and no longer plausibly returning to
+# the same point.
+REROUTE_AFTER_MIN = 2.0
+
+# What the crow-flies distance is multiplied by when the energy spent off-route
+# is billed. Roads are not straight, so the straight line between where the car
+# left the route and where it reappeared is a FLOOR on what it drove — and
+# under-billing an EV's battery is the dangerous direction to be wrong in.
+# 1.3 is the usual road-versus-crow ratio; it is a labelled estimate, which is
+# why a reading is asked for immediately afterwards.
+OFF_ROUTE_WINDING = 1.3
+
 # Fixes this vague don't move the position; they're recorded but ignored.
 MAX_ACCURACY_M = 200.0
 
@@ -112,6 +137,14 @@ def new_state(offset_m: float, soc: float, lat: float, lon: float, at_min: float
         # Multiplier on consumption learned from the driver's own corrections.
         "run_factor": 1.0,
         "off_route_m": 0.0,
+        # When the car first went off the route, on the drive's own clock.
+        # Null whenever it is on it. `reroute_due` reads the age of this.
+        "off_route_since_min": None,
+        # How much road was driven on EARLIER routes. `offset_m` is measured
+        # along the CURRENT snapshot, which restarts at zero every time the
+        # drive is re-routed; this is what keeps "how far have I come" one
+        # number that only ever goes up. See `rebase`.
+        "distance_before_m": 0.0,
         "at_charger_id": None,
         "stale": False,
     }
@@ -180,7 +213,12 @@ def bank_charge(
     kw = out.pop("charge_kw", None)
     if anchor is None:
         return out
-    minutes = max(0.0, float(until_min) - float(anchor_min or until_min))
+    # `anchor_min is None`, not `or` — the anchor minute is a POSITION on the
+    # drive's clock and zero is a real one. `or` read a charge that started at
+    # minute zero as one with no start time at all, banked it as zero minutes,
+    # and handed back a battery that had visibly been charging.
+    start_min = float(anchor_min) if anchor_min is not None else float(until_min)
+    minutes = max(0.0, float(until_min) - start_min)
     gained = (
         charge_forward(veh, float(anchor), minutes, float(kw or 0.0), p.charge_power_factor)
         - float(anchor)
@@ -272,6 +310,102 @@ def resync(
     return out
 
 
+def reroute_due(state: dict) -> bool:
+    """Has the car been off the route long enough to want a new one?
+
+    Read off the drive's own clock rather than the wall clock, so a phone that
+    slept through the detour and woke up 40 minutes later is judged on the same
+    scale as one that reported throughout.
+    """
+    since = state.get("off_route_since_min")
+    if since is None or not state.get("stale"):
+        return False
+    return (state.get("at_min", 0.0) - float(since)) >= REROUTE_AFTER_MIN
+
+
+def rebase(
+    state: dict,
+    *,
+    veh: VehicleParams,
+    p: SimParams,
+    lat: float,
+    lon: float,
+    at_min: float,
+    detour_m: float,
+    speed_kph: float,
+    unbilled_min: float,
+) -> dict:
+    """Move the drive onto a NEW route, starting from where the car is.
+
+    Re-routing replaces the road, and `offset_m` is measured along it — so the
+    car lands at zero on an axis that did not exist a moment ago. Two things
+    have to survive that.
+
+    **How far you have come only ever goes up.** `distance_before_m` banks the
+    old route's driven distance, so the breadcrumb trail, the review and the
+    drive's own "distance" stay one monotonic number across any number of
+    re-routes. Everything that indexes INTO the route — the profile, the
+    charger offsets, the plan's `offset_base_m` — keeps using `offset_m` alone,
+    which is why it is rebased rather than accumulated in place.
+
+    **The detour is billed, and bounded.** While the car was off-route
+    `advance` returned early and spent nothing, which is right when the
+    position is unknown and wrong the moment it is known again: the energy went
+    somewhere. There is no geometry for road we were not following, so it is
+    priced as flat road at the plan's cruise over `detour_m` — the crow-flies
+    gap, widened by `OFF_ROUTE_WINDING`, because a straight line is a floor on
+    what was actually driven.
+
+    The bound is what stops that being reckless. A phone that slept through the
+    whole detour reappears wherever it reappears, and the straight line to it
+    can be hundreds of kilometres — a fix that surfaces in another country
+    would otherwise bill a full battery and the re-plan would answer "no plan
+    reaches the destination from 0%". So the distance is capped at what the car
+    could have covered in `unbilled_min` at `speed_kph`: whatever the fix says,
+    the clock says you cannot have driven further than that.
+
+    It is an estimate either way and is treated as one: `soc_is_measured` goes
+    false, so the screen asks for a reading and `apply_reading` corrects it.
+    """
+    out = dict(state)
+    out["distance_before_m"] = float(state.get("distance_before_m", 0.0)) + float(
+        state.get("offset_m", 0.0)
+    )
+    out["offset_m"] = 0.0
+    # The anchor is a position on the OLD axis, and every later reading is
+    # measured from it. Move it with the car; `kwh_used` already holds what has
+    # been spent since it was set, so nothing is double-counted.
+    out["anchor_offset_m"] = 0.0
+    out["at_min"] = max(at_min, state.get("at_min", 0.0))
+    out["lat"] = lat
+    out["lon"] = lon
+    out["off_route_m"] = 0.0
+    out["off_route_since_min"] = None
+    out["stale"] = False
+
+    reachable_m = max(0.0, unbilled_min) / 60.0 * speed_kph * 1000.0
+    billed_m = min(max(0.0, detour_m) * OFF_ROUTE_WINDING, reachable_m)
+    if billed_m > 0.0:
+        leg = [RouteSegment(dist_m=billed_m, freeflow_kph=speed_kph)]
+        prof = RouteProfile(leg, speed_kph, veh, replace(p, aux_kw=0.0))
+        out["kwh_used"] = out["kwh_used"] + max(0.0, prof.kwh_at(billed_m))
+        # The hours themselves still cost the heater, whatever the distance.
+        out["kwh_used"] = out["kwh_used"] + p.aux_kw * (max(0.0, unbilled_min) / 60.0)
+    out["soc_is_measured"] = False
+
+    # A charge session cannot survive a road change: the plug it was anchored
+    # to is on the route we have just left. Banked at now, exactly as `resync`
+    # does for the same reason.
+    if state.get("charge_anchor_soc") is not None:
+        out = bank_charge(out, veh, p, out["at_min"])
+    out["at_charger_id"] = None
+    # The undo would restore a state on the old axis, which is no longer a
+    # position this drive can be put back to.
+    out.pop("arrive_undo", None)
+    out.pop("need_soc_next", None)
+    return out
+
+
 def advance(
     state: dict,
     *,
@@ -316,8 +450,11 @@ def advance(
         # sits there — a phone carried into the services, a poor stationary fix
         # between buildings — is a fact about the fix, not about the car.
         out["stale"] = True
+        if state.get("off_route_since_min") is None:
+            out["off_route_since_min"] = at_min
         return out
     out["stale"] = False
+    out["off_route_since_min"] = None
 
     # Never let a wobbly fix walk the car backwards along the route.
     dx = max(0.0, offset_m - prev_offset)

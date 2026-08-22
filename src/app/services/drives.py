@@ -231,7 +231,12 @@ async def plan_vs_actual(
     for planned, started, finished, state in rows:
         if not (planned and started and finished and finished > started):
             continue
-        offset_m = (state or {}).get("offset_m") if isinstance(state, dict) else None
+        st = state if isinstance(state, dict) else {}
+        # Both halves. `offset_m` is measured along the CURRENT route, which
+        # restarts at zero every time a drive is re-routed, so a drive that
+        # went round a closure would report only the road since — and land in
+        # this chart as an implausibly slow journey.
+        offset_m = (st.get("offset_m") or 0.0) + (st.get("distance_before_m") or 0.0)
         if not offset_m:
             continue
         hours = (finished - started).total_seconds() / 3600.0

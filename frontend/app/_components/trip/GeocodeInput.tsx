@@ -1,24 +1,36 @@
 "use client"
 
 import { useEffect, useId, useRef, useState } from "react"
-import { MapPin } from "lucide-react"
-import { geocode, GeocodeHit, PlacePoint } from "@/lib/client"
+import { Crosshair, Loader2, MapPin } from "lucide-react"
+import { geocode, reverseGeocode, GeocodeHit, PlacePoint } from "@/lib/client"
 
 interface GeocodeInputProps {
   label: string
   placeholder: string
   value: PlacePoint | null
   onChange: (place: PlacePoint | null) => void
+  /** Offer "use my location". On the origin only: a destination you are
+   *  already standing at is not a journey, and a button that plans a trip to
+   *  here is a button nobody wants. */
+  allowHere?: boolean
 }
 
 /** Debounced place autocomplete backed by GET /api/geocode. */
-export default function GeocodeInput({ label, placeholder, value, onChange }: GeocodeInputProps) {
+export default function GeocodeInput({
+  label,
+  placeholder,
+  value,
+  onChange,
+  allowHere = false,
+}: GeocodeInputProps) {
   const [text, setText] = useState(value?.label ?? "")
   const [hits, setHits] = useState<GeocodeHit[]>([])
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [hereError, setHereError] = useState<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -34,6 +46,7 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
 
   function handleInput(next: string) {
     setText(next)
+    setHereError(null)
     onChange(null) // typing invalidates the previous selection
     if (timer.current) clearTimeout(timer.current)
     // Three, matching the server's `min_length`. Autocomplete is by far this
@@ -72,7 +85,56 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
     }, 650)
   }
 
+  /** "Start from where I am."
+   *
+   *  Two steps, and the second is the one that matters: the browser gives
+   *  coordinates, and a trip whose origin reads "52.09, 5.12" is one nobody can
+   *  check before planning it or recognise afterwards in their own list. So the
+   *  fix is NAMED server-side and the result goes through `select`, exactly as
+   *  a picked suggestion does — same shape, same "a place is only chosen when
+   *  it resolves" rule, no second way for `origin` to get set.
+   *
+   *  Every failure lands as text under the box rather than a toast: this is a
+   *  field, the reader is looking at it, and the answer to all three failures
+   *  (permission refused, no fix, nowhere nameable) is the same — type it. */
+  async function locateMe() {
+    if (locating) return
+    setLocating(true)
+    setError(null)
+    setOpen(false)
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (typeof navigator === "undefined" || !navigator.geolocation) {
+          reject(new Error("no geolocation"))
+          return
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10_000,
+          maximumAge: 60_000,
+        })
+      })
+      const hit = await reverseGeocode(pos.coords.latitude, pos.coords.longitude)
+      select(hit)
+    } catch (err) {
+      const denied =
+        typeof GeolocationPositionError !== "undefined" &&
+        err instanceof GeolocationPositionError &&
+        err.code === err.PERMISSION_DENIED
+      setHereError(
+        denied
+          ? "Location is blocked for this site. Type where you're starting from."
+          : err instanceof Error && err.message !== "no geolocation"
+            ? err.message
+            : "Couldn't get your location. Type where you're starting from."
+      )
+    } finally {
+      setLocating(false)
+    }
+  }
+
   function select(hit: GeocodeHit) {
+    setHereError(null)
     onChange({ label: hit.label, lat: hit.lat, lon: hit.lon })
     setText(hit.label)
     setOpen(false)
@@ -146,10 +208,40 @@ export default function GeocodeInput({ label, placeholder, value, onChange }: Ge
             aria-label={label}
             className="min-w-0 flex-1 bg-transparent text-base text-ink-900 outline-none placeholder:text-ink-300 sm:text-sm"
           />
+          {/* Inside the box, not beside it: the field is already full width on
+              a phone and a control alongside would halve it. A <button> so the
+              wrapper's click-to-focus handler steps over it — that handler
+              already skips anything inside a button, which is why the tap does
+              not shove the keyboard up over the answer. */}
+          {allowHere && (
+            <button
+              type="button"
+              onClick={() => void locateMe()}
+              disabled={locating}
+              title="Use my current location"
+              aria-label="Use my current location"
+              className="-mr-1 flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-50 disabled:text-ink-400"
+            >
+              {locating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Crosshair className="h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">
+                {locating ? "Locating…" : "Here"}
+              </span>
+            </button>
+          )}
         </div>
       </div>
-      {unresolved && (
-        <p className="mt-1 text-xs text-amber-700">Pick a place from the list to use it.</p>
+      {hereError ? (
+        <p className="mt-1 text-xs text-amber-700">{hereError}</p>
+      ) : (
+        unresolved && (
+          <p className="mt-1 text-xs text-amber-700">
+            Pick a place from the list to use it.
+          </p>
+        )
       )}
       {open && hits.length === 0 && error && (
         <div className="absolute z-30 mt-1.5 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900 shadow-lg shadow-ink-900/5">
