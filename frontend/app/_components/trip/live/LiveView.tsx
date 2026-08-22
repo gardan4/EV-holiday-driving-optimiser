@@ -812,6 +812,20 @@ export default function LiveView({
             onFocus={setFocusId}
             destLabel={trip.request.dest.label.split(",")[0]}
             destArrivalClock={mounted ? clockSince(run.started_at, etaMin) : "--:--"}
+            navigate={
+              /* The whole road ahead, starting from the phone rather than
+                 from this morning's origin. The HUD's "Navigate" is the next
+                 charger and nothing else, which is the right thing at
+                 120 km/h; this is the one to take standing at a stop — hence
+                 "from here", which is the only part of the sentence this
+                 replaced that the card does not already say. */
+              <MapsRouteButton
+                legs={remainingRouteLegs(trip, ahead)}
+                label="Navigate from here"
+                tone="solid"
+                full
+              />
+            }
             onSwap={
               isDriver ? (id) => void loadAlternatives(id) : undefined
             }
@@ -826,33 +840,6 @@ export default function LiveView({
             or the drive has finished and the list is gone. Then it is a card
             of its own again, still naming the stop it is about. */}
         {alts && !anchorAlts && altsPanel}
-
-        {/* The plan, in the navigation the car is actually following. The HUD's
-            "Navigate" is the next charger and nothing else, which is the right
-            thing at 120 km/h; this is the one to take at a stop, and it starts
-            from where the phone is rather than from this morning's origin. */}
-        {!finished && (
-          <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-ink-100 bg-white p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            {/* No heading: the button says what it does, and a phone screen
-                cannot afford a line that only introduces the next one. */}
-            <p className="min-w-0 text-xs text-ink-500">
-              {ahead.length === 0
-                ? `Straight to ${trip.request.dest.label.split(",")[0]}, no stops left`
-                : `${ahead.length} ${ahead.length === 1 ? "stop" : "stops"} left, then ${trip.request.dest.label.split(",")[0]}`}{" "}
-              · from where you are now
-            </p>
-            {/* Full width on a phone — a primary action operated in a car —
-                and back to its own size once there is a row to sit in. */}
-            <div className="w-full sm:w-auto">
-              <MapsRouteButton
-                legs={remainingRouteLegs(trip, ahead)}
-                label="Navigate the rest"
-                tone="solid"
-                full
-              />
-            </div>
-          </div>
-        )}
 
         {/* Off the route.
             "Rejoin the route and they'll pick up again" was the whole answer

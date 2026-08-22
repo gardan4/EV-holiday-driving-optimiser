@@ -26,7 +26,14 @@
  *   own further down, does not.
  *
  * Distances are from the CAR, not from this morning: this is a list about the
- * road ahead and it is written in the road ahead's units.
+ * road ahead and it is written in the road ahead's units. So is the hand-off
+ * to Maps (`navigate`): it used to be a card of its own below this one,
+ * introduced by "4 stops left, then Neerbeek · from where you are now" — a
+ * sentence whose every fact is already in this card, in the count beside the
+ * heading and in the destination row at the bottom. It is the action for the
+ * list, so it belongs to the list's heading, where it is also a screen higher
+ * up: this is the button you press standing at a charger, not one to go
+ * hunting for at the end of a scroll.
  */
 
 import { ReactNode } from "react"
@@ -49,6 +56,7 @@ export default function PlanAhead({
   onFocus,
   destLabel,
   destArrivalClock,
+  navigate,
   onSwap,
   swappingId = null,
   swapOpenId = null,
@@ -67,6 +75,10 @@ export default function PlanAhead({
   destLabel: string
   /** Clock time at the destination, on the plan in force. */
   destArrivalClock: string
+  /** Hand the rest of the plan to Maps. A slot rather than the button itself:
+   *  the legs are the drive screen's to build, and this only knows that the
+   *  action belongs to the list it heads. */
+  navigate?: ReactNode
   /** Driver only: replace this stop with something else. */
   onSwap?: (chargerId: string) => void
   /** The stop whose alternatives are open, and the panel to show under it.
@@ -87,15 +99,20 @@ export default function PlanAhead({
 }) {
   return (
     <div className="mt-3 rounded-2xl border border-ink-100 bg-white p-3 sm:p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="font-display text-sm font-semibold text-ink-900">
-          The rest of the plan
-        </h2>
-        <span className="text-xs text-ink-400">
-          {stops.length === 0
-            ? "no stops left"
-            : `${stops.length} ${stops.length === 1 ? "stop" : "stops"}`}
-        </span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="font-display text-sm font-semibold text-ink-900">
+            The rest of the plan
+          </h2>
+          <span className="text-xs text-ink-400">
+            {stops.length === 0
+              ? "no stops left"
+              : `${stops.length} ${stops.length === 1 ? "stop" : "stops"}`}
+          </span>
+        </div>
+        {/* Full width on a phone — a primary action operated in a car — and
+            back to its own size once there is a row to sit in. */}
+        {navigate && <div className="w-full sm:w-auto">{navigate}</div>}
       </div>
 
       <ol className="mt-2 space-y-1.5">

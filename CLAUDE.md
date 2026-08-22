@@ -307,7 +307,11 @@ the pipeline is green before infra exists. Infra deploy is manual
   endpoints and are LABELLED as parts — truncating to the first nine would
   navigate somebody to a road short of where they are going. **The live one
   omits `origin`**, which is what makes Maps start from the car rather than from
-  this morning's departure point. **Stops go over as coordinates, never names**:
+  this morning's departure point — and mid-drive it is the plan list's own
+  header button (`PlanAhead`'s `navigate`), not a card below the list: the
+  sentence that card needed to introduce itself ("4 stops left, then Neerbeek")
+  was already the heading's count and the list's last row, and the button you
+  press standing at a charger should not sit at the end of a scroll. **Stops go over as coordinates, never names**:
   a charger's name here is whatever OpenChargeMap calls the site, and the
   coordinate is what the plan was computed against.
 - **DP over greedy** for stop planning — it must *discover* "arrive low,
