@@ -420,6 +420,26 @@ the pipeline is green before infra exists. Infra deploy is manual
   in `_FOOD_WORDS` and match as WORDS, because "Spar" is inside "Sparkasse",
   "Hofer" inside "Strohofer" and "Moto" inside "Motorway" — a food chip over a
   savings bank is not a weak guess, it is a wrong one.
+  **The plan list carries the reading too, and the split is fetch versus
+  read** (`StopOut.nearby`, `trips.fill_stop_amenities`). It was rendered only
+  where the alternatives panel offered a swap, so the SAME charger said
+  "restaurant here" while it was an option and nothing at all once it was the
+  stop being driven to — one card apart, on one screen, reported from the road
+  that way. That is backwards: by the time a site is IN the plan, whether
+  there is anywhere to eat at it is the question actually being asked, and the
+  panel had already made the absence claim by omission that the hedged copy
+  exists to avoid. So every itinerary stop carries `nearby`, and `PlanAhead`
+  renders it as the strong chip with `food_hint` as the hedged fallback
+  beneath, exactly as `AlternativeStops` does. Unlike `food_hint` it cannot be
+  derived in a validator — it needs the cache row — so it is filled by whoever
+  serves the plan, and that is where the rule lives: **planning fetches, every
+  read is cache-only** (`nearby(..., fetch=False)`). `GET /live` is polled
+  every twenty-five seconds for the whole drive, so a read that could call
+  Overpass would re-ask about the same four chargers for six hours, which is
+  the fair-use concern in the paragraph above. And only the plan-in-force
+  speed's stops are fetched — the other feasible speeds are filled from what
+  that put in the cache — because a sweep touches every candidate on the
+  corridor and the reader is looking at one plan.
   **The stop the plan is already heading for is never offered as an
   alternative to itself** — the baseline pass is recomputed from where the car
   is NOW and must therefore use the same first-leg floor the plan was made

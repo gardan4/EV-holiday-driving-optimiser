@@ -119,11 +119,26 @@ export default function PlanAhead({
                 {Math.round(s.charge_min)} min
                 {fmtBays(s.n_points) && <> · {fmtBays(s.n_points)}</>}
               </div>
-              {s.food_hint && (
-                <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">
+              {/* Two different claims, said differently — the same rule
+                  `AlternativeStops` follows, because the two lists describe
+                  the same chargers and disagreeing about one on a single
+                  screen is what made this worth fixing. `nearby` is a place
+                  OpenStreetMap maps within a few hundred metres, so the chip
+                  states it; `food_hint` is a word in a title, so it hedges.
+                  With real data the guess is redundant and would only muddle
+                  which of the two the reader is looking at. */}
+              {s.nearby && s.nearby.length > 0 ? (
+                <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-100 px-1.5 py-0.5 text-[11px] font-semibold text-brand-900">
                   <UtensilsCrossed className="h-3 w-3 shrink-0" />
-                  reads like {s.food_hint}
+                  {s.nearby.slice(0, 2).join(" · ")} here
                 </div>
+              ) : (
+                s.food_hint && (
+                  <div className="mt-1 inline-flex items-center gap-1 rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-medium text-brand-800">
+                    <UtensilsCrossed className="h-3 w-3 shrink-0" />
+                    reads like {s.food_hint}
+                  </div>
+                )
               )}
             </button>
             {onSwap && (

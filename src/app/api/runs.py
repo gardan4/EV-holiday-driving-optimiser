@@ -790,6 +790,30 @@ def _state_out(run: TripRun, trip: Trip, vehicle: Vehicle) -> LiveStateOut:
     )
 
 
+async def _fill_plan_amenities(db: AsyncSession, plan, *, fetch: bool) -> None:
+    """The same chips on the drive's plan list as on the alternatives panel.
+
+    `PlanAhead` is the itinerary a driver reads at 120 km/h, and it was the one
+    list that never carried what is actually AT a stop — so "IONITY Spessart
+    Nord" sat blank in the plan while the panel underneath said "motorway
+    services · restaurant here" about that exact charger.
+
+    `fetch` splits making a plan from serving one: `/replan` and `/reroute` may
+    look sites up, `GET /live` may not. That route is polled every ten seconds
+    by every watcher, and a cold site behind it would be an Overpass request on
+    repeat for the length of the drive.
+    """
+    if plan is None or plan.remaining is None or not plan.remaining.stops:
+        return
+    stops = plan.remaining.stops
+    near = await amenities.nearby(
+        db, [(s.charger_id, s.lat, s.lon) for s in stops], fetch=fetch
+    )
+    for stop in stops:
+        if stop.charger_id in near:
+            stop.nearby = near[stop.charger_id]
+
+
 def _live_route_out(run: TripRun, coords: list) -> LiveRouteOut:
     snapshot = run.route_snapshot or {}
     return LiveRouteOut(
@@ -1767,6 +1791,7 @@ async def replan(
         step=body.speed_step,
     )
     hold = out.held_speed_kph
+    await _fill_plan_amenities(db, out, fetch=True)
     run.plan = out.model_dump(mode="json")
     run.plan_version = run.plan_version + 1
     run.n_replans = run.n_replans + 1
@@ -1933,6 +1958,7 @@ async def reroute(
         step=defaults.speed_step,
     )
 
+    await _fill_plan_amenities(db, out, fetch=True)
     run.plan = out.model_dump(mode="json")
     run.plan_version = run.plan_version + 1
     # Counted as a re-plan as well: every existing reader of `n_replans` means
@@ -2450,6 +2476,10 @@ async def get_live(
         if run.status == "active" and silent_s > ABANDON_AFTER_MIN * 60
         else run.status
     )
+    plan = ReplanOut.model_validate(run.plan) if run.plan else None
+    # Cache only — polled route. Drives whose plan predates the chips pick them
+    # up as soon as anything else has looked those sites up.
+    await _fill_plan_amenities(db, plan, fetch=False)
     return LiveOut(
         run_ref=run_ref_for(run.id),
         status=status,
@@ -2457,7 +2487,7 @@ async def get_live(
         finished_at=run.finished_at,
         planned_speed_kph=run.planned_speed_kph,
         state=_state_out(run, trip, vehicle),
-        plan=ReplanOut.model_validate(run.plan) if run.plan else None,
+        plan=plan,
         trail=trail,
         route_version=_route_version(run),
         seconds_since_ping=max(

@@ -177,6 +177,16 @@ class StopOut(BaseModel):
     # What the site's NAME suggests you could eat there, or null when it says
     # nothing. See `food_hint` below for why it is derived here.
     food_hint: Optional[str] = None
+    # What OpenStreetMap MAPS within a few hundred metres — the same field
+    # `AlternativeOut` carries, and for the same reason. On a German motorway
+    # every fast charger is a network plus a place ("IONITY Spessart Nord"), so
+    # `food_hint` above reads back empty for the whole itinerary while the site
+    # is in fact a services with a restaurant. The alternatives panel showed
+    # that and the plan list did not, about the SAME charger, on the same
+    # screen. Cannot be derived in a validator like `food_hint` is: it needs
+    # the cache row, so it is filled by whoever serves the plan.
+    # Null = we have not looked. [] = looked, nothing mapped. Not the same.
+    nearby: Optional[list[str]] = None
 
     @model_validator(mode="after")
     def _derive_food_hint(self):

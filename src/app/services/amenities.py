@@ -209,7 +209,10 @@ def food_hint(name: str | None) -> str | None:
 
 
 async def nearby(
-    db: AsyncSession, sites: Sequence[tuple[str, float, float]]
+    db: AsyncSession,
+    sites: Sequence[tuple[str, float, float]],
+    *,
+    fetch: bool = True,
 ) -> dict[str, list[str]]:
     """`{charger_id: [category, ...]}` for the sites we have an answer for.
 
@@ -222,6 +225,12 @@ async def nearby(
     unwell — see the breaker in `overpass`. On any failure this returns what
     the cache already knew, which is the behaviour the app had before OSM was
     consulted at all.
+
+    `fetch=False` answers from the cache and asks nobody. That is what a READ
+    path wants: `GET /trips/{id}` and `GET /live` are polled, and a cold site
+    on one of them would put an Overpass request behind a poll for ever. The
+    cache is filled where a plan is MADE — a rare, deliberate action, already
+    spending upstream quota on the route itself.
     """
     if not sites:
         return {}
@@ -256,7 +265,7 @@ async def nearby(
             and row.amenities_at >= fresh_after
         ):
             out[cid] = list(row.amenities)
-        elif len(stale) < settings.AMENITY_MAX_PER_REQUEST:
+        elif fetch and len(stale) < settings.AMENITY_MAX_PER_REQUEST:
             stale.append(overpass.Point(key=cid, lat=lat, lon=lon))
 
     if not stale:

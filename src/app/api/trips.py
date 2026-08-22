@@ -30,6 +30,7 @@ from app.core.failures import PlanError, reason_of
 from app.core.rate_limit import limiter
 from app.core.visitor import request_client_id, request_owner_hash, request_visitor
 from app.models import AppEvent, Profile, Trip, TripEvent, TripRun, TripStat, Vehicle
+from app.services import amenities
 from app.services import chargers as chargers_svc
 from app.services import networks, routing
 from app.services.geo import polyline_encode
@@ -120,6 +121,53 @@ def _result_out(r: SpeedResult) -> SpeedResultOut:
             for t, d, soc in r.timeline
         ],
     )
+
+
+async def fill_stop_amenities(
+    db: AsyncSession, result: PlanResult | None, *, fetch: bool
+) -> None:
+    """Put "restaurant here" on the PLAN's stops, not only on the alternatives.
+
+    The plan list and the "somewhere else to charge" panel were describing the
+    same charger two different ways on one screen: the panel said "motorway
+    services · restaurant here" and the itinerary above it said nothing, because
+    only the panel ever asked OpenStreetMap. `food_hint` cannot cover for it —
+    on a motorway every fast charger is a network plus a place, so reading the
+    name comes back empty for the whole list, which is exactly the ceiling
+    `services/amenities.py` writes down.
+
+    `fetch` is the whole cost decision. Making a plan may look sites up; serving
+    one may not — `GET /trips/{id}` and `GET /live` are polled, and a cold site
+    behind a poll is an Overpass request on repeat. One lookup covers the plan
+    in force, and the rest of the sweep is answered from whatever that filled,
+    which on a real corridor is most of it: the speeds share their chargers.
+    """
+    if result is None:
+        return
+    feasible = [sp for sp in result.speeds if sp.feasible and sp.stops]
+    if not feasible:
+        return
+    in_force = next(
+        (sp for sp in feasible if sp.speed_kph == result.optimum_speed), feasible[0]
+    )
+    if fetch:
+        # Bounded by `AMENITY_MAX_PER_REQUEST`, so ask about the itinerary the
+        # reader is actually looking at rather than the union of every speed —
+        # a truncated union would give the same charger a chip at one speed and
+        # none at the next.
+        await amenities.nearby(
+            db, [(s.charger_id, s.lat, s.lon) for s in in_force.stops], fetch=True
+        )
+    every = {s.charger_id: (s.lat, s.lon) for sp in feasible for s in sp.stops}
+    near = await amenities.nearby(
+        db, [(cid, la, lo) for cid, (la, lo) in every.items()], fetch=False
+    )
+    if not near:
+        return
+    for sp in feasible:
+        for stop in sp.stops:
+            if stop.charger_id in near:
+                stop.nearby = near[stop.charger_id]
 
 
 async def _record_plan_failure(db: AsyncSession, request: Request, reason: str) -> None:
@@ -369,6 +417,10 @@ async def _plan(request: Request, plan: PlanRequest, db: AsyncSession) -> TripOu
         countries=list(dict.fromkeys(s.country for s in route.segments if s.country)),
     )
 
+    # Before the JSON is frozen, so the chips are in the stored trip too and a
+    # share link opened tomorrow does not have to look anything up.
+    await fill_stop_amenities(db, result, fetch=True)
+
     request_json = plan.model_dump(mode="json")
     result_json = result.model_dump(mode="json")
 
@@ -454,10 +506,15 @@ async def get_trip(
     trip = await db.get(Trip, tid)
     if trip is None:
         raise HTTPException(status_code=404, detail="Trip not found.")
+    result = PlanResult.model_validate(trip.result)
+    # Cache only: this route is polled by the results page and every share link
+    # that gets opened. Trips planned before amenities existed pick the chips up
+    # as soon as anything else has looked those sites up.
+    await fill_stop_amenities(db, result, fetch=False)
     return TripOut(
         id=str(trip.id),
         request=PlanRequest.model_validate(trip.request),
-        result=PlanResult.model_validate(trip.result),
+        result=result,
         created_at=trip.created_at,
     )
 

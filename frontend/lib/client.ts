@@ -113,6 +113,10 @@ export interface Stop {
    *  the way out, so old trips get it too; null means the name says nothing,
    *  not that there is nothing there. */
   food_hint?: string | null
+  /** What OpenStreetMap maps within a few hundred metres — the same field the
+   *  alternatives panel carries. Null means we have not looked; `[]` means we
+   *  looked and nothing is mapped, which is not the same as nothing there. */
+  nearby?: string[] | null
   offset_m: number
   arrive_min: number
   arrive_soc: number
