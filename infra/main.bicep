@@ -45,7 +45,7 @@ param apiImageTag string = 'dev-latest'
 @description('Tag of the Web image to run (the infra job overrides with the running tag).')
 param webImageTag string = 'dev-latest'
 
-@description('GHCR pull token (PAT with read:packages). Leave empty for public images.')
+@description('GHCR pull token (PAT with read:packages). Leave empty: the packages are public, and an expiring token here is an outage waiting to happen.')
 @secure()
 param ghcrToken string = ''
 
@@ -168,13 +168,14 @@ var effectiveCors = empty(corsOrigins) ? webPublicUrl : corsOrigins
 // mssql+aioodbc DSN the FastAPI app expects (matches src/ settings + Dockerfile ODBC 18).
 var databaseUrl = 'mssql+aioodbc://${sqlAdminLogin}:${sqlAdminPassword}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
 
-// Shared container-registry settings. For public GHCR packages the empty
-// password is harmless; set ghcrToken for private ones.
-var registrySettings = [
-  {
-    name: 'DOCKER_REGISTRY_SERVER_URL'
-    value: 'https://${registry}'
-  }
+// Shared container-registry settings. The GHCR packages are PUBLIC, so the
+// pull needs no credential at all — and that is deliberate. A private package
+// meant a PAT in DOCKER_REGISTRY_SERVER_PASSWORD, and a PAT expires: the site
+// then stays up on its already-pulled image and only dies at the next platform
+// restart, hours or weeks later, as a 503 that no deploy in the history
+// explains. Credentials are emitted ONLY when ghcrToken is set, so the default
+// path has nothing on it that can expire.
+var registryCredentials = empty(ghcrToken) ? [] : [
   {
     name: 'DOCKER_REGISTRY_SERVER_USERNAME'
     value: githubOwner
@@ -183,11 +184,18 @@ var registrySettings = [
     name: 'DOCKER_REGISTRY_SERVER_PASSWORD'
     value: ghcrToken
   }
+]
+
+var registrySettings = concat([
+  {
+    name: 'DOCKER_REGISTRY_SERVER_URL'
+    value: 'https://${registry}'
+  }
   {
     name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
     value: 'false'
   }
-]
+], registryCredentials)
 
 // ============================================================================
 // Log Analytics

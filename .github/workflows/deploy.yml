@@ -89,7 +89,6 @@ jobs:
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}
           ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
           OCM_API_KEY: ${{ secrets.OCM_API_KEY }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           if [ -z "$AZURE_CLIENT_ID" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -97,7 +96,7 @@ jobs:
             exit 0
           fi
           missing=""
-          for v in SQL_ADMIN_PASSWORD APP_SECRET_KEY APP_ENCRYPTION_KEY ORS_API_KEY OCM_API_KEY GHCR_TOKEN; do
+          for v in SQL_ADMIN_PASSWORD APP_SECRET_KEY APP_ENCRYPTION_KEY ORS_API_KEY OCM_API_KEY; do
             [ -z "${!v}" ] && missing="$missing $v"
           done
           if [ -n "$missing" ]; then
@@ -171,7 +170,6 @@ jobs:
               feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
               statsToken='${{ secrets.STATS_TOKEN }}' \
               discordWebhookUrl='${{ secrets.DISCORD_WEBHOOK_URL }}' \
-              ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output table
 
       - name: Deploy infra
@@ -195,7 +193,6 @@ jobs:
               feedbackToken='${{ secrets.FEEDBACK_TOKEN }}' \
               statsToken='${{ secrets.STATS_TOKEN }}' \
               discordWebhookUrl='${{ secrets.DISCORD_WEBHOOK_URL }}' \
-              ghcrToken='${{ secrets.GHCR_TOKEN }}' \
             --output none
 
       - name: Note
@@ -253,7 +250,7 @@ jobs:
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Deploy skipped::Tests passed. Set AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID / RESOURCE_GROUP / GHCR_TOKEN to enable deploys."
+            echo "::notice title=Deploy skipped::Tests passed. Set AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID / RESOURCE_GROUP to enable deploys."
           fi
 
       - uses: docker/setup-buildx-action@v3
@@ -294,9 +291,7 @@ jobs:
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --name ${{ env.API_APP_NAME }} \
             --container-image-name "$IMAGE" \
-            --container-registry-url https://${{ env.REGISTRY }} \
-            --container-registry-user ${{ github.repository_owner }} \
-            --container-registry-password ${{ secrets.GHCR_TOKEN }}
+            --container-registry-url https://${{ env.REGISTRY }}
           # `container set` above already rolls the container, so this restart is
           # belt-and-braces. ARM has been observed returning a spurious
           # ResourceNotFound here for a resource the same credential can read and
@@ -430,9 +425,7 @@ jobs:
             --resource-group ${{ secrets.RESOURCE_GROUP }} \
             --name ${{ env.WEB_APP_NAME }} \
             --container-image-name "$IMAGE" \
-            --container-registry-url https://${{ env.REGISTRY }} \
-            --container-registry-user ${{ github.repository_owner }} \
-            --container-registry-password ${{ secrets.GHCR_TOKEN }}
+            --container-registry-url https://${{ env.REGISTRY }}
           # `container set` above already rolls the container, so this restart is
           # belt-and-braces. ARM has been observed returning a spurious
           # ResourceNotFound here for a resource the same credential can read and
