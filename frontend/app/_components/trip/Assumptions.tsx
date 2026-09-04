@@ -8,7 +8,8 @@ import { PlanRequest, Trip, Vehicle, planTrip } from "@/lib/client"
 import { freeflowFactorFor } from "@/lib/driving"
 import { auxKwForTemp, consumptionFactorForTemp, describeTemp } from "@/lib/weather"
 import { describePayload, extraWhPerKm, payloadExtraKg } from "@/lib/payload"
-import { listFieldNames, NumberField, revealField, useNumberFieldValidity } from "./fields"
+import { listFieldNames, NumberField, SpeedField, revealField, useNumberFieldValidity } from "./fields"
+import { useUnits } from "@/lib/useUnits"
 import NetworkPicker from "./NetworkPicker"
 
 /**
@@ -53,6 +54,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
   }
   // Which of the route's countries have their real limits modelled, and
   // whether the derestriction rules can apply at all.
+  const { units, speed, speedValue, consumption, climb } = useUnits()
   const routeCountries = trip.result.countries ?? []
   const MODELLED = ["DE", "NL", "BE", "LU", "FR", "CH", "AT", "IT"]
   const modelled = routeCountries.filter((c) => MODELLED.includes(c))
@@ -102,14 +104,17 @@ export default function Assumptions({ trip }: { trip: Trip }) {
           <dl className="space-y-1.5 text-sm">
             <Row k="Usable battery" val={`${v.usable_kwh} kWh`} />
             <Row k="Peak DC charging" val={`${Math.round(v.max_dc_kw)} kW`} />
-            <Row k="Top speed" val={`${Math.round(v.top_speed_kph)} km/h`} />
+            <Row k="Top speed" val={speed(v.top_speed_kph)} />
             <Row
               k="Mass as modelled"
               val={`${Math.round(v.mass_kg + payloadExtraKg(occupants, luggageKg))} kg`}
             />
             <Row
               k="Energy use"
-              val={`${wh(100)} · ${wh(130)} · ${wh(160)} Wh/km at 100 · 130 · 160`}
+              val={
+                `${consumption(wh(100))} · ${consumption(wh(130))} · ` +
+                `${consumption(wh(160))} at ${speedValue(100)} · ${speedValue(130)} · ${speedValue(160)}`
+              }
             />
           </dl>
 
@@ -158,7 +163,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
             />
             <div className="col-span-2 -mt-1">
               <p className="text-xs leading-relaxed text-ink-500">
-                {describePayload(occupants, luggageKg, v.usable_kwh, wh(130))}
+                {describePayload(occupants, luggageKg, v.usable_kwh, wh(130), units)}
               </p>
             </div>
             <div className="col-span-2">
@@ -167,7 +172,7 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                 onValidity={onValidity}
                 value={Math.round(tempC ?? 20)} min={-30} max={45}
                 onChange={(x) => set("temperature_c", x)}
-                readout={describeTemp(tempC ?? 20)}
+                readout={describeTemp(tempC ?? 20, units)}
               />
             </div>
             <div className="col-span-2">
@@ -193,15 +198,17 @@ export default function Assumptions({ trip }: { trip: Trip }) {
                 string still blocks "Re-plan", with its red border off-screen. */}
             {!r.ignore_speed_limits && (
             <div className="col-span-2">
-              <NumberField
-                id="a-motorway-cap" label="Motorway limit" unit="km/h"
+              <SpeedField
+                id="a-motorway-cap" label="Motorway limit"
                 onValidity={onValidity}
-                value={Math.round(r.motorway_cap_kph ?? 130)} min={80} max={200} step={5}
-                onChange={(x) => set("motorway_cap_kph", x)}
+                valueKph={Math.round(r.motorway_cap_kph ?? 130)} minKph={80} maxKph={200} stepKph={5}
+                onChangeKph={(x) => set("motorway_cap_kph", x)}
                 readout={
                   modelled.length > 0
                     ? `used outside ${modelled.join("/")}, whose own limits are real`
-                    : `${Math.round((r.motorway_cap_kph ?? 130) / 1.609)} mph`
+                    : units === "imperial"
+                      ? `${Math.round(r.motorway_cap_kph ?? 130)} km/h as the plan sees it`
+                      : `${Math.round((r.motorway_cap_kph ?? 130) / 1.609344)} mph`
                 }
               />
             </div>
@@ -221,11 +228,11 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               </div>
             )}
             <div className="col-span-2">
-              <NumberField
-                id="a-over-cap" label="Over the posted limit" unit="km/h"
+              <SpeedField
+                id="a-over-cap" label="Over the posted limit"
                 onValidity={onValidity}
-                value={Math.round(r.over_cap_kph ?? 0)} min={0} max={30}
-                onChange={(x) => {
+                valueKph={Math.round(r.over_cap_kph ?? 0)} minKph={0} maxKph={30}
+                onChangeKph={(x) => {
                   set("over_cap_kph", x)
                   set("over_freeflow_factor", freeflowFactorFor(x))
                 }}
@@ -369,13 +376,13 @@ export default function Assumptions({ trip }: { trip: Trip }) {
               {/* One expression, not prose interleaved with {…}: JSX trims the
                   whitespace at each line's edges, which silently glued "113" to
                   "km/h" and then "above" to the dash. */}
-              {`Everywhere else uses the ${Math.round(r.motorway_cap_kph ?? 130)} km/h ` +
+              {`Everywhere else uses the ${speed(r.motorway_cap_kph ?? 130)} ` +
                 `you set above. Check it against the local limit, because it's the ` +
                 `number the recommended speed is built on.`}
             </li>
             <li>
               <b className="font-semibold text-ink-700">Elevation.</b>{" "}
-              {(trip.result.climb_m / 1000).toFixed(1)} km of cumulative climb on this
+              {climb(trip.result.climb_m)} of cumulative climb on this
               route, costing energy on the way up and giving about two-thirds of it back
               through regen on the way down.
             </li>

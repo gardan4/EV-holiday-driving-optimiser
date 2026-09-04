@@ -12,7 +12,8 @@ import {
   YAxis,
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
-import { clockAt, fmtKm } from "@/lib/format"
+import { clockAt } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 
 const MINT = "#17a56b"
 const AMBER = "#d98e1f"
@@ -30,6 +31,7 @@ interface BatteryChartProps {
  * of driving drain and charging spikes. A cursor follows 3D playback.
  */
 export default function BatteryChart({ result, departureIso, targetSoc }: BatteryChartProps) {
+  const { speed, dist } = useUnits()
   const data = useMemo(
     () => result.timeline.map((p) => ({ t: p.t_min, soc: p.soc, dist: p.dist_m })),
     [result.timeline]
@@ -42,7 +44,7 @@ export default function BatteryChart({ result, departureIso, targetSoc }: Batter
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
       <div className="mb-1 flex items-baseline justify-between gap-3">
         <h2 className="font-display text-base font-semibold text-ink-900">
-          Battery through the night, {result.speed_kph} km/h
+          Battery through the night, {speed(result.speed_kph)}
         </h2>
         <span className="text-xs text-ink-400">
           each spike is a charging stop
@@ -51,7 +53,7 @@ export default function BatteryChart({ result, departureIso, targetSoc }: Batter
       <div
         className="h-44 sm:h-48"
         role="img"
-        aria-label={`Estimated battery percentage over the trip at ${result.speed_kph} kilometers per hour`}
+        aria-label={`Estimated battery percentage over the trip at ${speed(result.speed_kph)}`}
       >
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 0, left: 4 }}>
@@ -91,7 +93,7 @@ export default function BatteryChart({ result, departureIso, targetSoc }: Batter
                     <div className="font-semibold text-ink-900">
                       {clockAt(departureIso, p.t)} · {Math.round(p.soc)}%
                     </div>
-                    <div className="text-ink-500">{fmtKm(p.dist)} driven</div>
+                    <div className="text-ink-500">{dist(p.dist)} driven</div>
                   </div>
                 )
               }}

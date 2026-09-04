@@ -30,6 +30,7 @@ import { Check, Gauge, Loader2 } from "lucide-react"
 import { RevisedPlan } from "@/lib/client"
 import { clockSince, fmtDuration } from "@/lib/format"
 import { useMounted } from "@/lib/mounted"
+import { useUnits } from "@/lib/useUnits"
 
 export default function HoldSpeed({
   plan,
@@ -45,6 +46,7 @@ export default function HoldSpeed({
   onHold: (speedKph: number | null) => void
 }) {
   const mounted = useMounted()
+  const { speed, speedValue, speedUnit } = useUnits()
   const feasible = plan.speeds.filter((s) => s.feasible && s.total_min != null)
   const inForce = plan.optimum_speed ?? feasible[0]?.speed_kph ?? 0
   const [picked, setPicked] = useState<number>(inForce)
@@ -94,8 +96,8 @@ export default function HoldSpeed({
         <Big label="−" onClick={() => step(-1)} disabled={busy} />
         <div className="flex-1 text-center">
           <div className="font-display text-4xl font-bold tabular-nums tracking-tight text-ink-900">
-            {picked}
-            <span className="ml-1 text-lg font-semibold text-ink-400">km/h</span>
+            {speedValue(picked)}
+            <span className="ml-1 text-lg font-semibold text-ink-400">{speedUnit}</span>
           </div>
           {current?.total_min != null && (
             <div className="mt-0.5 text-xs text-ink-500">
@@ -109,7 +111,7 @@ export default function HoldSpeed({
           )}
           <div className="text-[11px] text-ink-400">
             {costMin >= 0.5
-              ? `${fmtDuration(costMin)} slower than ${fastest.speed_kph} km/h`
+              ? `${fmtDuration(costMin)} slower than ${speed(fastest.speed_kph)}`
               : "the fastest of these"}
           </div>
         </div>

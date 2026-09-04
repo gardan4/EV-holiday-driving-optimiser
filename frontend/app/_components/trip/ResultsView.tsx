@@ -8,7 +8,8 @@ import { LiveRun, Trip } from "@/lib/client"
 import { nearOptimalBand } from "@/lib/verdict"
 import { buildVerdict } from "@/lib/summary"
 import { useAnchoredSelection } from "@/lib/useAnchoredSelection"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { plannedRouteLegs } from "@/lib/maps"
 import AnswerBlock from "./AnswerBlock"
 import Assumptions from "./Assumptions"
@@ -37,6 +38,7 @@ export default function ResultsView({
   live?: LiveRun | null
 }) {
   const { result } = trip
+  const { speed, dist } = useUnits()
   const [selectedSpeed, setSelectedSpeed] = useState<number>(
     result.optimum_speed ?? result.speeds.find((s) => s.feasible)?.speed_kph ?? 0
   )
@@ -89,7 +91,7 @@ export default function ResultsView({
       return { headline: <>Arrive {arriveClock}</>, sub }
     }
     if (v.isBaseline) {
-      return { headline: <>The {v.baseline.speed_kph} km/h plan</>, sub }
+      return { headline: <>The {speed(v.baseline.speed_kph)} plan</>, sub }
     }
     if (v.tie) {
       return {
@@ -97,7 +99,7 @@ export default function ResultsView({
           <>
             Same arrival{" "}
             <span className="font-medium text-white/60">
-              as cruising {v.baseline.speed_kph} km/h
+              as cruising {speed(v.baseline.speed_kph)}
             </span>
           </>
         ),
@@ -110,13 +112,13 @@ export default function ResultsView({
         <>
           {fmtDuration(Math.abs(v.savedMin))} {faster ? "sooner" : "slower"}{" "}
           <span className="font-medium text-white/60">
-            than cruising {v.baseline.speed_kph} km/h
+            than cruising {speed(v.baseline.speed_kph)}
           </span>
         </>
       ),
       sub,
     }
-  }, [result, selectedSpeed, trip.request.departure_iso])
+  }, [result, selectedSpeed, trip.request.departure_iso, speed])
 
   const raceRun = useMemo(
     () =>
@@ -168,7 +170,7 @@ export default function ResultsView({
               {short(trip.request.origin.label)} → {short(trip.request.dest.label)}
             </h1>
             <p className="mt-0.5 text-sm text-ink-500">
-              {fmtKm(result.total_dist_m)} · {result.vehicle.make} {result.vehicle.model}{" "}
+              {dist(result.total_dist_m)} · {result.vehicle.make} {result.vehicle.model}{" "}
               {result.vehicle.variant} · leaves {clockAt(trip.request.departure_iso, 0)}
             </p>
           </div>
@@ -259,7 +261,7 @@ export default function ResultsView({
             className="flex min-h-0 flex-col lg:h-0 lg:min-h-full"
           >
             <h2 className="mb-2 flex items-baseline justify-between gap-2 px-1 font-display text-base font-semibold text-ink-900">
-              <span>Itinerary at {selected.speed_kph} km/h</span>
+              <span>Itinerary at {speed(selected.speed_kph)}</span>
               {/* On a long route the list scrolls, so the count is the only
                   place the size of the plan is still visible at a glance. */}
               {selected.stops.length > 0 && (

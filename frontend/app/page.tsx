@@ -3,6 +3,7 @@ import JsonLd from "./_components/JsonLd"
 import SiteFooter from "./_components/SiteFooter"
 import TripForm from "./_components/trip/TripForm"
 import TripsButton from "./_components/trips/TripsButton"
+import UnitsToggle from "./_components/UnitsToggle"
 import { FAQ } from "@/lib/faq"
 import { faqLd, graph, organizationLd, webApplicationLd, websiteLd } from "@/lib/seo"
 
@@ -22,6 +23,9 @@ export default function Home() {
           in the corner the header would have put it in — the panel itself is
           mounted once, in `providers.tsx`. */}
       <TripsButton floating />
+      {/* Same reasoning, opposite corner: the form below is where the units
+          matter first, so the switch cannot wait for the footer. */}
+      <UnitsToggle floating />
 
       {/* Soft alpine backdrop */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden>

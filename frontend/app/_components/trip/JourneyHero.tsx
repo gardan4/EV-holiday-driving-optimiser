@@ -18,10 +18,10 @@ import {
   clockAt,
   clockAtMs,
   fmtDuration,
-  fmtKm,
   parseLocalIso,
   parseServerTime,
 } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { useMounted } from "@/lib/mounted"
 import { isCharging, sampleTimeline, timeAtDist } from "@/lib/playback"
 import type { JourneyWorldRef } from "./scene/JourneyScene"
@@ -112,6 +112,7 @@ export default function JourneyHero({
   live = null,
   onCorrectBattery,
 }: JourneyHeroProps) {
+  const { speed, speedValue, dist, distValue, speedUnit, distUnit } = useUnits()
   const scroller = useRef<HTMLDivElement>(null)
   const [night, setNight] = useState(true)
   const [playing, setPlaying] = useState(false)
@@ -532,7 +533,7 @@ export default function JourneyHero({
             {trip.request.dest.label.split(",")[0]}
           </span>
           <span className="ml-1 font-mono text-[11px] text-white/45">
-            {fmtKm(totalDistM)} · {result.speed_kph} km/h
+            {dist(totalDistM)} · {speed(result.speed_kph)}
           </span>
         </div>
         {/* Only at rest at the start: during playback the HUD clock is the
@@ -560,7 +561,7 @@ export default function JourneyHero({
           {race && race.total_min != null && result.total_min != null && (
             <div className="mt-0.5 font-mono text-xs text-brand-300">
               {fmtDuration(Math.abs(race.total_min - result.total_min))}{" "}
-              {race.total_min > result.total_min ? "ahead of" : "behind"} {race.speed_kph} km/h
+              {race.total_min > result.total_min ? "ahead of" : "behind"} {speed(race.speed_kph)}
             </div>
           )}
         </div>
@@ -632,8 +633,8 @@ export default function JourneyHero({
 
           <div className="w-16 shrink-0">
             <div className="font-mono text-sm font-bold tabular-nums text-white">
-              {Math.round(hud.dist / 1000)}
-              <span className="text-[10px] font-medium text-white/50"> km</span>
+              {distValue(hud.dist)}
+              <span className="text-[10px] font-medium text-white/50"> {distUnit}</span>
             </div>
             <div className="text-[9px] uppercase tracking-wider text-white/40">driven</div>
           </div>
@@ -653,11 +654,11 @@ export default function JourneyHero({
               >
                 {feasibleSpeeds.map((s) => (
                   <option key={s} value={s}>
-                    {s}
+                    {speedValue(s)}
                   </option>
                 ))}
               </select>
-              <span className="text-[10px] font-medium text-white/50">km/h</span>
+              <span className="text-[10px] font-medium text-white/50">{speedUnit}</span>
             </div>
             <div className="mt-0.5 text-[9px] uppercase tracking-wider text-white/40">
               your speed
@@ -720,7 +721,7 @@ export default function JourneyHero({
               >
                 {feasibleSpeeds.map((s) => (
                   <option key={s} value={s}>
-                    {s} km/h
+                    {speed(s)}
                   </option>
                 ))}
               </select>
@@ -736,7 +737,7 @@ export default function JourneyHero({
 
           {race && !finished && hud.min > 0 && (
             <span className="shrink-0 font-mono text-[11px] font-semibold text-white/80">
-              {meLeads ? `${result.speed_kph}` : `${race.speed_kph}`} leads {fmtDuration(Math.abs(hud.gap))}
+              {meLeads ? speedValue(result.speed_kph) : speedValue(race.speed_kph)} leads {fmtDuration(Math.abs(hud.gap))}
             </span>
           )}
         </div>

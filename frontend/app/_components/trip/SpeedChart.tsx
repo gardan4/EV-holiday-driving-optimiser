@@ -15,6 +15,7 @@ import {
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
 import { fmtDuration, fmtHm } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { nearOptimalBand } from "@/lib/verdict"
 
 const DRIVE = "#3f6dbf" // --color-chart-drive (validated)
@@ -72,6 +73,7 @@ export default function SpeedChart({
   onSelect,
   restIntervalMin = 0,
 }: SpeedChartProps) {
+  const { speed, speedValue, speedUnit } = useUnits()
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const data = useMemo(
     () =>
@@ -223,13 +225,18 @@ export default function SpeedChart({
                 ifOverflow="extendDomain"
               />
             )}
+            {/* The data key stays km/h — it is what a click resolves back to
+                a plan with — and only the tick TEXT is converted. Converting
+                the key itself would make `onSelect` hand the results view a
+                speed the trip never simulated. */}
             <XAxis
               dataKey="speed"
+              tickFormatter={(v: number) => String(speedValue(v))}
               tick={{ fill: INK, fontSize: 12 }}
               axisLine={{ stroke: GRID }}
               tickLine={false}
               label={{
-                value: "cruise speed (km/h)",
+                value: `cruise speed (${speedUnit})`,
                 position: "insideBottom",
                 offset: -2,
                 fill: INK,
@@ -251,12 +258,12 @@ export default function SpeedChart({
                 const p = payload[0].payload as (typeof data)[number]
                 if (!p.feasible)
                   return (
-                    <TooltipCard title={`${label} km/h`}>
+                    <TooltipCard title={speed(Number(label))}>
                       <span className="text-ink-500">not feasible: charger gaps too large</span>
                     </TooltipCard>
                   )
                 return (
-                  <TooltipCard title={`${label} km/h, ${fmtHm(p.total ?? 0)}`}>
+                  <TooltipCard title={`${speed(Number(label))}, ${fmtHm(p.total ?? 0)}`}>
                     <Row color={DRIVE} text={`driving ${fmtDuration(p.drive)}`} />
                     <Row
                       color={CHARGE}

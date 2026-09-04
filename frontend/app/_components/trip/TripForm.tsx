@@ -14,9 +14,11 @@ import {
   InfoTip,
   listFieldNames,
   NumberField,
+  SpeedField,
   revealField,
   useNumberFieldValidity,
 } from "./fields"
+import { useUnits } from "@/lib/useUnits"
 import DepartureField from "./DepartureField"
 import GeocodeInput from "./GeocodeInput"
 import NetworkPicker from "./NetworkPicker"
@@ -28,6 +30,7 @@ import { useTrips } from "../trips/TripsContext"
 export default function TripForm() {
   const router = useRouter()
   const { noteTripPlanned } = useTrips()
+  const { units, speed } = useUnits()
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [origin, setOrigin] = useState<PlacePoint | null>(null)
   const [dest, setDest] = useState<PlacePoint | null>(null)
@@ -99,6 +102,7 @@ export default function TripForm() {
         luggageKg,
         car.usable_kwh,
         car.consumption.a_wh_km + car.consumption.b_wh_km_per_kph2 * 130 * 130,
+        units,
       )
     : undefined
 
@@ -191,8 +195,8 @@ export default function TripForm() {
           max={45}
           step={1}
           onChange={setTempC}
-          explain="The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one. It can move the best cruise speed down by 30 km/h."
-          readout={describeTemp(tempC)}
+          explain={`The temperature you expect for most of the drive. Cold hits twice: the car uses more energy AND the battery accepts charge more slowly. The second effect is the bigger one. It can move the best cruise speed down by ${speed(30)}.`}
+          readout={describeTemp(tempC, units)}
         />
         </div>
         {/* Deliberately its own control rather than something inferred from the
@@ -315,41 +319,48 @@ export default function TripForm() {
             the whole track wider than the card holding it. */}
         {!noLimits && (
         <div className="min-w-0">
-        <NumberField
+        <SpeedField
           id="motorway-cap"
           onValidity={onValidity}
           label="Motorway limit"
-          unit="km/h"
-          value={motorwayCap}
-          min={80}
-          max={200}
-          step={5}
-          onChange={setMotorwayCap}
-          explain="The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this. Everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
+          valueKph={motorwayCap}
+          minKph={80}
+          maxKph={200}
+          stepKph={5}
+          onChangeKph={setMotorwayCap}
+          explain={
+            units === "imperial"
+              ? "The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this. Everywhere else uses it, because those are the only countries whose limits are modelled. 70 is a British motorway, 75 a US interstate."
+              : "The legal motorway limit where you're driving. Germany, the Netherlands, Belgium, Luxembourg, France, Switzerland, Austria and Italy use their own real limits and ignore this. Everywhere else uses it, because those are the only countries whose limits are modelled. 113 is 70 mph, 121 is 75."
+          }
+          // The readout quotes the OTHER unit: the number in the box is already
+          // on screen, and the limit you are matching may well be posted in the
+          // one you are not reading in.
           readout={
             motorwayCap === 130
-              ? "130 is a western-European motorway, so lower it elsewhere"
-              : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609)} mph`
+              ? `${speed(130)} is a western-European motorway, so lower it elsewhere`
+              : units === "imperial"
+                ? `${motorwayCap} km/h as the plan sees it`
+                : `${motorwayCap} km/h ≈ ${Math.round(motorwayCap / 1.609344)} mph`
           }
         />
         </div>
         )}
 
-        <NumberField
+        <SpeedField
           id="over-cap"
           onValidity={onValidity}
           label="Over the limit"
-          unit="km/h"
-          value={overCap}
-          min={0}
-          max={30}
-          step={1}
-          onChange={setOverCap}
+          valueKph={overCap}
+          minKph={0}
+          maxKph={30}
+          stepKph={1}
+          onChangeKph={setOverCap}
           explain="How far above the posted limit you actually sit. Saves driving time but burns more energy, so past a point it simply buys you another charging stop. Ordinary roads lift more gently than the autobahn does."
           readout={
             overCap === 0
               ? "sitting on the limit"
-              : `+${overCap} on limited roads, about +${Math.round((freeflowFactorFor(overCap) - 1) * 100)}% elsewhere`
+              : `+${speed(overCap)} on limited roads, about +${Math.round((freeflowFactorFor(overCap) - 1) * 100)}% elsewhere`
           }
         />
         </div>

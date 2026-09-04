@@ -1,3 +1,5 @@
+import { Units, perDistance } from "./units"
+
 /**
  * Client-side mirror of the temperature model, used only to show the reader
  * what their number means as they type it.
@@ -35,7 +37,7 @@ export function chargePowerFactorForTemp(tempC: number): number {
 }
 
 /** Puts the three effects into words, including the "no penalty" case. */
-export function describeTemp(tempC: number): string {
+export function describeTemp(tempC: number, units: Units = "metric"): string {
   const extra = Math.round((consumptionFactorForTemp(tempC) - 1) * 100)
   const aux = auxKwForTemp(tempC)
   const charge = Math.round(chargePowerFactorForTemp(tempC) * 100)
@@ -43,7 +45,7 @@ export function describeTemp(tempC: number): string {
     return "no weather penalty, full range and full charging speed"
   }
   const parts: string[] = []
-  if (extra > 0) parts.push(`${extra}% more energy per km`)
+  if (extra > 0) parts.push(`${extra}% more energy ${perDistance(units)}`)
   if (aux > 0) parts.push(`${aux.toFixed(1)} kW of heating or cooling`)
   if (charge < 100) parts.push(`charging at ${charge}% of full speed`)
   return parts.join(" · ")

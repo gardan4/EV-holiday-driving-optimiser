@@ -33,7 +33,8 @@ import {
   Search,
 } from "lucide-react"
 import { Stop, Vehicle } from "@/lib/client"
-import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { fmtBays, fmtDuration, mapsLink } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { chargeMinutes } from "@/lib/vehicles"
 
 /** Beyond this the plan's arrival percentage is worth a caveat. Matches the
@@ -129,6 +130,7 @@ export default function NextStopCard({
    */
   onUndoArrive?: () => void
 }) {
+  const { dist } = useUnits()
   if (!stop) {
     return (
       <div className="mt-4 flex items-start gap-3 rounded-2xl border border-ink-100 bg-white p-4">
@@ -213,7 +215,7 @@ export default function NextStopCard({
             {stop.operator && <span>{stop.operator} · </span>}
             {Math.round(stop.power_kw)} kW
             {fmtBays(stop.n_points) && <> · {fmtBays(stop.n_points)}</>}
-            {!here && <> · {fmtKm(toGo)} to go</>}
+            {!here && <> · {dist(toGo)} to go</>}
           </p>
         </div>
 

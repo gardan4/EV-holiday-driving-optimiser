@@ -103,10 +103,6 @@ export function toLocalIso(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-export function fmtKm(meters: number): string {
-  return `${Math.round(meters / 1000)} km`
-}
-
 /**
  * The live battery, as text: "46%" once a human has confirmed it, a RANGE
  * while it is inferred.

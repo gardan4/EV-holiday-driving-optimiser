@@ -4,7 +4,8 @@ import { notFound } from "next/navigation"
 import AppHeader from "@/app/_components/AppHeader"
 import ReviewReplay from "@/app/_components/trip/live/ReviewReplay"
 import { RunReview, SpeedResult, Trip } from "@/lib/client"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration } from "@/lib/format"
+import { Distance, Speed } from "@/app/_components/Units"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100"
 
@@ -82,8 +83,8 @@ export default async function ReviewPage({
           {trip.request.dest.label.split(",")[0]}
         </h1>
         <p className="mt-1 text-sm text-ink-500">
-          {fmtKm(trip.result.total_dist_m)} · planned at{" "}
-          {review.planned_speed_kph.toFixed(0)} km/h · {trip.result.vehicle.make}{" "}
+          <Distance meters={trip.result.total_dist_m} /> · planned at{" "}
+          <Speed kph={review.planned_speed_kph} /> · {trip.result.vehicle.make}{" "}
           {trip.result.vehicle.model}
         </p>
 

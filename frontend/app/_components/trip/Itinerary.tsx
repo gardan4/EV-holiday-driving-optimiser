@@ -2,7 +2,8 @@
 
 import { BatteryCharging, Car, ExternalLink, Flag, MapPin } from "lucide-react"
 import { SpeedResult, Trip } from "@/lib/client"
-import { clockAt, fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { clockAt, fmtBays, fmtDuration, mapsLink } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 
 interface ItineraryProps {
   trip: Trip
@@ -17,6 +18,7 @@ interface ItineraryProps {
  */
 export default function Itinerary({ trip, result, highlightStop, onHoverStop }: ItineraryProps) {
   const departIso = trip.request.departure_iso
+  const { speed } = useUnits()
   const stops = result.stops
 
   const legs: React.ReactNode[] = []
@@ -28,7 +30,7 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
         badge={clockAt(departIso, 0)}
       />
       <p className="text-xs text-ink-500">
-        Battery at {Math.round(trip.request.depart_soc)}% · cruise {result.speed_kph} km/h
+        Battery at {Math.round(trip.request.depart_soc)}% · cruise {speed(result.speed_kph)}
       </p>
     </LegCard>
   )
@@ -38,7 +40,7 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
     legs.push(
       <DriveLeg
         key={`drive-${i}`}
-        km={stop.offset_m - prevOffset}
+        meters={stop.offset_m - prevOffset}
         from={i === 0 ? 0 : stops[i - 1].arrive_min + minutesAtStop(stops[i - 1])}
         to={stop.arrive_min}
       />
@@ -85,7 +87,7 @@ export default function Itinerary({ trip, result, highlightStop, onHoverStop }: 
   legs.push(
     <DriveLeg
       key="drive-last"
-      km={result.timeline.length ? result.timeline[result.timeline.length - 1].dist_m - (stops[stops.length - 1]?.offset_m ?? 0) : 0}
+      meters={result.timeline.length ? result.timeline[result.timeline.length - 1].dist_m - (stops[stops.length - 1]?.offset_m ?? 0) : 0}
       from={lastLeave}
       to={result.total_min ?? 0}
     />
@@ -215,11 +217,12 @@ function LegHeader({
   )
 }
 
-function DriveLeg({ km, from, to }: { km: number; from: number; to: number }) {
+function DriveLeg({ meters, from, to }: { meters: number; from: number; to: number }) {
+  const { dist } = useUnits()
   return (
     <div className="flex items-center gap-2 py-0.5 pl-7 text-[11px] text-ink-400">
       <span className="h-4 w-px bg-ink-200" />
-      drive {fmtKm(km)} · {fmtDuration(Math.max(to - from, 0))}
+      drive {dist(meters)} · {fmtDuration(Math.max(to - from, 0))}
     </div>
   )
 }

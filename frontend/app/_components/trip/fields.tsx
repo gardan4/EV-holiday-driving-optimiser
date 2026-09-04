@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { useOverlayPresence } from "@/lib/overlay"
+import { KM_PER_MI } from "@/lib/units"
+import { useUnits } from "@/lib/useUnits"
 
 /**
  * Shared form controls. Used by the planner form and by the editable
@@ -392,5 +394,63 @@ export function NumberField({
         </p>
       )}
     </div>
+  )
+}
+
+interface SpeedFieldProps {
+  id: string
+  label: string
+  /** Always km/h, in and out. The API has no other unit. */
+  valueKph: number
+  minKph: number
+  maxKph: number
+  stepKph?: number
+  onChangeKph: (kph: number) => void
+  explain?: string
+  readout?: string
+  onValidity?: (id: string, valid: boolean, label: string) => void
+}
+
+/**
+ * A cruise/limit speed, in whichever units the reader has chosen.
+ *
+ * The conversion happens here and nowhere else: the request is km/h whatever
+ * the box says, so a plan made in mph and the same plan made in km/h are the
+ * same plan. Round-tripping is stable because a mile is coarser than a
+ * kilometre — every integer mph maps to a km/h that maps back to itself — which
+ * is what stops the box rewriting itself under the cursor as you type.
+ *
+ * The bounds are converted with ceil/floor rather than round, or a limit of
+ * 200 km/h becomes 124 mph and 124 mph is 200.1 km/h: outside the range the
+ * API accepts, by way of the control that exists to keep you inside it.
+ */
+export function SpeedField({
+  id,
+  label,
+  valueKph,
+  minKph,
+  maxKph,
+  stepKph = 1,
+  onChangeKph,
+  explain,
+  readout,
+  onValidity,
+}: SpeedFieldProps) {
+  const { units, speedValue, toKph, speedUnit } = useUnits()
+  const imperial = units === "imperial"
+  return (
+    <NumberField
+      id={id}
+      label={label}
+      unit={speedUnit}
+      value={speedValue(valueKph)}
+      min={imperial ? Math.ceil(minKph / KM_PER_MI) : minKph}
+      max={imperial ? Math.floor(maxKph / KM_PER_MI) : maxKph}
+      step={imperial ? Math.max(1, Math.round(stepKph / KM_PER_MI)) : stepKph}
+      onChange={(v) => onChangeKph(toKph(v))}
+      explain={explain}
+      readout={readout}
+      onValidity={onValidity}
+    />
   )
 }

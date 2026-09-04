@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { BatteryCharging, Gauge, Search, Zap } from "lucide-react"
 import { Vehicle } from "@/lib/client"
+import { useUnits } from "@/lib/useUnits"
 import { InfoTip } from "./fields"
 
 interface VehiclePickerProps {
@@ -70,6 +71,7 @@ function search(vehicles: Vehicle[], query: string): SearchResult {
 /** Card-per-car picker (radio semantics), filterable once the catalog is long. */
 export default function VehiclePicker({ vehicles, value, onChange }: VehiclePickerProps) {
   const [query, setQuery] = useState("")
+  const { speed } = useUnits()
 
   // Match the printed name only. Folding the spec numbers in as well seemed
   // helpful until "ioniq 6" matched the Ioniq 5, whose 72.6 kWh contains a 6 —
@@ -164,7 +166,10 @@ export default function VehiclePicker({ vehicles, value, onChange }: VehiclePick
                 </span>
                 <span className="inline-flex items-center gap-1">
                   <Gauge className="h-3 w-3" />
-                  max {Math.round(v.top_speed_kph)}
+                  {/* The unit is spelled out here and nowhere else on the row:
+                      the neighbouring chips carry theirs, and a bare "160" that
+                      silently becomes "99" for an mph reader is unreadable. */}
+                  max {speed(v.top_speed_kph)}
                 </span>
               </div>
             </button>

@@ -29,7 +29,8 @@ import {
   Undo2,
 } from "lucide-react"
 import { LiveHeroState } from "../JourneyHero"
-import { clockAtMs, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAtMs, fmtDuration } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { useMounted } from "@/lib/mounted"
 
 export default function LiveHud({
@@ -56,6 +57,7 @@ export default function LiveHud({
   onCorrectBattery?: () => void
 }) {
   const mounted = useMounted()
+  const { dist } = useUnits()
   const late = live.aheadBehindMin > 1
   const early = live.aheadBehindMin < -1
   // Past a few minutes of silence the numbers are history, not telemetry, and
@@ -74,7 +76,7 @@ export default function LiveHud({
           Back to the car
           {browseAheadM > 500 && (
             <span className="font-normal text-ink-500">
-              · looking {fmtKm(browseAheadM)} ahead
+              · looking {dist(browseAheadM)} ahead
             </span>
           )}
         </button>
@@ -134,7 +136,7 @@ export default function LiveHud({
                 {live.nextStop.name}
               </div>
               <div className="font-mono text-[10px] text-white/50">
-                {fmtKm(live.nextStop.distanceM)} · arrive{" "}
+                {dist(live.nextStop.distanceM)} · arrive{" "}
                 {Math.round(live.nextStop.arriveSoc)}%
               </div>
             </>

@@ -60,7 +60,8 @@ import {
   X,
 } from "lucide-react"
 import { Alternative, Alternatives } from "@/lib/client"
-import { fmtBays, fmtDuration, fmtKm, mapsLink } from "@/lib/format"
+import { fmtBays, fmtDuration, mapsLink } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 
 /** The planner's own floor, for the sentence that explains why an option is
  *  amber. `simulator.SimParams.reserve_soc`, which is not configurable — if it
@@ -114,6 +115,7 @@ export default function AlternativeStops({
   onRefresh?: () => void
   onClose: () => void
 }) {
+  const { dist, speed } = useUnits()
   const [taking, setTaking] = useState<string | null>(null)
   // Which option is in view. Derived from the scroll position rather than
   // owned: the track is scrollable, so a swipe is a first-class way of moving
@@ -193,12 +195,12 @@ export default function AlternativeStops({
                 Stop {stopIndex} of {stopTotal} ·{" "}
               </>
             )}
-            cost is to your arrival, at {Math.round(data.speed_kph)} km/h.
+            cost is to your arrival, at {speed(data.speed_kph)}.
           </p>
           {moved >= STALE_AFTER_M && (
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium text-amber-800">
               <span>
-                Worked out {fmtKm(moved)} back — the percentages and minutes are
+                Worked out {dist(moved)} back — the percentages and minutes are
                 from there.
               </span>
               {onRefresh && (
@@ -450,6 +452,7 @@ function Row({
    *  construction — hence no pill either. */
   compact?: boolean
 }) {
+  const { dist } = useUnits()
   const later = alt.delta_min >= 0.5
   const sooner = alt.delta_min <= -0.5
   return (
@@ -468,7 +471,7 @@ function Row({
           {/* From where the car is NOW, on the same axis as the stop card and
               the plan list — never `dist_from_here_m`, which is frozen at the
               moment of the fetch. */}
-          {fmtKm(Math.max(alt.offset_m - distM, 0))}
+          {dist(Math.max(alt.offset_m - distM, 0))}
         </div>
         )}
         {/* Two different claims, said differently. `nearby` is a place

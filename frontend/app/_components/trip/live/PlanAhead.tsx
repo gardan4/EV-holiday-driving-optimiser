@@ -46,7 +46,8 @@ import {
   X,
 } from "lucide-react"
 import { Stop } from "@/lib/client"
-import { fmtBays, fmtKm } from "@/lib/format"
+import { fmtBays } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 
 export default function PlanAhead({
   stops,
@@ -97,6 +98,7 @@ export default function PlanAhead({
    *  per-run budget. */
   swappingId?: string | null
 }) {
+  const { dist } = useUnits()
   return (
     <div className="mt-3 rounded-2xl border border-ink-100 bg-white p-3 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
@@ -153,7 +155,7 @@ export default function PlanAhead({
                 )}
               </div>
               <div className="mt-0.5 text-[11px] text-ink-500">
-                {atThis ? "here now" : `in ${fmtKm(Math.max(s.offset_m - distM, 0))}`} ·{" "}
+                {atThis ? "here now" : `in ${dist(Math.max(s.offset_m - distM, 0))}`} ·{" "}
                 {Math.round(s.arrive_soc)}→{Math.round(s.depart_soc)}% ·{" "}
                 {Math.round(s.charge_min)} min
                 {fmtBays(s.n_points) && <> · {fmtBays(s.n_points)}</>}

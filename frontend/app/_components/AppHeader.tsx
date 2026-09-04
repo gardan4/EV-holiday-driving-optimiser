@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { ReactNode } from "react"
 import TripsButton from "./trips/TripsButton"
+import UnitsToggle from "./UnitsToggle"
 
 interface AppHeaderProps {
   /** Page-specific primary action (e.g. "Plan a new trip" on results pages). */
@@ -31,6 +32,7 @@ export default function AppHeader({ action, subtitle }: AppHeaderProps) {
           )}
         </Link>
         <div className="flex shrink-0 items-center gap-3 sm:gap-4">
+          <UnitsToggle />
           <TripsButton />
           {action}
         </div>

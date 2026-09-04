@@ -13,7 +13,8 @@
 
 import Link from "next/link"
 import { LiveRun } from "@/lib/client"
-import { clockSince, fmtDuration, fmtKm } from "@/lib/format"
+import { clockSince, fmtDuration } from "@/lib/format"
+import { Distance } from "@/app/_components/Units"
 import { useMounted } from "@/lib/mounted"
 
 export default function DriveBanner({
@@ -41,7 +42,7 @@ export default function DriveBanner({
           Being driven right now
         </span>
         <span className="min-w-0 flex-1 text-sm text-red-900/80">
-          {fmtKm(live.state.offset_m)} in ·{" "}
+          <Distance meters={live.state.offset_m} /> in ·{" "}
           {Math.abs(behind) < 1
             ? "on time"
             : `${fmtDuration(Math.abs(behind))} ${behind > 0 ? "behind" : "ahead"}`}{" "}
@@ -64,7 +65,7 @@ export default function DriveBanner({
         This trip has been driven
       </span>
       <span className="min-w-0 flex-1 text-sm text-ink-500">
-        {fmtKm(live.state.offset_m)} covered
+        <Distance meters={live.state.offset_m} /> covered
         {live.plan ? ` · re-planned ${live.plan.plan_version}×` : ""}
       </span>
       <span className="shrink-0 text-sm font-semibold text-brand-700 underline underline-offset-2">

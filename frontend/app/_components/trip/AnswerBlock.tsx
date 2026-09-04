@@ -5,6 +5,7 @@ import { SpeedResult, Trip } from "@/lib/client"
 import type { Band } from "@/lib/verdict"
 import { batteryShape, buildVerdict } from "@/lib/summary"
 import { clockAt, fmtDuration, fmtHm } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 
 /**
  * The answer in one glance: the dominant number (time saved), the arrival
@@ -23,6 +24,7 @@ export default function AnswerBlock({
   onSelectSpeed: (speed: number) => void
 }) {
   const { result, request } = trip
+  const { speed, speedValue, speedUnit } = useUnits()
   const v = buildVerdict(result, selected.speed_kph)
   if (!v) return null
 
@@ -52,14 +54,14 @@ export default function AnswerBlock({
     tail = "arrival. The plan the faster ones are measured against"
   } else if (v.tie) {
     big = "±0"
-    tail = `vs the ${v.baseline.speed_kph} km/h plan. Same arrival, drive whichever feels calmer`
+    tail = `vs the ${speed(v.baseline.speed_kph)} plan. Same arrival, drive whichever feels calmer`
   } else if (v.savedMin > 0) {
     big = `−${fmtDuration(v.savedMin)}`
-    tail = `vs the ${v.baseline.speed_kph} km/h plan`
+    tail = `vs the ${speed(v.baseline.speed_kph)} plan`
     mint = true
   } else {
     big = `+${fmtDuration(-v.savedMin)}`
-    tail = `slower than the ${v.baseline.speed_kph} km/h plan`
+    tail = `slower than the ${speed(v.baseline.speed_kph)} plan`
   }
 
   // At most one line of advice; the flat band is the app's real insight.
@@ -68,13 +70,13 @@ export default function AnswerBlock({
     advice = (
       <>
         <strong className="font-semibold text-brand-700">
-          {band.lo} to {band.hi} km/h
+          {speedValue(band.lo)} to {speed(band.hi)}
         </strong>{" "}
         all arrive within {band.toleranceMin} min.
         {band.lo !== band.best && band.loSavesEur > 0.5 && (
           <>
             {" "}
-            Driving {band.lo} saves{" "}
+            Driving {speedValue(band.lo)} saves{" "}
             <span className="font-semibold text-[#8a5a10]">
               €{band.loSavesEur.toFixed(0)}
             </span>{" "}
@@ -87,13 +89,13 @@ export default function AnswerBlock({
     advice = (
       <>
         Faster stays quicker all the way to the car&apos;s{" "}
-        {Math.round(result.vehicle.top_speed_kph)} km/h limiter.
+        {speed(result.vehicle.top_speed_kph)} limiter.
       </>
     )
   } else if (band?.sharp) {
     advice = (
       <>
-        Only {band.best} km/h gets there this fast. Everything else loses{" "}
+        Only {speed(band.best)} gets there this fast. Everything else loses{" "}
         {band.toleranceMin} min or more.
       </>
     )
@@ -119,10 +121,10 @@ export default function AnswerBlock({
       >
         <div>
           <div className="font-mono text-2xl font-semibold text-ink-900">
-            {selected.speed_kph}
+            {speedValue(selected.speed_kph)}
           </div>
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-400">
-            cruise km/h
+            cruise {speedUnit}
           </div>
         </div>
         <div>
@@ -191,7 +193,7 @@ export default function AnswerBlock({
           {v.best != null && v.bestGainMin != null && v.bestGainMin > 1 && (
             <>
               {advice && " "}
-              {v.best.speed_kph} km/h is {fmtDuration(v.bestGainMin)} faster.{" "}
+              {speed(v.best.speed_kph)} is {fmtDuration(v.bestGainMin)} faster.{" "}
               <button
                 onClick={() => onSelectSpeed(v.best!.speed_kph)}
                 className="font-semibold text-brand-700 underline decoration-brand-300 underline-offset-2 transition-colors hover:text-brand-800"
@@ -226,6 +228,7 @@ function SpeedStep({
   onSelect: (speed: number) => void
   isBest: boolean
 }) {
+  const { speed, speedValue } = useUnits()
   const Chevron = dir === "down" ? ChevronLeft : ChevronRight
   return (
     <button
@@ -234,9 +237,9 @@ function SpeedStep({
       aria-label={
         target == null
           ? `No ${dir === "down" ? "slower" : "faster"} feasible plan`
-          : `Cruise ${target} km/h instead`
+          : `Cruise ${speed(target)} instead`
       }
-      title={target == null ? undefined : `Cruise ${target} km/h`}
+      title={target == null ? undefined : `Cruise ${speed(target)}`}
       className={`flex w-10 shrink-0 flex-col items-center justify-center gap-0.5 self-stretch rounded-2xl border transition-colors sm:w-11 ${
         target == null
           ? "cursor-not-allowed border-ink-100 bg-ink-100/40 text-ink-300"
@@ -247,7 +250,9 @@ function SpeedStep({
     >
       <Chevron className="h-4 w-4" />
       {target != null && (
-        <span className="font-mono text-[10px] font-semibold">{target}</span>
+        <span className="font-mono text-[10px] font-semibold">
+          {speedValue(target)}
+        </span>
       )}
     </button>
   )

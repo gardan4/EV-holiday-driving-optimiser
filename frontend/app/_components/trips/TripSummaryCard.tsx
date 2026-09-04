@@ -10,6 +10,9 @@
  * here truncates anything: a summary that looked short because the CSS clipped
  * it would still have shipped the address to every reader.
  *
+ * The two numbers go through the `Units` elements rather than a hook, so the
+ * card itself stays hook-free and only those spans follow the km/mi switch.
+ *
  * `action` is an escape hatch for the owner's own list, which carries a delete
  * control. It is a slot rather than a prop like `onDelete` so this component
  * stays hook-free and server-renderable — the interactive part is passed in
@@ -20,6 +23,7 @@
 import type { ReactNode } from "react"
 import Link from "next/link"
 import { fmtDeparture } from "@/lib/format"
+import { Distance, Speed } from "@/app/_components/Units"
 import type { TripSummary } from "@/lib/client"
 
 export default function TripSummaryCard({
@@ -47,11 +51,11 @@ export default function TripSummaryCard({
             : "Departure not recorded"}
         </p>
         <dl className="mt-3 grid grid-cols-3 gap-2">
-          <Stat label="Distance" value={`${trip.distance_km} km`} />
+          <Stat label="Distance" value={<Distance meters={trip.distance_km * 1000} />} />
           <Stat
             label="Best speed"
             value={
-              trip.optimum_speed_kph ? `${Math.round(trip.optimum_speed_kph)} km/h` : "—"
+              trip.optimum_speed_kph ? <Speed kph={trip.optimum_speed_kph} /> : "—"
             }
           />
           <Stat
@@ -69,7 +73,7 @@ export default function TripSummaryCard({
   )
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <dt className="text-[0.65rem] uppercase tracking-wide text-ink-400">{label}</dt>

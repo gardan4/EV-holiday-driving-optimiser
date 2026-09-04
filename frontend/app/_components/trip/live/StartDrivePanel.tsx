@@ -16,7 +16,8 @@ import { AlertTriangle, Loader2, Navigation } from "lucide-react"
 import { toast } from "sonner"
 import { Trip, startRun } from "@/lib/client"
 import { track } from "@/lib/analytics"
-import { clockAt, fmtDuration, fmtKm } from "@/lib/format"
+import { clockAt, fmtDuration } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { plannedRouteLegs } from "@/lib/maps"
 import { storeToken } from "@/lib/useLiveRun"
 import MapsRouteButton from "../MapsRouteButton"
@@ -45,6 +46,7 @@ export default function StartDrivePanel({
   const [soc, setSoc] = useState(Math.round(trip.request.depart_soc ?? 100))
   const [busy, setBusy] = useState(false)
   const [conflict, setConflict] = useState(alreadyDriving)
+  const { dist, speed } = useUnits()
 
   async function go(supersede: boolean) {
     if (!best) return
@@ -87,7 +89,7 @@ export default function StartDrivePanel({
         {trip.request.dest.label.split(",")[0]}
       </h1>
       <p className="mt-2 text-sm text-ink-500">
-        {fmtKm(trip.result.total_dist_m)} · hold {best.speed_kph} km/h ·{" "}
+        {dist(trip.result.total_dist_m)} · hold {speed(best.speed_kph)} ·{" "}
         {best.n_stops} stops · {fmtDuration(best.total_min ?? 0)}
       </p>
 

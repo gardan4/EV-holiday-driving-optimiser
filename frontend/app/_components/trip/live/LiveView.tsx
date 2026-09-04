@@ -22,7 +22,8 @@ import Link from "next/link"
 import { AlertTriangle, Flag, Loader2, MapPin, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Alternative, Alternatives, LiveRun, Stop, Trip } from "@/lib/client"
-import { clockSince, fmtDuration, fmtHm, fmtKm, socLabel } from "@/lib/format"
+import { clockSince, fmtDuration, fmtHm, socLabel } from "@/lib/format"
+import { useUnits } from "@/lib/useUnits"
 import { useMounted } from "@/lib/mounted"
 import { projectedSoc } from "@/lib/liveSoc"
 import { remainingRouteLegs } from "@/lib/maps"
@@ -44,6 +45,8 @@ export default function LiveView({
   trip: Trip
   initial: LiveRun | null
 }) {
+  // `speed` is taken by a local below, so the formatter comes in renamed.
+  const { dist, speed: showSpeed } = useUnits()
   const result = useMemo(() => {
     const speed = initial?.planned_speed_kph ?? trip.result.optimum_speed
     return (
@@ -378,8 +381,8 @@ export default function LiveView({
       if (plan) {
         toast.success(
           speedKph == null
-            ? `Back to the fastest — hold ${plan.optimum_speed?.toFixed(0)} km/h.`
-            : `Holding ${speedKph} km/h, arriving ${clockSince(
+            ? `Back to the fastest — hold ${showSpeed(plan.optimum_speed ?? 0)}.`
+            : `Holding ${showSpeed(speedKph)}, arriving ${clockSince(
                 run!.started_at,
                 plan.benchmark.live_total_min
               )}.`
@@ -446,7 +449,7 @@ export default function LiveView({
       setAlts(null)
       announceReroute(
         out.route.version,
-        out.detour_m > 500 ? ` — ${fmtKm(out.detour_m)} off route` : ""
+        out.detour_m > 500 ? ` — ${dist(out.detour_m)} off route` : ""
       )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not find a new route")
@@ -660,8 +663,8 @@ export default function LiveView({
         </div>
         <p className="mt-0.5 text-sm text-ink-500">
           {trip.request.origin.label.split(",")[0]} →{" "}
-          {trip.request.dest.label.split(",")[0]} · {fmtKm(distM + drivenBeforeM)} of{" "}
-          {fmtKm(totalDistM)}
+          {trip.request.dest.label.split(",")[0]} · {dist(distM + drivenBeforeM)} of{" "}
+          {dist(totalDistM)}
           {isDriver ? " · you're driving" : " · you're watching"}
         </p>
 
@@ -854,7 +857,7 @@ export default function LiveView({
             <p className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                You&apos;re {fmtKm(state.off_route_m)} off the planned route, so the
+                You&apos;re {dist(state.off_route_m)} off the planned route, so the
                 figures are frozen at their last good values rather than guessed.
                 {live.rerouting
                   ? " Finding a road from where you are…"
@@ -1008,6 +1011,7 @@ function RevisedPanel({
    *  in" under a header saying 93 km is the plan disagreeing with the page. */
   drivenBeforeM?: number
 }) {
+  const { dist, speed, speedValue } = useUnits()
   const mounted = useMounted()
   const b = plan.benchmark
   const worse = b.delta_min > 1
@@ -1018,7 +1022,7 @@ function RevisedPanel({
           Revised plan from here
         </h2>
         <span className="text-xs text-ink-400">
-          re-planned {fmtKm(plan.offset_base_m + drivenBeforeM)} in · version{" "}
+          re-planned {dist(plan.offset_base_m + drivenBeforeM)} in · version{" "}
           {plan.plan_version}
         </span>
       </div>
@@ -1026,8 +1030,8 @@ function RevisedPanel({
       <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
         <Stat
           label="Now hold"
-          value={`${plan.optimum_speed?.toFixed(0)} km/h`}
-          sub={`was ${b.original_speed_kph.toFixed(0)}`}
+          value={speed(plan.optimum_speed ?? 0)}
+          sub={`was ${speedValue(b.original_speed_kph)}`}
           tone="brand"
         />
         <Stat

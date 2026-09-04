@@ -1,3 +1,5 @@
+import { KM_PER_MI, Units, consumptionUnit, fmtRangeKm } from "./units"
+
 /**
  * What the car is carrying, and what it costs.
  *
@@ -32,12 +34,16 @@ export function extraWhPerKm(occupants: number, luggageKg: number): number {
 /**
  * One line explaining what this load does, measured against the two-people-
  * plus-a-bag the catalog figures already assume.
+ *
+ * The maths stays metric — `units` only decides how the two figures at the end
+ * are written, so the sentence matches the units the rest of the page is in.
  */
 export function describePayload(
   occupants: number,
   luggageKg: number,
   usableKwh: number,
   whPerKmAtCruise: number,
+  units: Units = "metric",
 ): string {
   const extra = extraWhPerKm(occupants, luggageKg)
   if (Math.abs(extra) < 0.35) {
@@ -46,9 +52,11 @@ export function describePayload(
   const rangeKm = (usableKwh * 1000) / whPerKmAtCruise
   const rangeDelta = rangeKm - (usableKwh * 1000) / (whPerKmAtCruise + extra)
   const kg = Math.round(payloadExtraKg(occupants, luggageKg))
+  const per = consumptionUnit(units)
+  const rate = (wh: number) => (units === "imperial" ? wh * KM_PER_MI : wh)
   return extra > 0
-    ? `+${kg} kg over the reference load, about +${extra.toFixed(1)} Wh/km, ` +
-        `costing roughly ${Math.round(rangeDelta)} km of range per charge.`
-    : `${kg} kg under the reference load, about ${extra.toFixed(1)} Wh/km, ` +
-        `worth roughly ${Math.round(-rangeDelta)} km of extra range per charge.`
+    ? `+${kg} kg over the reference load, about +${rate(extra).toFixed(1)} ${per}, ` +
+        `costing roughly ${fmtRangeKm(rangeDelta, units)} of range per charge.`
+    : `${kg} kg under the reference load, about ${rate(extra).toFixed(1)} ${per}, ` +
+        `worth roughly ${fmtRangeKm(-rangeDelta, units)} of extra range per charge.`
 }

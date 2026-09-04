@@ -13,6 +13,7 @@ import {
 } from "recharts"
 import { SpeedResult } from "@/lib/client"
 import { costOfSpeed } from "@/lib/summary"
+import { useUnits } from "@/lib/useUnits"
 import { fmtDuration } from "@/lib/format"
 
 const COST = "#d98e1f" // --color-chart-charge (validated)
@@ -61,6 +62,7 @@ export default function CostChart({
 
   // The trade-off in one sentence: what the fast plan buys and what it costs.
   const trade = costOfSpeed(speeds, optimumSpeed)
+  const { speed, speedValue, speedUnit } = useUnits()
 
   return (
     <div className="rounded-2xl border border-ink-100 bg-white p-4 shadow-sm sm:p-5">
@@ -91,11 +93,12 @@ export default function CostChart({
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis
               dataKey="speed"
+              tickFormatter={(v: number) => String(speedValue(v))}
               tick={{ fill: INK, fontSize: 12 }}
               axisLine={{ stroke: GRID }}
               tickLine={false}
               label={{
-                value: "cruise speed (km/h)",
+                value: `cruise speed (${speedUnit})`,
                 position: "insideBottom",
                 offset: -2,
                 fill: INK,
@@ -119,7 +122,7 @@ export default function CostChart({
                 return (
                   <div className="rounded-xl border border-ink-100 bg-white px-3 py-2 text-xs shadow-lg shadow-ink-900/10">
                     <div className="font-semibold text-ink-900">
-                      {label} km/h, €{p.cost.toFixed(2)}
+                      {speed(Number(label))}, €{p.cost.toFixed(2)}
                     </div>
                     <div className="text-ink-500">{Math.round(p.kwh)} kWh bought</div>
                   </div>
