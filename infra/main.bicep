@@ -174,7 +174,9 @@ var sitePublicUrl = empty(siteUrl) ? webPublicUrl : siteUrl
 var effectiveCors = empty(corsOrigins) ? webPublicUrl : corsOrigins
 
 // mssql+aioodbc DSN the FastAPI app expects (matches src/ settings + Dockerfile ODBC 18).
-var databaseUrl = 'mssql+aioodbc://${uriComponent(sqlAdminLogin)}:${uriComponent(sqlAdminPassword)}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
+// Preserve the released bootstrap's DSN format. Its ConfigParser rejects
+// percent-escaped values; changing encoding requires a separate application fix.
+var databaseUrl = 'mssql+aioodbc://${sqlAdminLogin}:${sqlAdminPassword}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
 
 // Shared container-registry settings. For public GHCR packages the empty
 // password is harmless; set ghcrToken for private ones.
