@@ -25,10 +25,18 @@ targetScope = 'resourceGroup'
   'dev'
   'prod'
 ])
-param environmentName string = 'dev'
+param environmentName string = 'prod'
 
 @description('Location for all resources.')
 param location string = resourceGroup().location
+
+@description('SQL can use a different EU region when subscription provisioning is restricted.')
+param sqlLocation string = 'swedencentral'
+param sqlServerNameOverride string = 'evtrip-sql-prod-se'
+
+@description('Keep staging private and disable background work until database/DNS cutover.')
+param migrationStage bool = true
+param stagingAllowedIps string = ''
 
 // ── Container images (GHCR) ─────────────────────────────────────────────────
 @description('GitHub owner / GHCR namespace that hosts the container images.')
@@ -151,7 +159,7 @@ var prefix = 'evtrip'
 var planName = '${prefix}-plan-${environmentName}'
 var apiAppName = '${prefix}-api-${environmentName}'
 var webAppName = '${prefix}-web-${environmentName}'
-var sqlServerName = '${prefix}-sql-${environmentName}'
+var sqlServerName = sqlServerNameOverride
 var sqlDatabaseName = '${prefix}db-${environmentName}'
 var logAnalyticsName = '${prefix}-logs-${environmentName}'
 
@@ -166,7 +174,7 @@ var sitePublicUrl = empty(siteUrl) ? webPublicUrl : siteUrl
 var effectiveCors = empty(corsOrigins) ? webPublicUrl : corsOrigins
 
 // mssql+aioodbc DSN the FastAPI app expects (matches src/ settings + Dockerfile ODBC 18).
-var databaseUrl = 'mssql+aioodbc://${sqlAdminLogin}:${sqlAdminPassword}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
+var databaseUrl = 'mssql+aioodbc://${uriComponent(sqlAdminLogin)}:${uriComponent(sqlAdminPassword)}@${sqlServer.properties.fullyQualifiedDomainName}:1433/${sqlDatabaseName}?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no'
 
 // Shared container-registry settings. For public GHCR packages the empty
 // password is harmless; set ghcrToken for private ones.
@@ -216,7 +224,7 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
 // ============================================================================
 resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
   name: sqlServerName
-  location: location
+  location: sqlLocation
   properties: {
     administratorLogin: sqlAdminLogin
     administratorLoginPassword: sqlAdminPassword
@@ -229,7 +237,7 @@ resource sqlServer 'Microsoft.Sql/servers@2023-05-01-preview' = {
 resource sqlDatabase 'Microsoft.Sql/servers/databases@2023-05-01-preview' = {
   parent: sqlServer
   name: sqlDatabaseName
-  location: location
+  location: sqlLocation
   sku: {
     name: sqlSkuName
     tier: sqlTier
@@ -341,7 +349,13 @@ var denyAll = [
   }
 ]
 
-var siteRestrictions = restrictToCloudflare ? concat(cloudflareRestrictions, denyAll) : []
+var stagingRestrictions = [for (ip, i) in (empty(stagingAllowedIps) ? [] : split(stagingAllowedIps, ',')): {
+  ipAddress: '${ip}/32'
+  action: 'Allow'
+  priority: 100 + i
+  name: 'migration-check-${i}'
+}]
+var siteRestrictions = migrationStage ? concat(stagingRestrictions, denyAll) : (restrictToCloudflare ? concat(cloudflareRestrictions, denyAll) : [])
 
 // ============================================================================
 // App Service Plan (Linux, shared by both containers)
@@ -525,13 +539,13 @@ resource apiApp 'Microsoft.Web/sites@2023-01-01' = {
           // the app. Tying the two together means the dangerous combination
           // cannot be produced by editing one value.
           name: 'TRUSTED_PROXY_HEADERS'
-          value: restrictToCloudflare ? 'true' : 'false'
+          value: (!migrationStage && restrictToCloudflare) ? 'true' : 'false'
         }
         // No separate worker tier ships in this skeleton — run everything in
         // one process. (The code honours PROCESS_ROLE if you split later.)
         {
           name: 'PROCESS_ROLE'
-          value: 'all'
+          value: migrationStage ? 'web' : 'all'
         }
         {
           name: 'WEBSITES_PORT'

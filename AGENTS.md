@@ -236,11 +236,14 @@ running it — `npm --prefix dashboard run build` also runs `tsc --noEmit`.
 Bicep provisions an App Service Plan, api + web App Services (GHCR containers),
 Azure SQL, and Log Analytics; `orsApiKey`/`ocmApiKey` land as api app settings.
 The admin console is deliberately absent from all of this — it runs locally.
-**One environment (`dev`), one workflow** (`deploy.yml`, push to `main`) — this
-is a PoC. It runs `uv run pytest` + `tsc`/`next build`, then builds images; the
-GHCR push and Azure deploy steps are gated on `AZURE_CLIENT_ID` being set, so
-the pipeline is green before infra exists. Infra deploy is manual
-(`az deployment group create`) — see `docs/DEPLOYMENT.md`.
+**One production environment**, deployed by `.github/workflows/deploy.yml`.
+The `azure-production` GitHub environment uses OIDC scoped to `evtrip-prod-rg`
+in subscription `cda65360-878b-48f2-a774-6eb4782a95aa`. The migration branch
+can stage the deployed releases privately with `migration_stage=true`;
+`MIGRATION_COMPLETE` must be true before normal release deployments.
+`infra/deploy.py` refuses to create an empty production database, pins the
+running images for infrastructure updates, and preserves required secrets.
+See `docs/AZURE-MIGRATION.md` for the account cutover and staging restrictions.
 
 ## Key design decisions (do not re-litigate casually)
 
@@ -1588,8 +1591,8 @@ docker compose -f docker-compose.local-db.yml up -d
   these at build time, so the variable just quietly becomes its fallback.
 - **Commits**: lowercase `<type>(<scope>): <imperative summary>` — `feat`, `fix`,
   `chore`, `docs`, `style`, `test`. Bodies explain the *why*.
-- `main` is the only branch; pushing to it runs CI and (once Azure secrets
-  exist) deploys the single `dev` environment.
+- Pushing to `main` runs CI and deploys the production environment after the
+  migration cutover guard has been enabled.
 
 ## Environment
 
