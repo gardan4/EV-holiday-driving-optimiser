@@ -647,6 +647,29 @@ module originTls './origin-tls.bicep' = if (!empty(originCertificatePfx)) {
   }
 }
 
+// Keep migration and recovery exports private and scoped to this use case.
+resource backupStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'mmevtripbackup2609'
+  location: location
+  kind: 'StorageV2'
+  sku: { name: 'Standard_LRS' }
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
+    allowBlobPublicAccess: false
+  }
+}
+resource backupBlobs 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' = {
+  parent: backupStorage
+  name: 'default'
+  properties: { deleteRetentionPolicy: { enabled: true, days: 7 } }
+}
+resource backups 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: backupBlobs
+  name: 'migration-backups'
+  properties: { publicAccess: 'None' }
+}
+
 output apiAppName string = apiApp.name
 output webAppName string = webApp.name
 output apiUrl string = 'https://${apiApp.properties.defaultHostName}'
