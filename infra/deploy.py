@@ -6,10 +6,18 @@ from pathlib import Path
 import subprocess
 import tempfile
 import urllib.request
+from urllib.parse import quote
 
 SUBSCRIPTION = 'cda65360-878b-48f2-a774-6eb4782a95aa'
 GROUP = 'evtrip-prod-rg'
 SERVER = 'evtrip-sql-prod-se'
+MASKS = []
+
+
+def safe_error(text):
+    for value in sorted(MASKS, key=len, reverse=True):
+        text = text.replace(value, '[redacted]').replace(quote(value, safe=''), '[redacted]')
+    return text[:1200]
 
 
 def azure(*args, optional=False):
@@ -18,7 +26,7 @@ def azure(*args, optional=False):
     if r.returncode:
         if optional and ('ResourceNotFound' in r.stderr or 'NotFound' in r.stderr):
             return None
-        raise RuntimeError(f'Azure operation failed: {args[:3]}: {r.stderr[:1200]}')
+        raise RuntimeError(f'Azure operation failed: {args[:3]}: {safe_error(r.stderr)}')
     return json.loads(r.stdout or 'null')
 
 
@@ -45,6 +53,17 @@ def main():
         if key in required and not value:
             raise RuntimeError(f'Required deployment secret is missing: {key}')
         values[param] = value
+        if value:
+            MASKS.append(value)
+    values['customDomainsEnabled'] = os.environ.get('CUSTOM_DOMAINS_ENABLED') == 'true'
+    for key, param in {'ORIGIN_CERTIFICATE_PFX':'originCertificatePfx',
+                       'ORIGIN_CERTIFICATE_PASSWORD':'originCertificatePassword'}.items():
+        values[param] = os.environ.get(key, '')
+        if values[param]:
+            MASKS.append(values[param])
+    if values['customDomainsEnabled'] or values['originCertificatePfx']:
+        if not values['originCertificatePfx'] or not values['originCertificatePassword']:
+            raise RuntimeError('Origin certificate and password are required for custom-domain TLS')
     if stage:
         runner_ip = str(ipaddress.IPv4Address(urllib.request.urlopen('https://api.ipify.org', timeout=20).read().decode()))
         operators = [str(ipaddress.IPv4Address(ip)) for ip in os.environ.get('MIGRATION_OPERATOR_IPS','').split(',') if ip]

@@ -82,6 +82,9 @@ jobs:
           MIGRATION_STAGE: ${{ inputs.migration_stage && 'true' || 'false' }}
           MIGRATION_COMPLETE: ${{ vars.MIGRATION_COMPLETE }}
           MIGRATION_OPERATOR_IPS: ${{ vars.MIGRATION_OPERATOR_IPS }}
+          CUSTOM_DOMAINS_ENABLED: ${{ vars.CUSTOM_DOMAINS_ENABLED || 'false' }}
+          ORIGIN_CERTIFICATE_PFX: ${{ secrets.ORIGIN_CERTIFICATE_PFX }}
+          ORIGIN_CERTIFICATE_PASSWORD: ${{ secrets.ORIGIN_CERTIFICATE_PASSWORD }}
           SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
           APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
           APP_ENCRYPTION_KEY: ${{ secrets.APP_ENCRYPTION_KEY }}

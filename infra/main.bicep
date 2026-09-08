@@ -38,6 +38,12 @@ param sqlServerNameOverride string = 'evtrip-sql-prod-se'
 param migrationStage bool = true
 param stagingAllowedIps string = ''
 
+param customDomainsEnabled bool = false
+@secure()
+param originCertificatePfx string = ''
+@secure()
+param originCertificatePassword string = ''
+
 // ── Container images (GHCR) ─────────────────────────────────────────────────
 @description('GitHub owner / GHCR namespace that hosts the container images.')
 param githubOwner string = 'gardan4'
@@ -625,6 +631,22 @@ resource webDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-previe
 // ============================================================================
 // Outputs
 // ============================================================================
+module originTls './origin-tls.bicep' = if (!empty(originCertificatePfx)) {
+  name: 'origin-tls'
+  params: {
+    location: location
+    certificateName: 'evtrip-origin'
+    serverFarmId: appServicePlan.id
+    certificatePfx: originCertificatePfx
+    certificatePassword: originCertificatePassword
+    hostnames: customDomainsEnabled ? [
+      { siteName: apiApp.name, hostname: 'api.evtrip.dev' }
+      { siteName: webApp.name, hostname: 'evtrip.dev' }
+      { siteName: webApp.name, hostname: 'www.evtrip.dev' }
+    ] : []
+  }
+}
+
 output apiAppName string = apiApp.name
 output webAppName string = webApp.name
 output apiUrl string = 'https://${apiApp.properties.defaultHostName}'
